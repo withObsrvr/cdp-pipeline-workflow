@@ -1,0 +1,57 @@
+pipelines:
+  PaymentPipeline:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "bucket-name"
+        network: "testnet"
+        buffer_size: 640
+        num_workers: 10
+        retry_limit: 3
+        retry_wait: 5
+        start_ledger: 539328
+    processors:
+      - type: TransformToAppPayment
+        config:
+          network_passphrase: "Test SDF Network ; September 2015"
+      - type: FilterPayments
+        config:
+          min_amount: "100.00"
+          asset_code: "native"
+          network_passphrase: "Test SDF Network ; September 2015"
+    consumers:
+      - type: SaveToExcel
+        config:
+          file_path: "./data/payments.xlsx"
+      - type: SaveToZeroMQ
+        config:
+          address: "tcp://127.0.0.1:5555"
+      - type: SaveToGCS
+        config:
+          bucket_name: "bucket-name"
+          object_name: "demo/filtered_payments_1.xlsx"
+          project_id: "project-id"
+  FilteredPaymentPipeline:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "mosley-mcs-1"
+        network: "testnet"
+        buffer_size: 640
+        num_workers: 10
+        retry_limit: 3
+        retry_wait: 5
+        start_ledger: 539328
+    processors:
+      - type: FilterPayments
+        config:
+          asset_code: "native"
+          min_amount: "100.00"
+          network_passphrase: "Test SDF Network ; September 2015"
+    consumers:
+      - type: SaveToGCS
+        config:
+          bucket_name: "bucket-name"
+          object_name: "demo/filtered_payments_2.xlsx"
+          project_id: "project-id"
+ 

@@ -1,0 +1,98 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"strconv"
+
+	"github.com/pkg/errors"
+	"github.com/stellar/go/amount"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/xdr"
+)
+
+type FilterPayments struct {
+	minAmount         float64
+	assetCode         string
+	processors        []Processor
+	networkPassphrase string
+}
+
+func NewFilterPayments(config map[string]interface{}) (*FilterPayments, error) {
+	minAmountStr, ok := config["min_amount"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid configuration for FilterPayments: missing 'min_amount'")
+	}
+	minAmount, err := strconv.ParseFloat(minAmountStr, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid 'min_amount' value: %v", err)
+	}
+
+	assetCode, ok := config["asset_code"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid configuration for FilterPayments: missing 'asset_code'")
+	}
+	networkPassphrase, ok := config["network_passphrase"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid configuration for FilterPayments: missing 'network_passphrase'")
+	}
+
+	return &FilterPayments{minAmount: minAmount, assetCode: assetCode, networkPassphrase: networkPassphrase}, nil
+}
+
+func (f *FilterPayments) Subscribe(receiver Processor) {
+	f.processors = append(f.processors, receiver)
+}
+
+func (f *FilterPayments) Process(ctx context.Context, msg Message) error {
+	log.Printf("Processing message in FilterPayments")
+
+	ledgerCloseMeta := msg.Payload.(xdr.LedgerCloseMeta)
+	ledgerTxReader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(f.networkPassphrase, ledgerCloseMeta)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create reader for ledger %v", ledgerCloseMeta.LedgerSequence())
+	}
+	closeTime := uint(ledgerCloseMeta.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime)
+
+	// scan all transactions in a ledger for payments to derive new model from
+	transaction, err := ledgerTxReader.Read()
+
+	for ; err == nil; transaction, err = ledgerTxReader.Read() {
+		for _, op := range transaction.Envelope.Operations() {
+			switch op.Body.Type {
+			case xdr.OperationTypePayment:
+				networkPayment := op.Body.MustPaymentOp()
+				myPayment := AppPayment{
+					Timestamp:       fmt.Sprintf("%d", closeTime),
+					BuyerAccountId:  networkPayment.Destination.Address(),
+					SellerAccountId: op.SourceAccount.Address(),
+					AssetCode:       networkPayment.Asset.StringCanonical(),
+					Amount:          amount.String(networkPayment.Amount),
+				}
+				jsonBytes, err := json.Marshal(myPayment)
+				if err != nil {
+					return err
+				}
+				amountFloat, err := strconv.ParseFloat(myPayment.Amount, 64)
+				if err != nil {
+					return fmt.Errorf("invalid amount: %v", err)
+				}
+				if myPayment.AssetCode == f.assetCode && amountFloat >= f.minAmount {
+					for _, processor := range f.processors {
+						if err := processor.Process(ctx, Message{Payload: jsonBytes}); err != nil {
+							return fmt.Errorf("error processing message: %w", err)
+						}
+					}
+				}
+			}
+		}
+	}
+	if err != io.EOF {
+		return errors.Wrapf(err, "failed to read transaction from ledger %v", ledgerCloseMeta.LedgerSequence())
+	}
+	return nil
+
+}
