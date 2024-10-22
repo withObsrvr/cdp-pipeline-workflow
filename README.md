@@ -33,6 +33,34 @@ pipeline:
       start_ledger: 539328
 ```
 
+Save to MongoDB example configuration. Needs Google Cloud Storage bucket name, Mongodb URI, mongodb database name and mongodb collection name.
+
+```yaml
+pipelines:
+  PaymentPipeline:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "bucket-name"
+        network: "testnet"
+        buffer_size: 640
+        num_workers: 10
+        retry_limit: 3
+        retry_wait: 5
+        start_ledger: 539328
+    processors:
+      - type: TransformToAppPayment
+        config:
+          network_passphrase: "Test SDF Network ; September 2015"
+    consumers:
+      - type: SaveToMongoDB
+        config:
+          uri: "mongodb-uri"
+          database: "mongodb-db"
+          collection: "mongodb-collection"
+          connect_timeout: 10  # seconds
+```
+
 ## Installation
 
 ```bash
@@ -45,4 +73,11 @@ go get github.com/withObsrvr/cdp-pipeline-workflow
 export GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
 ./cdp-pipeline-workflow
 ```
+
+or
+
+```bash
+GOOGLE_APPLICATION_CREDENTIALS=$HOME/.config/gcloud/application_default_credentials.json ./cdp-pipeline-workflow
+```
+
 
