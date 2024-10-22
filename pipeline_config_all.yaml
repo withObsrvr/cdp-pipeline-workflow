@@ -35,7 +35,7 @@ pipelines:
     source:
       type: BufferedStorageSourceAdapter
       config:
-        bucket_name: "mosley-mcs-1"
+        bucket_name: "bucket-name"
         network: "testnet"
         buffer_size: 640
         num_workers: 10
