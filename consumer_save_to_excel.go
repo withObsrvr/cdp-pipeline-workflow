@@ -67,6 +67,7 @@ func (c *SaveToExcel) Process(ctx context.Context, msg Message) error {
 		payment.SellerAccountId,
 		payment.AssetCode,
 		payment.Amount,
+		payment.Memo,
 	}
 	for i, v := range values {
 		cell, _ := excelize.CoordinatesToCellName(i+1, rowNum)

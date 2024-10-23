@@ -138,6 +138,7 @@ func (m *SaveToMongoDB) Process(ctx context.Context, msg Message) error {
 			{Key: "asset_code", Value: payment.AssetCode},
 			{Key: "amount", Value: payment.Amount},
 			{Key: "type", Value: payment.Type},
+			{Key: "memo", Value: payment.Memo},
 			{Key: "created_at", Value: time.Now().UTC()},
 		}
 

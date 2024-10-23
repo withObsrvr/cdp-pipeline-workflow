@@ -44,6 +44,20 @@ func (t *TransformToAppPayment) Process(ctx context.Context, msg Message) error 
 	transaction, err := ledgerTxReader.Read()
 
 	for ; err == nil; transaction, err = ledgerTxReader.Read() {
+		// Extract memo from transaction
+		memo := ""
+		switch transaction.Envelope.Memo().Type {
+		case xdr.MemoTypeMemoText:
+			memo = string(transaction.Envelope.Memo().MustText())
+		case xdr.MemoTypeMemoId:
+			memo = fmt.Sprintf("%d", transaction.Envelope.Memo().MustId())
+		case xdr.MemoTypeMemoHash:
+			hash := transaction.Envelope.Memo().MustHash()
+			memo = fmt.Sprintf("%x", hash)
+		case xdr.MemoTypeMemoReturn:
+			retHash := transaction.Envelope.Memo().MustRetHash()
+			memo = fmt.Sprintf("%x", retHash)
+		}
 		for _, op := range transaction.Envelope.Operations() {
 			switch op.Body.Type {
 			case xdr.OperationTypePayment:
@@ -55,6 +69,7 @@ func (t *TransformToAppPayment) Process(ctx context.Context, msg Message) error 
 					AssetCode:       networkPayment.Asset.StringCanonical(),
 					Amount:          amount.String(networkPayment.Amount),
 					Type:            "payment",
+					Memo:            memo,
 				}
 				jsonBytes, err := json.Marshal(myPayment)
 				if err != nil {

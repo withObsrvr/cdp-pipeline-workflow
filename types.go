@@ -11,6 +11,7 @@ type AppPayment struct {
 	AssetCode       string `json:"asset_code"`
 	Amount          string `json:"amount"`
 	Type            string `json:"type"`
+	Memo            string `json:"memo"`
 }
 
 type CreateAccountOp struct {
