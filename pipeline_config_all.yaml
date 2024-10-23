@@ -31,6 +31,9 @@ pipelines:
           bucket_name: "bucket-name"
           object_name: "demo/filtered_payments_1.xlsx"
           project_id: "project-id"
+      - type: SaveToDuckDB
+        config:
+          db_path: "stellar_operations.duckdb"
   FilteredPaymentPipeline:
     source:
       type: BufferedStorageSourceAdapter

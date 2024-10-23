@@ -144,6 +144,8 @@ func createConsumer(consumerConfig ConsumerConfig) (Processor, error) {
 		return NewSaveToZeroMQ(consumerConfig.Config)
 	case "SaveToGCS":
 		return NewSaveToGCS(consumerConfig.Config)
+	case "SaveToDuckDB":
+		return NewSaveToDuckDB(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}
