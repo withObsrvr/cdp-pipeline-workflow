@@ -129,6 +129,8 @@ func createProcessor(processorConfig ProcessorConfig) (Processor, error) {
 		return NewTransformToAppPayment(processorConfig.Config)
 	case "CreateAccountTransformer":
 		return NewCreateAccount(processorConfig.Config)
+	case "TransformToAppTrade":
+		return NewTransformToAppTrade(processorConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}
@@ -146,6 +148,8 @@ func createConsumer(consumerConfig ConsumerConfig) (Processor, error) {
 		return NewSaveToGCS(consumerConfig.Config)
 	case "SaveToDuckDB":
 		return NewSaveToDuckDB(consumerConfig.Config)
+	case "SaveToTimescaleDB":
+		return NewSaveToTimescaleDB(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}

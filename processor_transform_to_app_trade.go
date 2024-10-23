@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/stellar/go/amount"
 	"github.com/stellar/go/xdr"
@@ -43,8 +44,9 @@ func (t *TransformToAppTrade) Subscribe(processor Processor) {
 	t.processors = append(t.processors, processor)
 }
 
-func (t *TransformToAppTrade) Process(ctx context.Context, msg interface{}) error {
-	ledgerCloseMeta, ok := msg.(xdr.LedgerCloseMeta)
+func (t *TransformToAppTrade) Process(ctx context.Context, msg Message) error {
+	log.Printf("Processing message in TransformToAppTrade")
+	ledgerCloseMeta, ok := msg.Payload.(xdr.LedgerCloseMeta)
 	if !ok {
 		return fmt.Errorf("expected LedgerCloseMeta, got %T", msg)
 	}
