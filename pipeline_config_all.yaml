@@ -34,6 +34,14 @@ pipelines:
       - type: SaveToDuckDB
         config:
           db_path: "stellar_operations.duckdb"
+      - type: SaveToClickHouse
+        config:
+          address: "localhost:9000"
+          database: "stellar"
+          username: "default"
+          password: ""
+          max_open_conns: 10
+          max_idle_conns: 5
       - type: SaveToRedis
         config:
           address: "localhost:6379"
