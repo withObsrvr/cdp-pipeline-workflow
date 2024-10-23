@@ -13,26 +13,26 @@ import (
 	"github.com/stellar/go/xdr"
 )
 
-type TransformToAppPayment struct {
+type CreateAccount struct {
 	networkPassphrase string
 	processors        []Processor
 }
 
-func NewTransformToAppPayment(config map[string]interface{}) (*TransformToAppPayment, error) {
+func NewCreateAccount(config map[string]interface{}) (*CreateAccount, error) {
 	networkPassphrase, ok := config["network_passphrase"].(string)
 	if !ok {
-		return nil, fmt.Errorf("invalid configuration for TransformToAppPayment: missing 'network_passphrase'")
+		return nil, fmt.Errorf("invalid configuration for CreateAccount: missing 'network_passphrase'")
 	}
 
-	return &TransformToAppPayment{networkPassphrase: networkPassphrase}, nil
+	return &CreateAccount{networkPassphrase: networkPassphrase}, nil
 }
 
-func (t *TransformToAppPayment) Subscribe(receiver Processor) {
+func (t *CreateAccount) Subscribe(receiver Processor) {
 	t.processors = append(t.processors, receiver)
 }
 
-func (t *TransformToAppPayment) Process(ctx context.Context, msg Message) error {
-	log.Printf("Processing message in TransformToAppPayment")
+func (t *CreateAccount) Process(ctx context.Context, msg Message) error {
+	log.Printf("Processing message in CreateAccount")
 	ledgerCloseMeta := msg.Payload.(xdr.LedgerCloseMeta)
 	ledgerTxReader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(t.networkPassphrase, ledgerCloseMeta)
 	if err != nil {
@@ -40,30 +40,29 @@ func (t *TransformToAppPayment) Process(ctx context.Context, msg Message) error 
 	}
 	closeTime := uint(ledgerCloseMeta.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime)
 
-	// scan all transactions in a ledger for payments to derive new model from
+	// scan all transactions in a ledger for create account operations
 	transaction, err := ledgerTxReader.Read()
 
 	for ; err == nil; transaction, err = ledgerTxReader.Read() {
 		for _, op := range transaction.Envelope.Operations() {
-			switch op.Body.Type {
-			case xdr.OperationTypePayment:
-				networkPayment := op.Body.MustPaymentOp()
-				myPayment := AppPayment{
+			if op.Body.Type == xdr.OperationTypeCreateAccount {
+				createAccountOp := op.Body.MustCreateAccountOp()
+				createAccount := CreateAccountOp{
 					Timestamp:       fmt.Sprintf("%d", closeTime),
-					BuyerAccountId:  networkPayment.Destination.Address(),
-					SellerAccountId: op.SourceAccount.Address(),
-					AssetCode:       networkPayment.Asset.StringCanonical(),
-					Amount:          amount.String(networkPayment.Amount),
-					Type:            "payment",
+					Funder:          op.SourceAccount.Address(),
+					Account:         createAccountOp.Destination.Address(),
+					StartingBalance: amount.String(createAccountOp.StartingBalance),
+					Type:            "create_account",
 				}
-				jsonBytes, err := json.Marshal(myPayment)
+
+				jsonBytes, err := json.Marshal(createAccount)
 				if err != nil {
-					return err
+					return fmt.Errorf("error marshaling AppCreateAccount: %w", err)
 				}
 
 				for _, processor := range t.processors {
 					if err := processor.Process(ctx, Message{Payload: jsonBytes}); err != nil {
-						return fmt.Errorf("error processing message: %w", err)
+						return fmt.Errorf("error processing create account message: %w", err)
 					}
 				}
 			}

@@ -51,7 +51,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
 	defer stop()
 
-	configFile := "pipeline_config_buffered.yaml"
+	configFile := "pipeline_config_buffered.secret.yaml"
 	config, err := loadConfig(configFile)
 	if err != nil {
 		log.Fatalf("Error loading configuration: %v", err)
@@ -127,6 +127,8 @@ func createProcessor(processorConfig ProcessorConfig) (Processor, error) {
 		return NewFilterPayments(processorConfig.Config)
 	case "TransformToAppPayment":
 		return NewTransformToAppPayment(processorConfig.Config)
+	case "CreateAccountTransformer":
+		return NewCreateAccount(processorConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}

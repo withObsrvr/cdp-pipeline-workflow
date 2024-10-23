@@ -10,9 +10,10 @@ type AppPayment struct {
 	SellerAccountId string `json:"seller_account_id"`
 	AssetCode       string `json:"asset_code"`
 	Amount          string `json:"amount"`
+	Type            string `json:"type"`
 }
 
-type AppCreateAccount struct {
+type CreateAccountOp struct {
 	Timestamp       string `json:"timestamp"`
 	Funder          string `json:"funder"`
 	Account         string `json:"account"`

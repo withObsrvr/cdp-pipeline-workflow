@@ -113,14 +113,50 @@ func (m *SaveToMongoDB) Process(ctx context.Context, msg Message) error {
 		return fmt.Errorf("failed to unmarshal payload to AppPayment: %v", err)
 	}
 
-	// Convert to BSON document
-	doc := bson.D{
-		{Key: "timestamp", Value: payment.Timestamp},
-		{Key: "buyer_account_id", Value: payment.BuyerAccountId},
-		{Key: "seller_account_id", Value: payment.SellerAccountId},
-		{Key: "asset_code", Value: payment.AssetCode},
-		{Key: "amount", Value: payment.Amount},
-		{Key: "created_at", Value: time.Now().UTC()},
+	// First try to unmarshal as a generic map to get the type
+	var rawDoc map[string]interface{}
+	if err := json.Unmarshal(payloadBytes, &rawDoc); err != nil {
+		return fmt.Errorf("failed to unmarshal payload: %v", err)
+	}
+
+	operationType, ok := rawDoc["type"].(string)
+	if !ok {
+		return fmt.Errorf("missing operation type in payload")
+	}
+
+	var doc bson.D
+	switch operationType {
+	case "payment":
+		var payment AppPayment
+		if err := json.Unmarshal(payloadBytes, &payment); err != nil {
+			return fmt.Errorf("failed to unmarshal payment: %v", err)
+		}
+		doc = bson.D{
+			{Key: "timestamp", Value: payment.Timestamp},
+			{Key: "buyer_account_id", Value: payment.BuyerAccountId},
+			{Key: "seller_account_id", Value: payment.SellerAccountId},
+			{Key: "asset_code", Value: payment.AssetCode},
+			{Key: "amount", Value: payment.Amount},
+			{Key: "type", Value: payment.Type},
+			{Key: "created_at", Value: time.Now().UTC()},
+		}
+
+	case "create_account":
+		var createAccount CreateAccountOp
+		if err := json.Unmarshal(payloadBytes, &createAccount); err != nil {
+			return fmt.Errorf("failed to unmarshal create account: %v", err)
+		}
+		doc = bson.D{
+			{Key: "timestamp", Value: createAccount.Timestamp},
+			{Key: "funder", Value: createAccount.Funder},
+			{Key: "account", Value: createAccount.Account},
+			{Key: "starting_balance", Value: createAccount.StartingBalance},
+			{Key: "type", Value: createAccount.Type},
+			{Key: "created_at", Value: time.Now().UTC()},
+		}
+
+	default:
+		return fmt.Errorf("unknown operation type: %s", operationType)
 	}
 
 	// Insert document with timeout
