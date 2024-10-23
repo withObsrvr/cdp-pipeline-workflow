@@ -133,6 +133,8 @@ func createProcessor(processorConfig ProcessorConfig) (Processor, error) {
 		return NewTransformToAppTrade(processorConfig.Config)
 	case "TransformToAppTrustline":
 		return NewTransformToAppTrustline(processorConfig.Config)
+	case "TransformToAppMetrics":
+		return NewTransformToAppMetrics(processorConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}
