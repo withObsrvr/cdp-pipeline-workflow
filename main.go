@@ -150,6 +150,10 @@ func createConsumer(consumerConfig ConsumerConfig) (Processor, error) {
 		return NewSaveToDuckDB(consumerConfig.Config)
 	case "SaveToTimescaleDB":
 		return NewSaveToTimescaleDB(consumerConfig.Config)
+	case "SaveToRedis":
+		return NewSaveToRedis(consumerConfig.Config)
+	case "NotificationDispatcher":
+		return NewNotificationDispatcher(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}
