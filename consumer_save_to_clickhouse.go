@@ -160,6 +160,58 @@ func initializeClickHouseTables(conn driver.Conn) error {
             uniqExact(funder) as unique_funders
         FROM account_creations
         GROUP BY date`,
+
+		`CREATE TABLE IF NOT EXISTS trustlines (
+		timestamp DateTime,
+		account_id String,
+		asset_code LowCardinality(String),
+		asset_issuer String,
+		limit Decimal64(7),
+		action LowCardinality(String),
+		type LowCardinality(String),
+		ledger_seq UInt32,
+		tx_hash String,
+		auth_flags UInt32,
+		auth_required Bool,
+		auth_revocable Bool,
+		auth_immutable Bool,
+		date Date MATERIALIZED toDate(timestamp),
+		created_at DateTime DEFAULT now()
+	) ENGINE = MergeTree()
+	PARTITION BY toYYYYMM(date)
+	ORDER BY (timestamp, account_id, asset_code, asset_issuer);`,
+
+		`-- Materialized view for trustline statistics
+	CREATE MATERIALIZED VIEW IF NOT EXISTS trustline_daily_stats
+	ENGINE = SummingMergeTree()
+	PARTITION BY toYYYYMM(date)
+	ORDER BY (date, asset_code, action)
+	AS SELECT
+		toDate(timestamp) as date,
+		asset_code,
+		action,
+		count() as operation_count,
+		uniqExact(account_id) as unique_accounts,
+		uniqExact(asset_issuer) as unique_issuers
+	FROM trustlines
+	GROUP BY date, asset_code, action;`,
+
+		`-- Materialized view for asset issuer statistics
+	CREATE MATERIALIZED VIEW IF NOT EXISTS asset_issuer_stats
+	ENGINE = SummingMergeTree()
+	PARTITION BY toYYYYMM(date)
+	ORDER BY (date, asset_issuer, asset_code)
+	AS SELECT
+		toDate(timestamp) as date,
+		asset_issuer,
+		asset_code,
+		count() as trustline_count,
+		uniqExact(account_id) as unique_trustors,
+		countIf(action = 'created') as created_count,
+		countIf(action = 'removed') as removed_count,
+		countIf(action = 'updated') as updated_count
+	FROM trustlines
+	GROUP BY date, asset_issuer, asset_code;`,
 	}
 
 	for _, query := range queries {
