@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/stellar/go/ingest/cdp"
 	"github.com/stellar/go/ingest/ledgerbackend"
 	"github.com/stellar/go/support/datastore"
 	"github.com/stellar/go/xdr"
@@ -14,7 +15,6 @@ import (
 type BufferedStorageSourceAdapter struct {
 	config     BufferedStorageConfig
 	processors []Processor
-	backend    *ledgerbackend.BufferedStorageBackend
 }
 
 type BufferedStorageConfig struct {
@@ -96,39 +96,8 @@ func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapt
 	log.Printf("Parsed configuration: start_ledger=%d, bucket=%s, network=%s",
 		startLedger, bucketName, network)
 
-	return newBufferedStorageAdapter(bufferConfig)
-}
-func newBufferedStorageAdapter(config BufferedStorageConfig) (*BufferedStorageSourceAdapter, error) {
-	ctx := context.Background()
-
-	log.Printf("Creating GCS data store for bucket: %s", config.BucketName)
-	schema := datastore.DataStoreSchema{
-		LedgersPerFile:    uint32(64),
-		FilesPerPartition: uint32(10),
-	}
-
-	dataStore, err := datastore.NewGCSDataStore(ctx, config.BucketName, schema)
-	if err != nil {
-		return nil, errors.Wrap(err, "error creating GCS data store")
-	}
-	log.Printf("Successfully created GCS data store")
-
-	backendConfig := ledgerbackend.BufferedStorageBackendConfig{
-		BufferSize: config.BufferSize,
-		NumWorkers: config.NumWorkers,
-	}
-
-	log.Printf("Creating buffered storage backend with buffer size: %d, workers: %d",
-		config.BufferSize, config.NumWorkers)
-	backend, err := ledgerbackend.NewBufferedStorageBackend(backendConfig, dataStore)
-	if err != nil {
-		return nil, errors.Wrap(err, "error creating BufferedStorageBackend")
-	}
-	log.Printf("Successfully created buffered storage backend")
-
 	return &BufferedStorageSourceAdapter{
-		config:  config,
-		backend: backend,
+		config: bufferConfig,
 	}, nil
 }
 
@@ -139,64 +108,46 @@ func (adapter *BufferedStorageSourceAdapter) Subscribe(receiver Processor) {
 func (adapter *BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 	log.Printf("Initializing with start ledger: %d", adapter.config.StartLedger)
 
+	// Create DataStore configuration
+	schema := datastore.DataStoreSchema{
+		LedgersPerFile:    uint32(64),
+		FilesPerPartition: uint32(10),
+	}
+
+	dataStoreConfig := datastore.DataStoreConfig{
+		Type:   "GCS",
+		Schema: schema,
+		Params: map[string]string{
+			"destination_bucket_path": adapter.config.BucketName,
+		},
+	}
+
+	// Create buffered storage configuration using CDP defaults
+	bufferedConfig := cdp.DefaultBufferedStorageBackendConfig(schema.LedgersPerFile)
+	// Override with any custom settings
+	bufferedConfig.BufferSize = adapter.config.BufferSize
+	bufferedConfig.NumWorkers = adapter.config.NumWorkers
+	bufferedConfig.RetryLimit = adapter.config.RetryLimit
+	bufferedConfig.RetryWait = time.Duration(adapter.config.RetryWait) * time.Second
+
+	// Create publisher configuration
+	publisherConfig := cdp.PublisherConfig{
+		DataStoreConfig:       dataStoreConfig,
+		BufferedStorageConfig: bufferedConfig,
+	}
+
+	// Create ledger range starting from configured ledger
 	ledgerRange := ledgerbackend.UnboundedRange(adapter.config.StartLedger)
-	log.Printf("Preparing range starting at ledger %d", adapter.config.StartLedger)
 
-	if err := adapter.backend.PrepareRange(ctx, ledgerRange); err != nil {
-		return errors.Wrap(err, "error preparing range")
-	}
-
-	time.Sleep(time.Second * 2)
-
-	// Verify we're prepared
-	prepared, err := adapter.backend.IsPrepared(ctx, ledgerRange)
-	if err != nil {
-		return errors.Wrap(err, "error checking if range is prepared")
-	}
-	if !prepared {
-		return errors.New("range preparation failed")
-	}
-	log.Printf("Successfully prepared range starting at ledger %d", adapter.config.StartLedger)
-
-	// Try to get the latest ledger sequence to verify connectivity
-	latestLedger, err := adapter.backend.GetLatestLedgerSequence(ctx)
-	if err != nil {
-		return errors.Wrap(err, "error getting latest ledger sequence")
-	}
-	log.Printf("Latest available ledger in data store: %d", latestLedger)
-
-	// Initialize current ledger
-	currentLedger := adapter.config.StartLedger
-	log.Printf("Beginning processing at ledger %d", currentLedger)
-
-	// Main processing loop
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			log.Printf("Attempting to retrieve ledger %d", currentLedger)
-			ledger, err := adapter.backend.GetLedger(ctx, currentLedger)
-			if err != nil {
-				log.Printf("Error getting ledger %d: %v", currentLedger, err)
-
-				if currentLedger > adapter.config.StartLedger {
-					time.Sleep(time.Second * 5)
-					continue
-				}
-				return errors.Wrapf(err, "error getting ledger %d", currentLedger)
-			}
-
-			log.Printf("Successfully retrieved ledger %d", currentLedger)
-
-			if err := adapter.processLedger(ctx, ledger); err != nil {
-				return errors.Wrapf(err, "error processing ledger %d", currentLedger)
-			}
-
-			log.Printf("Successfully processed ledger %d", currentLedger)
-			currentLedger++
-		}
-	}
+	// Process ledgers using CDP's ApplyLedgerMetadata
+	return cdp.ApplyLedgerMetadata(
+		ledgerRange,
+		publisherConfig,
+		ctx,
+		func(lcm xdr.LedgerCloseMeta) error {
+			return adapter.processLedger(ctx, lcm)
+		},
+	)
 }
 
 func (adapter *BufferedStorageSourceAdapter) processLedger(ctx context.Context, ledger xdr.LedgerCloseMeta) error {
@@ -213,8 +164,5 @@ func (adapter *BufferedStorageSourceAdapter) processLedger(ctx context.Context, 
 }
 
 func (adapter *BufferedStorageSourceAdapter) Close() error {
-	if adapter.backend != nil {
-		return adapter.backend.Close()
-	}
 	return nil
 }
