@@ -1,0 +1,81 @@
+# Build stage
+FROM golang:1.22.5 AS builder
+
+WORKDIR /app
+
+# Install required packages using apt-get
+RUN apt-get update && \
+    apt-get install -y \
+    git \
+    make \
+    build-essential \
+    libzmq3-dev \
+    libczmq-dev \
+    libsodium-dev \
+    pkg-config \
+    gcc \
+    libc-dev \
+    cmake \
+    python3 \
+    libssl-dev
+
+# Copy go mod files first to leverage caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . ./
+
+# Build the application with CGO enabled and dynamic linking
+RUN CGO_ENABLED=1 GOOS=linux go build -o cdp-pipeline-workflow
+
+# Development stage
+FROM ubuntu:22.04
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libzmq5 \
+    libczmq4 \
+    libsodium23 \
+    bash \
+    curl \
+    vim \
+    htop \
+    tzdata \
+    python3 \
+    sudo \
+    ca-certificates \
+    jq \
+    net-tools \
+    iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install yq
+RUN curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq && \
+    chmod +x /usr/local/bin/yq
+
+WORKDIR /app
+
+# Create directory structure and non-root user
+RUN mkdir -p /app/config /app/secrets /app/data && \
+    useradd -m -s /bin/bash appuser && \
+    chown -R appuser:appuser /app && \
+    echo "appuser ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/appuser
+
+# Copy binary and configs
+COPY --from=builder /app/cdp-pipeline-workflow /app/
+COPY config/base/*.yaml /app/config/base/
+COPY scripts/dev-entrypoint.sh /app/
+RUN chmod +x /app/dev-entrypoint.sh
+
+USER appuser
+
+# Development environment variables
+ENV CONFIG_PATH=/app/config/base/pipeline_config.yaml \
+    LOG_LEVEL=debug \
+    DEV_MODE=true
+
+# Mount points for local development
+VOLUME ["/app/config", "/app/data"]
+
+ENTRYPOINT ["/app/dev-entrypoint.sh"]
