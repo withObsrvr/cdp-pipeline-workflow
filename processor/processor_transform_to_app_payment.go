@@ -196,74 +196,44 @@ func (t *TransformToAppPayment) createAppPaymentFromAccountMerge(
 	log.Printf("Processing account merge from %s to %s", sourceAccount.Address(), destination.Address())
 	log.Printf("Found %d changes for operation", len(changes))
 
-	var amountTransferred xdr.Int64
-	var foundAmount bool
+	var sourceBalance xdr.Int64
+	var destBalanceDiff xdr.Int64
 
-	// First pass: Look for the destination account update
+	// Analyze all changes to find source and destination balances
 	for _, change := range changes {
 		log.Printf("Change type: %T = %v", change.Type, change.Type)
 
-		// Cast the type to the correct enum type
-		changeType := xdr.LedgerEntryChangeType(change.Type)
-		if changeType == xdr.LedgerEntryChangeTypeLedgerEntryUpdated &&
-			change.Pre != nil && change.Post != nil &&
-			change.Pre.Data.Type == xdr.LedgerEntryTypeAccount &&
-			change.Post.Data.Type == xdr.LedgerEntryTypeAccount {
-
+		if change.Pre != nil && change.Pre.Data.Type == xdr.LedgerEntryTypeAccount {
 			preAccount := change.Pre.Data.MustAccount()
-			postAccount := change.Post.Data.MustAccount()
 
-			if postAccount.AccountId.Address() == destination.Address() {
-				amountTransferred = postAccount.Balance - preAccount.Balance
-				foundAmount = true
-				log.Printf("Found balance change in destination account: pre=%s, post=%s, diff=%s",
-					amount.String(preAccount.Balance),
-					amount.String(postAccount.Balance),
-					amount.String(amountTransferred))
-				break
+			// If this is the source account, record its balance
+			if preAccount.AccountId.Address() == sourceAccount.Address() {
+				sourceBalance = preAccount.Balance
+				log.Printf("Found source account balance: %s", amount.String(sourceBalance))
+			}
+
+			// If this is the destination account, calculate balance difference
+			if preAccount.AccountId.Address() == destination.Address() && change.Post != nil {
+				postAccount := change.Post.Data.MustAccount()
+				destBalanceDiff = postAccount.Balance - preAccount.Balance
+				log.Printf("Found destination balance change: %s", amount.String(destBalanceDiff))
 			}
 		}
 	}
 
-	// Second pass: Look for the source account removal
-	if !foundAmount {
-		for _, change := range changes {
-			changeType := xdr.LedgerEntryChangeType(change.Type)
-			if changeType == xdr.LedgerEntryChangeTypeLedgerEntryRemoved &&
-				change.Pre != nil &&
-				change.Pre.Data.Type == xdr.LedgerEntryTypeAccount {
-
-				account := change.Pre.Data.MustAccount()
-				if account.AccountId.Address() == sourceAccount.Address() {
-					amountTransferred = account.Balance
-					foundAmount = true
-					log.Printf("Found balance in removed source account: %s",
-						amount.String(amountTransferred))
-					break
-				}
-			}
-		}
+	// Verify we found the necessary information
+	if sourceBalance == 0 {
+		log.Printf("Could not find source account balance")
+		return nil, fmt.Errorf("could not find source account balance")
 	}
 
-	if !foundAmount {
-		log.Printf("Could not find amount. Dumping all changes:")
-		for i, change := range changes {
-			log.Printf("Change %d: Type=%v", i, change.Type)
-			if change.Pre != nil {
-				log.Printf("  Pre: Type=%v, Account: %v, Balance: %v",
-					change.Pre.Data.Type,
-					change.Pre.Data.MustAccount().AccountId.Address(),
-					amount.String(change.Pre.Data.MustAccount().Balance))
-			}
-			if change.Post != nil {
-				log.Printf("  Post: Type=%v, Account: %v, Balance: %v",
-					change.Post.Data.Type,
-					change.Post.Data.MustAccount().AccountId.Address(),
-					amount.String(change.Post.Data.MustAccount().Balance))
-			}
-		}
-		return nil, fmt.Errorf("could not determine transfer amount for account merge")
-	}
+	// Use the source balance as the transfer amount
+	amountTransferred := sourceBalance
+
+	log.Printf("Account merge details:")
+	log.Printf("  Source balance: %s", amount.String(sourceBalance))
+	log.Printf("  Destination balance change: %s", amount.String(destBalanceDiff))
+	log.Printf("  Transfer amount: %s", amount.String(amountTransferred))
 
 	return &AppPayment{
 		Timestamp:       fmt.Sprintf("%d", closeTime),
