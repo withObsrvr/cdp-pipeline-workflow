@@ -193,29 +193,83 @@ func (t *TransformToAppPayment) createAppPaymentFromAccountMerge(
 		return nil, fmt.Errorf("error getting operation changes: %w", err)
 	}
 
+	log.Printf("Processing account merge from %s to %s", sourceAccount.Address(), destination.Address())
+	log.Printf("Found %d changes for operation", len(changes))
+
 	var amountTransferred xdr.Int64
+	var foundAmount bool
+
+	// First pass: Look for the destination account update
 	for _, change := range changes {
-		if change.Type != xdr.LedgerEntryType(xdr.LedgerEntryChangeTypeLedgerEntryRemoved) {
-			continue
-		}
+		log.Printf("Change type: %T = %v", change.Type, change.Type)
 
-		entry := change.Pre
-		if entry == nil || entry.Data.Type != xdr.LedgerEntryTypeAccount {
-			continue
-		}
+		// Cast the type to the correct enum type
+		changeType := xdr.LedgerEntryChangeType(change.Type)
+		if changeType == xdr.LedgerEntryChangeTypeLedgerEntryUpdated &&
+			change.Pre != nil && change.Post != nil &&
+			change.Pre.Data.Type == xdr.LedgerEntryTypeAccount &&
+			change.Post.Data.Type == xdr.LedgerEntryTypeAccount {
 
-		account := entry.Data.Account
-		if account.AccountId.Address() == sourceAccount.Address() {
-			amountTransferred = account.Balance
-			break
+			preAccount := change.Pre.Data.MustAccount()
+			postAccount := change.Post.Data.MustAccount()
+
+			if postAccount.AccountId.Address() == destination.Address() {
+				amountTransferred = postAccount.Balance - preAccount.Balance
+				foundAmount = true
+				log.Printf("Found balance change in destination account: pre=%s, post=%s, diff=%s",
+					amount.String(preAccount.Balance),
+					amount.String(postAccount.Balance),
+					amount.String(amountTransferred))
+				break
+			}
 		}
+	}
+
+	// Second pass: Look for the source account removal
+	if !foundAmount {
+		for _, change := range changes {
+			changeType := xdr.LedgerEntryChangeType(change.Type)
+			if changeType == xdr.LedgerEntryChangeTypeLedgerEntryRemoved &&
+				change.Pre != nil &&
+				change.Pre.Data.Type == xdr.LedgerEntryTypeAccount {
+
+				account := change.Pre.Data.MustAccount()
+				if account.AccountId.Address() == sourceAccount.Address() {
+					amountTransferred = account.Balance
+					foundAmount = true
+					log.Printf("Found balance in removed source account: %s",
+						amount.String(amountTransferred))
+					break
+				}
+			}
+		}
+	}
+
+	if !foundAmount {
+		log.Printf("Could not find amount. Dumping all changes:")
+		for i, change := range changes {
+			log.Printf("Change %d: Type=%v", i, change.Type)
+			if change.Pre != nil {
+				log.Printf("  Pre: Type=%v, Account: %v, Balance: %v",
+					change.Pre.Data.Type,
+					change.Pre.Data.MustAccount().AccountId.Address(),
+					amount.String(change.Pre.Data.MustAccount().Balance))
+			}
+			if change.Post != nil {
+				log.Printf("  Post: Type=%v, Account: %v, Balance: %v",
+					change.Post.Data.Type,
+					change.Post.Data.MustAccount().AccountId.Address(),
+					amount.String(change.Post.Data.MustAccount().Balance))
+			}
+		}
+		return nil, fmt.Errorf("could not determine transfer amount for account merge")
 	}
 
 	return &AppPayment{
 		Timestamp:       fmt.Sprintf("%d", closeTime),
 		BuyerAccountId:  destination.Address(),
 		SellerAccountId: sourceAccount.Address(),
-		AssetCode:       "XLM", // Account merges only transfer native XLM
+		AssetCode:       "native",
 		Amount:          amount.String(amountTransferred),
 		Type:            "account_merge",
 		Memo:            memo,

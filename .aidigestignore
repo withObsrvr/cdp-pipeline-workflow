@@ -1,1 +1,7 @@
 cdp-pipeline-workflow
+cdp-pipeline-workflow.md
+obsrvr_cdp_pipeline.md
+*.duckdb
+*.xlsx
+*.secret.yaml
+.vscode/
