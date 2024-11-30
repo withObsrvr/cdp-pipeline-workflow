@@ -53,22 +53,12 @@ func parsePaymentsPostgreSQLConfig(config map[string]interface{}) (PaymentsPostg
 		pgConfig.BatchSize = batchSize
 	}
 
-	// Build connection string from individual components or use provided string
-	if connStr, ok := config["connection_string"].(string); ok {
-		pgConfig.ConnectionString = connStr
-	} else {
-		host, _ := config["host"].(string)
-		port, _ := config["port"].(int)
-		dbname, _ := config["database"].(string)
-		user, _ := config["username"].(string)
-		password, _ := config["password"].(string)
-		sslMode, _ := config["ssl_mode"].(string)
-
-		pgConfig.ConnectionString = fmt.Sprintf(
-			"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s",
-			host, int(port), dbname, user, password, sslMode,
-		)
+	// Get connection string
+	connStr, ok := config["connection_string"].(string)
+	if !ok || connStr == "" {
+		return pgConfig, fmt.Errorf("missing or empty connection_string in config")
 	}
+	pgConfig.ConnectionString = connStr
 
 	return pgConfig, nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strconv"
 
 	"github.com/stellar/go/amount"
 	"github.com/stellar/go/ingest"
@@ -13,6 +14,10 @@ import (
 )
 
 type TransformToAppPayment struct {
+	minAmount         *float64
+	assetCode         *string
+	addresses         []string
+	memoText          *string
 	networkPassphrase string
 	processors        []Processor
 }
@@ -23,7 +28,35 @@ func NewTransformToAppPayment(config map[string]interface{}) (*TransformToAppPay
 		return nil, fmt.Errorf("invalid configuration for TransformToAppPayment: missing 'network_passphrase'")
 	}
 
-	return &TransformToAppPayment{networkPassphrase: networkPassphrase}, nil
+	t := &TransformToAppPayment{
+		networkPassphrase: networkPassphrase,
+	}
+
+	// Optional min_amount
+	if minAmountStr, ok := config["min_amount"].(string); ok && minAmountStr != "" {
+		minAmount, err := strconv.ParseFloat(minAmountStr, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid 'min_amount' value: %v", err)
+		}
+		t.minAmount = &minAmount
+	}
+
+	// Optional asset_code
+	if assetCode, ok := config["asset_code"].(string); ok && assetCode != "" {
+		t.assetCode = &assetCode
+	}
+
+	// Optional addresses
+	if addresses, ok := config["addresses"].([]string); ok && len(addresses) > 0 {
+		t.addresses = addresses
+	}
+
+	// Optional memo_text
+	if memoText, ok := config["memo_text"].(string); ok && memoText != "" {
+		t.memoText = &memoText
+	}
+
+	return t, nil
 }
 
 func (t *TransformToAppPayment) Subscribe(receiver Processor) {
@@ -302,7 +335,78 @@ func (t *TransformToAppPayment) createAppPaymentFromClaimableBalance(
 	}, nil
 }
 
+// Helper function to check if a payment should be processed
+func (t *TransformToAppPayment) shouldProcessPayment(payment AppPayment) bool {
+	// Track if we have any filters at all
+	hasFilters := false
+
+	// Check min amount if specified
+	if t.minAmount != nil {
+		hasFilters = true
+		paymentAmount, err := strconv.ParseFloat(payment.Amount, 64)
+		if err != nil {
+			log.Printf("Warning: Could not parse payment amount %s: %v", payment.Amount, err)
+			return false
+		}
+		if paymentAmount < *t.minAmount {
+			log.Printf("Payment amount %f is below minimum %f", paymentAmount, *t.minAmount)
+			return false
+		}
+	}
+
+	// Check asset code if specified
+	if t.assetCode != nil {
+		hasFilters = true
+		if payment.AssetCode != *t.assetCode {
+			log.Printf("Payment asset code %s does not match filter %s", payment.AssetCode, *t.assetCode)
+			return false
+		}
+	}
+
+	// Check addresses if specified
+	if len(t.addresses) > 0 {
+		hasFilters = true
+		addressMatch := false
+		for _, addr := range t.addresses {
+			if payment.BuyerAccountId == addr || payment.SellerAccountId == addr {
+				addressMatch = true
+				break
+			}
+		}
+		if !addressMatch {
+			log.Printf("Neither buyer %s nor seller %s match address filters",
+				payment.BuyerAccountId, payment.SellerAccountId)
+			return false
+		}
+	}
+
+	// Check memo text if specified
+	if t.memoText != nil {
+		hasFilters = true
+		if payment.Memo != *t.memoText {
+			log.Printf("Payment memo %q does not match filter %q", payment.Memo, *t.memoText)
+			return false
+		}
+	}
+
+	// If no filters were specified, return true
+	// If any filters were specified, we've already checked them all must match
+	if hasFilters {
+		log.Printf("Payment matched all specified filters")
+	} else {
+		log.Printf("No filters specified, accepting all payments")
+	}
+
+	return true
+}
+
 func (t *TransformToAppPayment) forwardAppPayment(ctx context.Context, payment AppPayment) error {
+	// Check if payment meets filter criteria
+	if !t.shouldProcessPayment(payment) {
+		log.Printf("Skipping payment that doesn't meet filter criteria")
+		return nil
+	}
+
 	jsonBytes, err := json.Marshal(payment)
 	if err != nil {
 		return fmt.Errorf("error marshaling payment: %w", err)
