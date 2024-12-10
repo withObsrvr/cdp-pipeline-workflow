@@ -11,6 +11,7 @@ import (
 	"github.com/stellar/go/amount"
 	"github.com/stellar/go/ingest"
 	"github.com/stellar/go/xdr"
+	"github.com/withObsrvr/cdp-pipeline-workflow/utils"
 )
 
 type TransformToAppPayment struct {
@@ -76,8 +77,11 @@ func (t *TransformToAppPayment) Process(ctx context.Context, msg Message) error 
 	}
 	defer ledgerTxReader.Close()
 
-	closeTime := uint(ledgerCloseMeta.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime)
-
+	rawCloseTime, err := utils.CloseTime(ledgerCloseMeta)
+	if err != nil {
+		return fmt.Errorf("error getting close time: %w", err)
+	}
+	closeTime := uint(rawCloseTime.Unix())
 	// Process all transactions in the ledger
 	for {
 		tx, err := ledgerTxReader.Read()

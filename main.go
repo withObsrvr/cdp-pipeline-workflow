@@ -128,6 +128,16 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewLedgerReader(processorConfig.Config)
 	case "AssetEnrichment":
 		return processor.NewAssetEnrichmentProcessor(processorConfig.Config)
+	case "ContractLedgerReader":
+		return processor.NewContractLedgerReader(processorConfig.Config)
+	case "ContractInvocation":
+		return processor.NewContractInvocationProcessor(processorConfig.Config)
+	case "ContractCreation":
+		return processor.NewContractCreationProcessor(processorConfig.Config)
+	case "ContractEvent":
+		return processor.NewContractEventProcessor(processorConfig.Config)
+	case "LatestLedger":
+		return processor.NewLatestLedgerProcessor(processorConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}
@@ -169,6 +179,10 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveAssetEnrichmentConsumer(consumerConfig.Config)
 	case "SavePaymentToPostgreSQL":
 		return consumer.NewSavePaymentToPostgreSQL(consumerConfig.Config)
+	case "SavePaymentsToRedis":
+		return consumer.NewSavePaymentsToRedis(consumerConfig.Config)
+	case "SaveLatestLedgerToRedis":
+		return consumer.NewSaveLatestLedgerRedis(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}
