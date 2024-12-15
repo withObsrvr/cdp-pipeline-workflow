@@ -138,6 +138,12 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewContractEventProcessor(processorConfig.Config)
 	case "LatestLedger":
 		return processor.NewLatestLedgerProcessor(processorConfig.Config)
+	case "AccountTransaction":
+		return processor.NewAccountTransactionProcessor(processorConfig.Config)
+	case "FilteredContractInvocation":
+		return processor.NewFilteredContractInvocationProcessor(processorConfig.Config)
+	case "AccountYearAnalytics":
+		return processor.NewAccountYearAnalytics(processorConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}

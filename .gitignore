@@ -9,6 +9,7 @@ cdp-pipeline-workflow
 # Test binary, built with `go test -c`
 *.test
 cdp-pipeline-workflow.md
+cdp-pipeline-workflow.pdf
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
