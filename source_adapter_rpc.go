@@ -17,8 +17,7 @@ import (
 // Configuration types
 type SorobanConfig struct {
 	RPCURL       string
-	APIKey       string
-	ContractID   string
+	AuthHeader   string
 	StartLedger  uint64
 	BatchSize    int
 	PollInterval time.Duration
@@ -49,8 +48,8 @@ type PaginationOptions struct {
 
 type GetEventsResponse struct {
 	Result struct {
-		Events       []Event `json:"events"`
-		LatestLedger uint64  `json:"latestLedger"`
+		Events       []cdpProcessor.Event `json:"events"`
+		LatestLedger uint64               `json:"latestLedger"`
 	} `json:"result"`
 }
 
@@ -94,17 +93,11 @@ func NewSorobanSourceAdapter(config map[string]interface{}) (SourceAdapter, erro
 		return nil, errors.New("rpc_url must be specified")
 	}
 
-	apiKey, ok := config["api_key"].(string)
+	authHeader, ok := config["auth_header"].(string)
 	if !ok {
-		return nil, errors.New("api_key must be specified")
+		return nil, errors.New("auth_header must be specified")
 	}
 
-	contractID, ok := config["contract_id"].(string)
-	if !ok {
-		return nil, errors.New("contract_id must be specified")
-	}
-
-	// Get other configs with defaults
 	batchSize := 100
 	if size, ok := config["batch_size"].(int); ok {
 		batchSize = size
@@ -113,8 +106,7 @@ func NewSorobanSourceAdapter(config map[string]interface{}) (SourceAdapter, erro
 	adapter := &SorobanSourceAdapter{
 		config: SorobanConfig{
 			RPCURL:     rpcURL,
-			APIKey:     apiKey,
-			ContractID: contractID,
+			AuthHeader: authHeader,
 			BatchSize:  batchSize,
 		},
 		client: &http.Client{
@@ -122,7 +114,6 @@ func NewSorobanSourceAdapter(config map[string]interface{}) (SourceAdapter, erro
 		},
 	}
 
-	// Initialize with latest ledger
 	latestLedger, err := adapter.getLatestLedger()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get latest ledger: %w", err)
@@ -159,8 +150,6 @@ func (s *SorobanSourceAdapter) Subscribe(receiver cdpProcessor.Processor) {
 }
 
 func (s *SorobanSourceAdapter) Run(ctx context.Context) error {
-	log.Printf("Starting Soroban event ingestion for contract: %s from ledger: %d",
-		s.config.ContractID, s.lastLedger)
 
 	ticker := time.NewTicker(10 * time.Second) // Poll every 10 seconds
 	defer ticker.Stop()
@@ -198,12 +187,6 @@ func (s *SorobanSourceAdapter) fetchAndProcessEvents(ctx context.Context) error 
 		Method:  "getEvents",
 		Params: GetEventsRequestParams{
 			StartLedger: s.lastLedger,
-			Filters: []EventFilter{
-				{
-					Type:        "contract",
-					ContractIds: []string{s.config.ContractID},
-				},
-			},
 			Pagination: PaginationOptions{
 				Limit: s.config.BatchSize,
 			},
@@ -215,13 +198,9 @@ func (s *SorobanSourceAdapter) fetchAndProcessEvents(ctx context.Context) error 
 		return errors.Wrap(err, "failed to fetch events")
 	}
 
-	log.Printf("Received response from Soroban RPC: Latest Ledger: %d, Events Count: %d",
-		resp.Result.LatestLedger, len(resp.Result.Events))
+	log.Printf("Received %d events from Soroban RPC", len(resp.Result.Events))
 
-	for i, event := range resp.Result.Events {
-		log.Printf("Processing event %d/%d - ID: %s, Type: %s, Ledger: %d",
-			i+1, len(resp.Result.Events), event.ID, event.Type, event.Ledger)
-
+	for _, event := range resp.Result.Events {
 		if err := s.processEvent(ctx, event); err != nil {
 			log.Printf("Error processing event %s: %v", event.ID, err)
 			continue
@@ -231,30 +210,19 @@ func (s *SorobanSourceAdapter) fetchAndProcessEvents(ctx context.Context) error 
 	if len(resp.Result.Events) > 0 {
 		lastEvent := resp.Result.Events[len(resp.Result.Events)-1]
 		s.lastLedger = lastEvent.Ledger
-		log.Printf("Updated last processed ledger to %d", s.lastLedger)
 	} else {
-		// If no events, update to latest ledger to avoid re-scanning empty ledgers
 		s.lastLedger = resp.Result.LatestLedger
-		log.Printf("No new events, updating last ledger to latest: %d", s.lastLedger)
 	}
 
 	return nil
 }
 
-func (s *SorobanSourceAdapter) processEvent(ctx context.Context, event Event) error {
-	log.Printf("Event details - Contract: %s, Ledger: %d, TxHash: %s",
-		event.ContractID, event.Ledger, event.TxHash)
+func (s *SorobanSourceAdapter) processEvent(ctx context.Context, event cdpProcessor.Event) error {
+	log.Printf("Processing event - Ledger: %d, TxHash: %s", event.Ledger, event.TxHash)
 
-	// Log topic and value in a readable format
-	topicStr, _ := json.MarshalIndent(event.Topic, "", "  ")
-	valueStr, _ := json.MarshalIndent(event.Value, "", "  ")
-	log.Printf("Event topic: %s", string(topicStr))
-	log.Printf("Event value: %s", string(valueStr))
-
-	for i, processor := range s.processors {
-		log.Printf("Sending event to processor %d (%T)", i+1, processor)
+	for _, processor := range s.processors {
 		if err := processor.Process(ctx, cdpProcessor.Message{Payload: event}); err != nil {
-			return errors.Wrapf(err, "error in processor %T", processor)
+			return fmt.Errorf("error in processor chain: %w", err)
 		}
 	}
 
@@ -273,7 +241,7 @@ func (s *SorobanSourceAdapter) sendRPCRequest(ctx context.Context, req interface
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", fmt.Sprintf("Api-Key %s", s.config.APIKey))
+	httpReq.Header.Set("Authorization", s.config.AuthHeader)
 
 	// Log request details
 	reqDump, _ := httputil.DumpRequestOut(httpReq, true)

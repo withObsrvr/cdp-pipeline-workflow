@@ -166,14 +166,14 @@ func (t *TransformToAppPayment) createAppPaymentFromPaymentOp(
 	memo string,
 ) *AppPayment {
 	return &AppPayment{
-		Timestamp:       fmt.Sprintf("%d", closeTime),
-		BuyerAccountId:  paymentOp.Destination.Address(),
-		SellerAccountId: sourceAccount.Address(),
-		AssetCode:       paymentOp.Asset.StringCanonical(),
-		Amount:          amount.String(paymentOp.Amount),
-		Type:            "payment",
-		LedgerSequence:  ledgerSeq,
-		Memo:            memo,
+		Timestamp:            fmt.Sprintf("%d", closeTime),
+		SourceAccountId:      paymentOp.Destination.Address(),
+		DestinationAccountId: sourceAccount.Address(),
+		AssetCode:            paymentOp.Asset.StringCanonical(),
+		Amount:               amount.String(paymentOp.Amount),
+		Type:                 "payment",
+		LedgerSequence:       ledgerSeq,
+		Memo:                 memo,
 	}
 }
 
@@ -185,14 +185,14 @@ func (t *TransformToAppPayment) createAppPaymentFromPathPaymentStrictReceiveOp(
 	memo string,
 ) *AppPayment {
 	return &AppPayment{
-		Timestamp:       fmt.Sprintf("%d", closeTime),
-		BuyerAccountId:  pathPaymentOp.Destination.Address(),
-		SellerAccountId: sourceAccount.Address(),
-		AssetCode:       pathPaymentOp.DestAsset.StringCanonical(),
-		Amount:          amount.String(pathPaymentOp.DestAmount),
-		Type:            "path_payment_strict_receive",
-		Memo:            memo,
-		LedgerSequence:  ledgerSeq,
+		Timestamp:            fmt.Sprintf("%d", closeTime),
+		SourceAccountId:      pathPaymentOp.Destination.Address(),
+		DestinationAccountId: sourceAccount.Address(),
+		AssetCode:            pathPaymentOp.DestAsset.StringCanonical(),
+		Amount:               amount.String(pathPaymentOp.DestAmount),
+		Type:                 "path_payment_strict_receive",
+		Memo:                 memo,
+		LedgerSequence:       ledgerSeq,
 	}
 }
 
@@ -204,14 +204,14 @@ func (t *TransformToAppPayment) createAppPaymentFromPathPaymentStrictSendOp(
 	memo string,
 ) *AppPayment {
 	return &AppPayment{
-		Timestamp:       fmt.Sprintf("%d", closeTime),
-		BuyerAccountId:  pathPaymentOp.Destination.Address(),
-		SellerAccountId: sourceAccount.Address(),
-		AssetCode:       pathPaymentOp.DestAsset.StringCanonical(),
-		Amount:          amount.String(pathPaymentOp.SendAmount), // Note: actual received amount may differ
-		Type:            "path_payment_strict_send",
-		Memo:            memo,
-		LedgerSequence:  ledgerSeq,
+		Timestamp:            fmt.Sprintf("%d", closeTime),
+		SourceAccountId:      pathPaymentOp.Destination.Address(),
+		DestinationAccountId: sourceAccount.Address(),
+		AssetCode:            pathPaymentOp.DestAsset.StringCanonical(),
+		Amount:               amount.String(pathPaymentOp.SendAmount), // Note: actual received amount may differ
+		Type:                 "path_payment_strict_send",
+		Memo:                 memo,
+		LedgerSequence:       ledgerSeq,
 	}
 }
 
@@ -273,14 +273,14 @@ func (t *TransformToAppPayment) createAppPaymentFromAccountMerge(
 	log.Printf("  Transfer amount: %s", amount.String(amountTransferred))
 
 	return &AppPayment{
-		Timestamp:       fmt.Sprintf("%d", closeTime),
-		BuyerAccountId:  destination.Address(),
-		SellerAccountId: sourceAccount.Address(),
-		AssetCode:       "native",
-		Amount:          amount.String(amountTransferred),
-		Type:            "account_merge",
-		Memo:            memo,
-		LedgerSequence:  ledgerSeq,
+		Timestamp:            fmt.Sprintf("%d", closeTime),
+		SourceAccountId:      destination.Address(),
+		DestinationAccountId: sourceAccount.Address(),
+		AssetCode:            "native",
+		Amount:               amount.String(amountTransferred),
+		Type:                 "account_merge",
+		Memo:                 memo,
+		LedgerSequence:       ledgerSeq,
 	}, nil
 }
 
@@ -301,7 +301,8 @@ func (t *TransformToAppPayment) createAppPaymentFromClaimableBalance(
 
 	var claimedAmount xdr.Int64
 	var asset xdr.Asset
-	var claimableBalance *xdr.ClaimableBalanceEntry
+	var creator string
+
 	for _, change := range changes {
 		if change.Type != xdr.LedgerEntryType(xdr.LedgerEntryChangeTypeLedgerEntryRemoved) {
 			continue
@@ -312,30 +313,32 @@ func (t *TransformToAppPayment) createAppPaymentFromClaimableBalance(
 			continue
 		}
 
-		claimableBalance := entry.Data.ClaimableBalance
-		if claimableBalance.BalanceId == claimOp.BalanceId {
-			claimedAmount = claimableBalance.Amount
-			asset = claimableBalance.Asset
+		balanceEntry := entry.Data.MustClaimableBalance()
+		if balanceEntry.BalanceId == claimOp.BalanceId {
+			claimedAmount = balanceEntry.Amount
+			asset = balanceEntry.Asset
+			// Get the first claimant as the creator
+			if len(balanceEntry.Claimants) > 0 {
+				creator = balanceEntry.Claimants[0].MustV0().Destination.Address()
+			}
 			break
 		}
 	}
 
-	// Find the original creator of the claimable balance
-	var creator string
-	for _, claimant := range claimableBalance.Claimants {
-		creator = claimant.MustV0().Destination.Address()
-		break
+	// If we couldn't find a creator, use a placeholder
+	if creator == "" {
+		creator = "unknown"
 	}
 
 	return &AppPayment{
-		Timestamp:       fmt.Sprintf("%d", closeTime),
-		BuyerAccountId:  sourceAccount.Address(), // The claimer receives the funds
-		SellerAccountId: creator,                 // The original creator of the balance
-		AssetCode:       asset.StringCanonical(),
-		Amount:          amount.String(claimedAmount),
-		Type:            "claim_claimable_balance",
-		Memo:            memo,
-		LedgerSequence:  ledgerSeq,
+		Timestamp:            fmt.Sprintf("%d", closeTime),
+		SourceAccountId:      sourceAccount.Address(), // The claimer receives the funds
+		DestinationAccountId: creator,                 // The original creator of the balance
+		AssetCode:            asset.StringCanonical(),
+		Amount:               amount.String(claimedAmount),
+		Type:                 "claim_claimable_balance",
+		Memo:                 memo,
+		LedgerSequence:       ledgerSeq,
 	}, nil
 }
 
@@ -372,14 +375,14 @@ func (t *TransformToAppPayment) shouldProcessPayment(payment AppPayment) bool {
 		hasFilters = true
 		addressMatch := false
 		for _, addr := range t.addresses {
-			if payment.BuyerAccountId == addr || payment.SellerAccountId == addr {
+			if payment.SourceAccountId == addr || payment.DestinationAccountId == addr {
 				addressMatch = true
 				break
 			}
 		}
 		if !addressMatch {
-			log.Printf("Neither buyer %s nor seller %s match address filters",
-				payment.BuyerAccountId, payment.SellerAccountId)
+			log.Printf("Neither source %s nor destination %s match address filters",
+				payment.SourceAccountId, payment.DestinationAccountId)
 			return false
 		}
 	}
@@ -427,12 +430,12 @@ func (t *TransformToAppPayment) forwardAppPayment(ctx context.Context, payment A
 }
 
 type AppPayment struct {
-	Timestamp       string `json:"timestamp"`
-	BuyerAccountId  string `json:"buyer_account_id"`
-	SellerAccountId string `json:"seller_account_id"`
-	AssetCode       string `json:"asset_code"`
-	Amount          string `json:"amount"`
-	Type            string `json:"type"`
-	Memo            string `json:"memo"`
-	LedgerSequence  uint32 `json:"ledger_sequence"`
+	Timestamp            string `json:"timestamp"`
+	SourceAccountId      string `json:"source_account_id"`
+	DestinationAccountId string `json:"destination_account_id"`
+	AssetCode            string `json:"asset_code"`
+	Amount               string `json:"amount"`
+	Type                 string `json:"type"`
+	Memo                 string `json:"memo"`
+	LedgerSequence       uint32 `json:"ledger_sequence"`
 }

@@ -94,3 +94,13 @@ func ForwardToProcessors(ctx context.Context, payload interface{}, processors []
 
 	return nil
 }
+
+type Event struct {
+	ID         string      `json:"id"`
+	Type       string      `json:"type"`
+	Ledger     uint64      `json:"ledger"`
+	ContractID string      `json:"contractId"`
+	TxHash     string      `json:"txHash"`
+	Topic      interface{} `json:"topic"`
+	Value      interface{} `json:"value"`
+}

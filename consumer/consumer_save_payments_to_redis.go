@@ -74,24 +74,24 @@ func (r *SavePaymentsToRedis) Process(ctx context.Context, msg processor.Message
 		return fmt.Errorf("error unmarshaling payment: %w", err)
 	}
 
-	// Create Redis key using timestamp and account IDs
-	key := fmt.Sprintf("%s%s:%s:%s",
+	// Generate a unique key for this payment
+	key := fmt.Sprintf("%spayment:%s:%d",
 		r.keyPrefix,
-		payment.Timestamp,
-		payment.BuyerAccountId[:8],
-		payment.SellerAccountId[:8])
+		payment.SourceAccountId,
+		payment.LedgerSequence,
+	)
 
 	// Prepare data for Redis
 	redisData := map[string]interface{}{
-		"timestamp":         payment.Timestamp,
-		"buyer_account_id":  payment.BuyerAccountId,
-		"seller_account_id": payment.SellerAccountId,
-		"asset_code":        payment.AssetCode,
-		"amount":            payment.Amount,
-		"type":              payment.Type,
-		"memo":              payment.Memo,
-		"ledger_sequence":   payment.LedgerSequence,
-		"stored_at":         time.Now().UTC().Format(time.RFC3339),
+		"timestamp":              payment.Timestamp,
+		"source_account_id":      payment.SourceAccountId,
+		"destination_account_id": payment.DestinationAccountId,
+		"asset_code":             payment.AssetCode,
+		"amount":                 payment.Amount,
+		"type":                   payment.Type,
+		"memo":                   payment.Memo,
+		"ledger_sequence":        payment.LedgerSequence,
+		"stored_at":              time.Now().UTC().Format(time.RFC3339),
 	}
 
 	// Store in Redis using pipeline
@@ -104,21 +104,21 @@ func (r *SavePaymentsToRedis) Process(ctx context.Context, msg processor.Message
 	pipe.Expire(ctx, key, r.ttl)
 
 	// Add to account indices for faster lookups
-	buyerKey := fmt.Sprintf("%sbuyer:%s", r.keyPrefix, payment.BuyerAccountId)
-	sellerKey := fmt.Sprintf("%sseller:%s", r.keyPrefix, payment.SellerAccountId)
+	sourceKey := fmt.Sprintf("%ssource:%s", r.keyPrefix, payment.SourceAccountId)
+	destinationKey := fmt.Sprintf("%sdestination:%s", r.keyPrefix, payment.DestinationAccountId)
 
-	pipe.ZAdd(ctx, buyerKey, redis.Z{
+	pipe.ZAdd(ctx, sourceKey, redis.Z{
 		Score:  float64(payment.LedgerSequence),
 		Member: key,
 	})
-	pipe.ZAdd(ctx, sellerKey, redis.Z{
+	pipe.ZAdd(ctx, destinationKey, redis.Z{
 		Score:  float64(payment.LedgerSequence),
 		Member: key,
 	})
 
 	// Set TTL on indices
-	pipe.Expire(ctx, buyerKey, r.ttl)
-	pipe.Expire(ctx, sellerKey, r.ttl)
+	pipe.Expire(ctx, sourceKey, r.ttl)
+	pipe.Expire(ctx, destinationKey, r.ttl)
 
 	// Execute pipeline
 	if _, err := pipe.Exec(ctx); err != nil {

@@ -45,23 +45,24 @@ type AccountTransactionProcessor struct {
 }
 
 func NewAccountTransactionProcessor(config map[string]interface{}) (*AccountTransactionProcessor, error) {
-	account, ok := config["account"].(string)
-	if !ok {
-		return nil, fmt.Errorf("missing account in configuration")
-	}
-
-	startYear, ok := config["year"].(int)
-	if !ok {
-		return nil, fmt.Errorf("missing year in configuration")
-	}
+	var account string
+	var startTime, endTime time.Time
 
 	networkPassphrase, ok := config["network_passphrase"].(string)
 	if !ok {
 		return nil, fmt.Errorf("missing network_passphrase in configuration")
 	}
 
-	startTime := time.Date(startYear, 1, 1, 0, 0, 0, 0, time.UTC)
-	endTime := startTime.AddDate(1, 0, 0)
+	// Optional account filter
+	if acc, ok := config["account"].(string); ok && acc != "" {
+		account = acc
+	}
+
+	// Optional year filter
+	if year, ok := config["year"].(int); ok && year > 0 {
+		startTime = time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
+		endTime = startTime.AddDate(1, 0, 0)
+	}
 
 	return &AccountTransactionProcessor{
 		targetAccount:     account,
@@ -83,9 +84,11 @@ func (p *AccountTransactionProcessor) Process(ctx context.Context, msg Message) 
 
 	closeTime := time.Unix(int64(ledgerCloseMeta.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime), 0)
 
-	// Skip if outside target year
-	if closeTime.Before(p.startTime) || closeTime.After(p.endTime) {
-		return nil
+	// Skip if outside target year (only if year filter is set)
+	if !p.startTime.IsZero() && !p.endTime.IsZero() {
+		if closeTime.Before(p.startTime) || closeTime.After(p.endTime) {
+			return nil
+		}
 	}
 
 	txReader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(p.networkPassphrase, ledgerCloseMeta)
@@ -104,8 +107,8 @@ func (p *AccountTransactionProcessor) Process(ctx context.Context, msg Message) 
 		}
 		ledgerSequence := ledgerCloseMeta.LedgerSequence()
 
-		// Process the transaction if it involves our target account
-		if p.isAccountInvolved(tx, p.targetAccount) {
+		// Process the transaction if it involves our target account (only if account filter is set)
+		if p.targetAccount == "" || p.isAccountInvolved(tx, p.targetAccount) {
 			accTx, err := p.processTransaction(tx, closeTime, ledgerSequence)
 			if err != nil {
 				log.Printf("Error processing transaction: %v", err)
@@ -167,16 +170,30 @@ func (p *AccountTransactionProcessor) isAccountInvolved(tx ingest.LedgerTransact
 }
 
 func (p *AccountTransactionProcessor) processTransaction(tx ingest.LedgerTransaction, closeTime time.Time, ledgerSequence uint32) (*AccountTransaction, error) {
+	// Get the source account - either target account or transaction source
+	sourceAccount := p.targetAccount
+	if sourceAccount == "" {
+		sourceAccount = tx.Envelope.SourceAccount().ToAccountId().Address()
+	}
+
 	accTx := &AccountTransaction{
 		Timestamp:         closeTime,
 		TransactionHash:   tx.Result.TransactionHash.HexString(),
 		LedgerSequence:    ledgerSequence,
-		AccountID:         p.targetAccount,
+		AccountID:         sourceAccount,
 		TransactionStatus: tx.Result.Successful(),
 	}
 
 	// Process operations
 	for _, op := range tx.Envelope.Operations() {
+		// Get operation source if available, otherwise use transaction source
+		opSourceAccount := sourceAccount
+		if op.SourceAccount != nil {
+			opSourceAccount = op.SourceAccount.Address()
+		}
+
+		accTx.AccountID = opSourceAccount
+
 		switch op.Body.Type {
 		case xdr.OperationTypePayment:
 			accTx.Type = "stellar"
@@ -235,8 +252,13 @@ func (p *AccountTransactionProcessor) processTransaction(tx ingest.LedgerTransac
 			accTx.Type = "stellar"
 			accTx.Operation = "change_trust"
 			trust := op.Body.MustChangeTrustOp()
-			accTx.AssetCode = trust.Line.ToAsset().GoString()
-			accTx.Amount = amount.String(trust.Limit)
+			if trust.Line.Type != xdr.AssetTypeAssetTypePoolShare {
+				accTx.AssetCode = trust.Line.ToAsset().StringCanonical()
+				accTx.Amount = amount.String(trust.Limit)
+			} else {
+				accTx.AssetCode = "liquidity_pool_shares"
+				accTx.Amount = amount.String(trust.Limit)
+			}
 
 		case xdr.OperationTypeAllowTrust:
 			accTx.Type = "stellar"
@@ -262,6 +284,7 @@ func (p *AccountTransactionProcessor) processTransaction(tx ingest.LedgerTransac
 		case xdr.OperationTypeInvokeHostFunction:
 			accTx.Type = "soroban"
 			hostFn := op.Body.MustInvokeHostFunctionOp()
+
 			// Get the invoking account
 			var invokingAccount xdr.AccountId
 			if op.SourceAccount != nil {
@@ -271,26 +294,37 @@ func (p *AccountTransactionProcessor) processTransaction(tx ingest.LedgerTransac
 			}
 			accTx.CounterpartyID = invokingAccount.Address()
 
-			if hostFn.HostFunction.Type == xdr.HostFunctionTypeHostFunctionTypeInvokeContract {
+			// Set operation based on host function type
+			switch hostFn.HostFunction.Type {
+			case xdr.HostFunctionTypeHostFunctionTypeInvokeContract:
 				accTx.Operation = "invoke_contract"
 				contract := hostFn.HostFunction.MustInvokeContract()
-
 				if contractID, err := strkey.Encode(strkey.VersionByteContract, contract.ContractAddress.ContractId[:]); err == nil {
 					accTx.ContractID = contractID
 				}
-
 				if len(contract.Args) > 0 {
 					if sym, ok := contract.Args[0].GetSym(); ok {
 						accTx.FunctionName = string(sym)
 					}
 				}
+			case xdr.HostFunctionTypeHostFunctionTypeCreateContract:
+				accTx.Operation = "create_contract"
+				create := hostFn.HostFunction.MustCreateContract()
+				accTx.Parameters = map[string]interface{}{
+					"executable_type": create.Executable.Type.String(),
+				}
+			case xdr.HostFunctionTypeHostFunctionTypeUploadContractWasm:
+				accTx.Operation = "upload_contract_wasm"
+			default:
+				accTx.Operation = hostFn.HostFunction.Type.String()
+			}
 
-				events, err := tx.GetDiagnosticEvents()
-				if err == nil {
-					for _, event := range events {
-						if eventBytes, err := json.Marshal(event); err == nil {
-							accTx.ContractEvents = append(accTx.ContractEvents, eventBytes)
-						}
+			// Add diagnostic events if available
+			events, err := tx.GetDiagnosticEvents()
+			if err == nil {
+				for _, event := range events {
+					if eventBytes, err := json.Marshal(event); err == nil {
+						accTx.ContractEvents = append(accTx.ContractEvents, eventBytes)
 					}
 				}
 			}

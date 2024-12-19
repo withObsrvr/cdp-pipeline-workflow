@@ -70,6 +70,10 @@ func createSourceAdapter(sourceConfig SourceConfig) (SourceAdapter, error) {
 		return NewCaptiveCoreInboundAdapter(sourceConfig.Config)
 	case "BufferedStorageSourceAdapter":
 		return NewBufferedStorageSourceAdapter(sourceConfig.Config)
+	case "SorobanSourceAdapter":
+		return NewSorobanSourceAdapter(sourceConfig.Config)
+	case "GCSBufferedStorageSourceAdapter":
+		return NewGCSBufferedStorageSourceAdapter(sourceConfig.Config)
 	// Add more source types as needed
 	default:
 		return nil, fmt.Errorf("unsupported source type: %s", sourceConfig.Type)
@@ -144,6 +148,12 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewFilteredContractInvocationProcessor(processorConfig.Config)
 	case "AccountYearAnalytics":
 		return processor.NewAccountYearAnalytics(processorConfig.Config)
+	case "ContractFilter":
+		return processor.NewContractFilterProcessor(processorConfig.Config)
+	case "AccountEffect":
+		return processor.NewAccountEffectProcessor(processorConfig.Config)
+	case "LedgerChanges":
+		return processor.NewLedgerChangeProcessor(processorConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}

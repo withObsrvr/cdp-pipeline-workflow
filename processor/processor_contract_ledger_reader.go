@@ -2,16 +2,37 @@ package processor
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/stellar/go/hash"
 	"github.com/stellar/go/ingest"
 	"github.com/stellar/go/strkey"
 	"github.com/stellar/go/xdr"
+)
+
+var (
+	// Storage DataKey enum constants
+	balanceMetadataSym = xdr.ScSymbol("Balance")
+	issuerSym          = xdr.ScSymbol("issuer")
+	assetCodeSym       = xdr.ScSymbol("asset_code")
+	assetInfoSym       = xdr.ScSymbol("AssetInfo")
+	assetInfoVec       = &xdr.ScVec{
+		xdr.ScVal{
+			Type: xdr.ScValTypeScvSymbol,
+			Sym:  &assetInfoSym,
+		},
+	}
+	assetInfoKey = xdr.ScVal{
+		Type: xdr.ScValTypeScvVec,
+		Vec:  &assetInfoVec,
+	}
 )
 
 // Data type definitions
@@ -39,6 +60,7 @@ type ContractBalanceData struct {
 type ContractLedgerReader struct {
 	processors        []Processor
 	networkPassphrase string
+	transformer       *TransformContractDataStruct
 	mu                sync.RWMutex
 	stats             struct {
 		ProcessedLedgers uint32
@@ -56,19 +78,107 @@ func AssetFromContractData(ledgerEntry xdr.LedgerEntry, passphrase string) *xdr.
 	if !ok {
 		return nil
 	}
-
 	if contractData.Key.Type != xdr.ScValTypeScvLedgerKeyContractInstance {
 		return nil
 	}
-
-	// Basic implementation - you'll want to expand this based on your needs
-	if contractData.Contract.ContractId != nil {
-		// Process asset data
-		// This is a simplified version - you'll want to implement the full logic
+	contractInstanceData, ok := contractData.Val.GetInstance()
+	if !ok || contractInstanceData.Storage == nil {
 		return nil
 	}
 
-	return nil
+	nativeAssetContractID, err := xdr.MustNewNativeAsset().ContractID(passphrase)
+	if err != nil {
+		return nil
+	}
+
+	var assetInfo *xdr.ScVal
+	for _, mapEntry := range *contractInstanceData.Storage {
+		if mapEntry.Key.Equals(assetInfoKey) {
+			// clone the map entry to avoid reference to loop iterator
+			mapValXdr, cloneErr := mapEntry.Val.MarshalBinary()
+			if cloneErr != nil {
+				return nil
+			}
+			assetInfo = &xdr.ScVal{}
+			cloneErr = assetInfo.UnmarshalBinary(mapValXdr)
+			if cloneErr != nil {
+				return nil
+			}
+			break
+		}
+	}
+
+	if assetInfo == nil {
+		return nil
+	}
+
+	vecPtr, ok := assetInfo.GetVec()
+	if !ok || vecPtr == nil || len(*vecPtr) != 2 {
+		return nil
+	}
+	vec := *vecPtr
+
+	sym, ok := vec[0].GetSym()
+	if !ok {
+		return nil
+	}
+	switch sym {
+	case "AlphaNum4":
+	case "AlphaNum12":
+	case "Native":
+		if contractData.Contract.ContractId != nil && (*contractData.Contract.ContractId) == nativeAssetContractID {
+			asset := xdr.MustNewNativeAsset()
+			return &asset
+		}
+	default:
+		return nil
+	}
+
+	var assetCode, assetIssuer string
+	assetMapPtr, ok := vec[1].GetMap()
+	if !ok || assetMapPtr == nil || len(*assetMapPtr) != 2 {
+		return nil
+	}
+	assetMap := *assetMapPtr
+
+	assetCodeEntry, assetIssuerEntry := assetMap[0], assetMap[1]
+	if sym, ok = assetCodeEntry.Key.GetSym(); !ok || sym != assetCodeSym {
+		return nil
+	}
+	assetCodeSc, ok := assetCodeEntry.Val.GetStr()
+	if !ok {
+		return nil
+	}
+	if assetCode = string(assetCodeSc); assetCode == "" {
+		return nil
+	}
+
+	if sym, ok = assetIssuerEntry.Key.GetSym(); !ok || sym != issuerSym {
+		return nil
+	}
+	assetIssuerSc, ok := assetIssuerEntry.Val.GetBytes()
+	if !ok {
+		return nil
+	}
+	assetIssuer, err = strkey.Encode(strkey.VersionByteAccountID, assetIssuerSc)
+	if err != nil {
+		return nil
+	}
+
+	asset, err := xdr.NewCreditAsset(assetCode, assetIssuer)
+	if err != nil {
+		return nil
+	}
+
+	expectedID, err := asset.ContractID(passphrase)
+	if err != nil {
+		return nil
+	}
+	if contractData.Contract.ContractId == nil || expectedID != *(contractData.Contract.ContractId) {
+		return nil
+	}
+
+	return &asset
 }
 
 // Helper functions for balance extraction
@@ -78,14 +188,72 @@ func ContractBalanceFromContractData(ledgerEntry xdr.LedgerEntry, passphrase str
 		return [32]byte{}, nil, false
 	}
 
+	_, err := xdr.MustNewNativeAsset().ContractID(passphrase)
+	if err != nil {
+		return [32]byte{}, nil, false
+	}
+
 	if contractData.Contract.ContractId == nil {
 		return [32]byte{}, nil, false
 	}
 
-	// Basic implementation - you'll want to expand this based on your needs
-	holder := [32]byte{}
-	balance := big.NewInt(0)
-	return holder, balance, true
+	keyEnumVecPtr, ok := contractData.Key.GetVec()
+	if !ok || keyEnumVecPtr == nil {
+		return [32]byte{}, nil, false
+	}
+	keyEnumVec := *keyEnumVecPtr
+	if len(keyEnumVec) != 2 || !keyEnumVec[0].Equals(
+		xdr.ScVal{
+			Type: xdr.ScValTypeScvSymbol,
+			Sym:  &balanceMetadataSym,
+		},
+	) {
+		return [32]byte{}, nil, false
+	}
+
+	scAddress, ok := keyEnumVec[1].GetAddress()
+	if !ok {
+		return [32]byte{}, nil, false
+	}
+
+	holder, ok := scAddress.GetContractId()
+	if !ok {
+		return [32]byte{}, nil, false
+	}
+
+	balanceMapPtr, ok := contractData.Val.GetMap()
+	if !ok || balanceMapPtr == nil {
+		return [32]byte{}, nil, false
+	}
+	balanceMap := *balanceMapPtr
+	if !ok || len(balanceMap) != 3 {
+		return [32]byte{}, nil, false
+	}
+
+	var keySym xdr.ScSymbol
+	if keySym, ok = balanceMap[0].Key.GetSym(); !ok || keySym != "amount" {
+		return [32]byte{}, nil, false
+	}
+	if keySym, ok = balanceMap[1].Key.GetSym(); !ok || keySym != "authorized" ||
+		!balanceMap[1].Val.IsBool() {
+		return [32]byte{}, nil, false
+	}
+	if keySym, ok = balanceMap[2].Key.GetSym(); !ok || keySym != "clawback" ||
+		!balanceMap[2].Val.IsBool() {
+		return [32]byte{}, nil, false
+	}
+	amount, ok := balanceMap[0].Val.GetI128()
+	if !ok {
+		return [32]byte{}, nil, false
+	}
+
+	// amount cannot be negative
+	if int64(amount.Hi) < 0 {
+		return [32]byte{}, nil, false
+	}
+	amt := new(big.Int).Lsh(new(big.Int).SetInt64(int64(amount.Hi)), 64)
+	amt.Add(amt, new(big.Int).SetUint64(uint64(amount.Lo)))
+	return holder, amt, true
 }
 
 func NewContractLedgerReader(config map[string]interface{}) (*ContractLedgerReader, error) {
@@ -94,8 +262,11 @@ func NewContractLedgerReader(config map[string]interface{}) (*ContractLedgerRead
 		return nil, fmt.Errorf("missing network_passphrase in configuration")
 	}
 
+	transformer := NewTransformContractDataStruct(AssetFromContractData, ContractBalanceFromContractData)
+
 	return &ContractLedgerReader{
 		networkPassphrase: networkPassphrase,
+		transformer:       transformer,
 	}, nil
 }
 
@@ -128,6 +299,8 @@ func (p *ContractLedgerReader) Process(ctx context.Context, msg Message) error {
 			return fmt.Errorf("error reading transaction: %w", err)
 		}
 
+		log.Printf("Processing transaction: %s", tx.Result.TransactionHash.HexString())
+
 		// Process each operation's changes
 		if tx.UnsafeMeta.V1 == nil {
 			continue
@@ -135,40 +308,27 @@ func (p *ContractLedgerReader) Process(ctx context.Context, msg Message) error {
 
 		for i := range tx.UnsafeMeta.V1.Operations {
 			changes := tx.UnsafeMeta.V1.Operations[i].Changes
+			log.Printf("Found %d changes in operation %d", len(changes), i)
+
 			for _, change := range changes {
-				// First, check if this change involves contract data
-				var entry *xdr.LedgerEntry
-				var changeType string
-
-				switch change.Type {
-				case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
-					entry = change.Created
-					changeType = "created"
-				case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
-					entry = change.Updated
-					changeType = "updated"
-				case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
-					entry = change.State
-					changeType = "removed"
-				default:
+				output, err, ok := p.transformer.TransformContractData(change, p.networkPassphrase, ledgerCloseMeta.LedgerHeaderHistoryEntry())
+				if err != nil {
+					log.Printf("Error transforming contract data: %v", err)
 					continue
 				}
-
-				if entry == nil {
-					continue
-				}
-
-				// Now examine the contract data itself
-				contractData, ok := entry.Data.GetContractData()
 				if !ok {
 					continue
 				}
 
-				// Process the contract data
-				if err := p.processContractData(ctx, &contractData, entry, changeType, ledgerCloseMeta.LedgerHeaderHistoryEntry()); err != nil {
-					log.Printf("Error processing contract data: %v", err)
+				// Forward the transformed data
+				if err := p.forwardToProcessors(ctx, output); err != nil {
+					log.Printf("Error forwarding contract data: %v", err)
 					continue
 				}
+
+				p.mu.Lock()
+				p.stats.ProcessedChanges++
+				p.mu.Unlock()
 			}
 		}
 	}
@@ -182,84 +342,7 @@ func (p *ContractLedgerReader) Process(ctx context.Context, msg Message) error {
 	return nil
 }
 
-func (p *ContractLedgerReader) processContractData(
-	ctx context.Context,
-	contractData *xdr.ContractDataEntry,
-	entry *xdr.LedgerEntry,
-	changeType string,
-	header xdr.LedgerHeaderHistoryEntry,
-) error {
-	if contractData.Contract.ContractId == nil {
-		return fmt.Errorf("contract ID is nil")
-	}
-
-	contractID, err := strkey.Encode(strkey.VersionByteContract, contractData.Contract.ContractId[:])
-	if err != nil {
-		return fmt.Errorf("error encoding contract ID: %w", err)
-	}
-
-	log.Printf("Processing contract data for contract ID: %s (change type: %s)", contractID, changeType)
-
-	// Extract asset data if present
-	if asset := AssetFromContractData(*entry, p.networkPassphrase); asset != nil {
-		p.mu.Lock()
-		p.stats.AssetsFound++
-		p.mu.Unlock()
-
-		log.Printf("Found asset contract: %s (type: %s, code: %s, issuer: %s)",
-			contractID,
-			asset.Type.String(),
-			asset.GetCode(),
-			asset.GetIssuer())
-
-		assetData := ContractAssetData{
-			ContractID:     contractID,
-			AssetType:      asset.Type.String(),
-			AssetCode:      asset.GetCode(),
-			AssetIssuer:    asset.GetIssuer(),
-			OperationType:  changeType,
-			LastModified:   uint32(entry.LastModifiedLedgerSeq),
-			LedgerSequence: uint32(header.Header.LedgerSeq),
-			Timestamp:      time.Unix(int64(header.Header.ScpValue.CloseTime), 0),
-		}
-
-		return p.forwardToProcessors(ctx, assetData)
-	}
-
-	// Extract balance data if present
-	if holder, balance, ok := ContractBalanceFromContractData(*entry, p.networkPassphrase); ok {
-		p.mu.Lock()
-		p.stats.BalancesFound++
-		p.mu.Unlock()
-
-		holderID, err := strkey.Encode(strkey.VersionByteContract, holder[:])
-		if err != nil {
-			return fmt.Errorf("error encoding holder ID: %w", err)
-		}
-
-		log.Printf("Found balance contract: %s (holder: %s, balance: %s)",
-			contractID,
-			holderID,
-			balance.String())
-
-		balanceData := ContractBalanceData{
-			ContractID:     contractID,
-			BalanceHolder:  holderID,
-			Balance:        balance.String(),
-			OperationType:  changeType,
-			LastModified:   uint32(entry.LastModifiedLedgerSeq),
-			LedgerSequence: uint32(header.Header.LedgerSeq),
-			Timestamp:      time.Unix(int64(header.Header.ScpValue.CloseTime), 0),
-		}
-
-		return p.forwardToProcessors(ctx, balanceData)
-	}
-
-	log.Printf("Contract %s did not match asset or balance patterns", contractID)
-	return nil
-}
-
-func (p *ContractLedgerReader) forwardToProcessors(ctx context.Context, data interface{}) error {
+func (p *ContractLedgerReader) forwardToProcessors(ctx context.Context, data ContractDataOutput) error {
 	for _, processor := range p.processors {
 		if err := processor.Process(ctx, Message{Payload: data}); err != nil {
 			return fmt.Errorf("error in processor chain: %w", err)
@@ -279,4 +362,134 @@ func (p *ContractLedgerReader) GetStats() struct {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.stats
+}
+
+// Helper function to convert ledger entry to hash
+func LedgerEntryToLedgerKeyHash(ledgerEntry xdr.LedgerEntry) string {
+	ledgerKey, _ := ledgerEntry.LedgerKey()
+	ledgerKeyByte, _ := ledgerKey.MarshalBinary()
+	hashedLedgerKeyByte := hash.Hash(ledgerKeyByte)
+	return hex.EncodeToString(hashedLedgerKeyByte[:])
+}
+
+// Add these type definitions after the existing var block
+type AssetFromContractDataFunc func(ledgerEntry xdr.LedgerEntry, passphrase string) *xdr.Asset
+type ContractBalanceFromContractDataFunc func(ledgerEntry xdr.LedgerEntry, passphrase string) ([32]byte, *big.Int, bool)
+
+type TransformContractDataStruct struct {
+	AssetFromContractData           AssetFromContractDataFunc
+	ContractBalanceFromContractData ContractBalanceFromContractDataFunc
+}
+
+type ContractDataOutput struct {
+	ContractId                string    `json:"contract_id"`
+	ContractKeyType           string    `json:"contract_key_type"`
+	ContractDurability        string    `json:"contract_durability"`
+	ContractDataAssetCode     string    `json:"asset_code"`
+	ContractDataAssetIssuer   string    `json:"asset_issuer"`
+	ContractDataAssetType     string    `json:"asset_type"`
+	ContractDataBalanceHolder string    `json:"balance_holder"`
+	ContractDataBalance       string    `json:"balance"` // balance is a string because it is go type big.Int
+	LastModifiedLedger        uint32    `json:"last_modified_ledger"`
+	LedgerEntryChange         uint32    `json:"ledger_entry_change"`
+	Deleted                   bool      `json:"deleted"`
+	ClosedAt                  time.Time `json:"closed_at"`
+	LedgerSequence            uint32    `json:"ledger_sequence"`
+	LedgerKeyHash             string    `json:"ledger_key_hash"`
+}
+
+// Add this function after the existing helper functions
+func NewTransformContractDataStruct(assetFrom AssetFromContractDataFunc, contractBalance ContractBalanceFromContractDataFunc) *TransformContractDataStruct {
+	return &TransformContractDataStruct{
+		AssetFromContractData:           assetFrom,
+		ContractBalanceFromContractData: contractBalance,
+	}
+}
+
+// Add this method to TransformContractDataStruct
+func (t *TransformContractDataStruct) TransformContractData(change xdr.LedgerEntryChange, passphrase string, header xdr.LedgerHeaderHistoryEntry) (ContractDataOutput, error, bool) {
+	ledgerEntry, changeType, outputDeleted, err := ExtractEntryFromChange(change)
+	if err != nil {
+		return ContractDataOutput{}, err, false
+	}
+
+	contractData, ok := ledgerEntry.Data.GetContractData()
+	if !ok {
+		return ContractDataOutput{}, fmt.Errorf("could not extract contract data from ledger entry; actual type is %s", ledgerEntry.Data.Type), false
+	}
+
+	if contractData.Key.Type.String() == "ScValTypeScvLedgerKeyNonce" {
+		// Is a nonce and should be discarded
+		return ContractDataOutput{}, nil, false
+	}
+
+	ledgerKeyHash := LedgerEntryToLedgerKeyHash(ledgerEntry)
+
+	var contractDataAssetType string
+	var contractDataAssetCode string
+	var contractDataAssetIssuer string
+
+	contractDataAsset := t.AssetFromContractData(ledgerEntry, passphrase)
+	if contractDataAsset != nil {
+		contractDataAssetType = contractDataAsset.Type.String()
+		contractDataAssetCode = contractDataAsset.GetCode()
+		contractDataAssetCode = strings.ReplaceAll(contractDataAssetCode, "\x00", "")
+		contractDataAssetIssuer = contractDataAsset.GetIssuer()
+	}
+
+	var contractDataBalanceHolder string
+	var contractDataBalance string
+
+	dataBalanceHolder, dataBalance, _ := t.ContractBalanceFromContractData(ledgerEntry, passphrase)
+	if dataBalance != nil {
+		holderHashByte, _ := xdr.Hash(dataBalanceHolder).MarshalBinary()
+		contractDataBalanceHolder, _ = strkey.Encode(strkey.VersionByteContract, holderHashByte)
+		contractDataBalance = dataBalance.String()
+	}
+
+	contractDataContractId, ok := contractData.Contract.GetContractId()
+	if !ok {
+		return ContractDataOutput{}, fmt.Errorf("could not extract contractId data information from contractData"), false
+	}
+
+	contractDataKeyType := contractData.Key.Type.String()
+	contractDataContractIdByte, _ := contractDataContractId.MarshalBinary()
+	outputContractDataContractId, _ := strkey.Encode(strkey.VersionByteContract, contractDataContractIdByte)
+
+	contractDataDurability := contractData.Durability.String()
+
+	closedAt := time.Unix(int64(header.Header.ScpValue.CloseTime), 0).UTC()
+
+	transformedData := ContractDataOutput{
+		ContractId:                outputContractDataContractId,
+		ContractKeyType:           contractDataKeyType,
+		ContractDurability:        contractDataDurability,
+		ContractDataAssetCode:     contractDataAssetCode,
+		ContractDataAssetIssuer:   contractDataAssetIssuer,
+		ContractDataAssetType:     contractDataAssetType,
+		ContractDataBalanceHolder: contractDataBalanceHolder,
+		ContractDataBalance:       contractDataBalance,
+		LastModifiedLedger:        uint32(ledgerEntry.LastModifiedLedgerSeq),
+		LedgerEntryChange:         uint32(changeType),
+		Deleted:                   outputDeleted,
+		ClosedAt:                  closedAt,
+		LedgerSequence:            uint32(header.Header.LedgerSeq),
+		LedgerKeyHash:             ledgerKeyHash,
+	}
+
+	return transformedData, nil, true
+}
+
+// Add this helper function
+func ExtractEntryFromChange(change xdr.LedgerEntryChange) (xdr.LedgerEntry, xdr.LedgerEntryChangeType, bool, error) {
+	switch change.Type {
+	case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
+		return *change.Created, change.Type, false, nil
+	case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
+		return *change.Updated, change.Type, false, nil
+	case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
+		return *change.State, change.Type, true, nil
+	default:
+		return xdr.LedgerEntry{}, change.Type, false, fmt.Errorf("unable to extract ledger entry type from change")
+	}
 }

@@ -182,7 +182,7 @@ func (p *ContractCreationProcessor) processContractCreation(
 	// Create contract creation record
 	wasmID := ""
 	if wasm := createContractArgs.Executable.WasmHash; wasm != nil {
-		wasmID = fmt.Sprintf("%x", wasm)
+		wasmID = fmt.Sprintf("%x", *wasm)
 	}
 
 	creation := &ContractCreation{

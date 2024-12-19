@@ -14,12 +14,12 @@ import (
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
 )
 
-type BufferedStorageSourceAdapter struct {
-	config     BufferedStorageConfig
+type GCSBufferedStorageSourceAdapter struct {
+	config     GCSBufferedStorageConfig
 	processors []cdpProcessor.Processor
 }
 
-type BufferedStorageConfig struct {
+type GCSBufferedStorageConfig struct {
 	BucketName  string
 	BufferSize  uint32
 	NumWorkers  uint32
@@ -28,9 +28,10 @@ type BufferedStorageConfig struct {
 	Network     string
 	StartLedger uint32
 	EndLedger   uint32
+	AccessToken string
 }
 
-func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapter, error) {
+func NewGCSBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapter, error) {
 	// Helper function to safely convert interface{} to int
 	getIntValue := func(v interface{}) (int, bool) {
 		switch i := v.(type) {
@@ -54,6 +55,11 @@ func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapt
 		return nil, errors.New("invalid start_ledger value")
 	}
 	startLedger := uint32(startLedgerInt)
+
+	accessToken, ok := config["access_token"].(string)
+	if !ok {
+		return nil, errors.New("access_token must be specified")
+	}
 
 	bucketName, ok := config["bucket_name"].(string)
 	if !ok {
@@ -102,7 +108,7 @@ func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapt
 		}
 	}
 
-	bufferConfig := BufferedStorageConfig{
+	bufferConfig := GCSBufferedStorageConfig{
 		BucketName:  bucketName,
 		Network:     network,
 		BufferSize:  uint32(bufferSizeInt),
@@ -111,21 +117,22 @@ func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapt
 		RetryWait:   uint32(retryWaitInt),
 		StartLedger: startLedger,
 		EndLedger:   endLedger,
+		AccessToken: accessToken,
 	}
 
 	log.Printf("Parsed configuration: start_ledger=%d, end_ledger=%d, bucket=%s, network=%s",
 		startLedger, endLedger, bucketName, network)
 
-	return &BufferedStorageSourceAdapter{
+	return &GCSBufferedStorageSourceAdapter{
 		config: bufferConfig,
 	}, nil
 }
 
-func (adapter *BufferedStorageSourceAdapter) Subscribe(receiver cdpProcessor.Processor) {
+func (adapter *GCSBufferedStorageSourceAdapter) Subscribe(receiver cdpProcessor.Processor) {
 	adapter.processors = append(adapter.processors, receiver)
 }
 
-func (adapter *BufferedStorageSourceAdapter) Run(ctx context.Context) error {
+func (adapter *GCSBufferedStorageSourceAdapter) Run(ctx context.Context) error {
 	log.Printf("Starting BufferedStorageSourceAdapter from ledger %d", adapter.config.StartLedger)
 	if adapter.config.EndLedger > 0 {
 		log.Printf("Will process until ledger %d", adapter.config.EndLedger)
@@ -140,10 +147,11 @@ func (adapter *BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 	}
 
 	dataStoreConfig := datastore.DataStoreConfig{
-		Type:   "GCS",
+		Type:   "GCS_OAUTH",
 		Schema: schema,
 		Params: map[string]string{
 			"destination_bucket_path": adapter.config.BucketName,
+			"access_token":            adapter.config.AccessToken,
 		},
 	}
 
@@ -217,7 +225,7 @@ func (adapter *BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 	return nil
 }
 
-func (adapter *BufferedStorageSourceAdapter) processLedger(ctx context.Context, ledger xdr.LedgerCloseMeta) error {
+func (adapter *GCSBufferedStorageSourceAdapter) processLedger(ctx context.Context, ledger xdr.LedgerCloseMeta) error {
 	sequence := ledger.LedgerSequence()
 	log.Printf("Processing ledger %d", sequence)
 
@@ -235,6 +243,6 @@ func (adapter *BufferedStorageSourceAdapter) processLedger(ctx context.Context, 
 	return nil
 }
 
-func (adapter *BufferedStorageSourceAdapter) Close() error {
+func (adapter *GCSBufferedStorageSourceAdapter) Close() error {
 	return nil
 }

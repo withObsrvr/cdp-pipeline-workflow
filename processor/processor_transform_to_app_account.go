@@ -123,12 +123,12 @@ func (t *TransformToAppAccount) processPayment(ctx context.Context, op xdr.Payme
 	}
 
 	payment := AppPayment{
-		Timestamp:       fmt.Sprintf("%d", closeTime),
-		BuyerAccountId:  op.Destination.Address(),
-		SellerAccountId: sourceAccount,
-		AssetCode:       op.Asset.StringCanonical(),
-		Amount:          amount.String(op.Amount),
-		Type:            "payment",
+		Timestamp:            fmt.Sprintf("%d", closeTime),
+		SourceAccountId:      sourceAccount,
+		DestinationAccountId: op.Destination.Address(),
+		AssetCode:            op.Asset.StringCanonical(),
+		Amount:               amount.String(op.Amount),
+		Type:                 "payment",
 	}
 
 	// Marshal to JSON bytes
