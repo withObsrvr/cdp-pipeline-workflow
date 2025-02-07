@@ -21,14 +21,16 @@ type BufferedStorageSourceAdapter struct {
 }
 
 type BufferedStorageConfig struct {
-	BucketName  string
-	BufferSize  uint32
-	NumWorkers  uint32
-	RetryLimit  uint32
-	RetryWait   uint32
-	Network     string
-	StartLedger uint32
-	EndLedger   uint32
+	BucketName        string
+	BufferSize        uint32
+	NumWorkers        uint32
+	RetryLimit        uint32
+	RetryWait         uint32
+	Network           string
+	StartLedger       uint32
+	EndLedger         uint32
+	LedgersPerFile    uint32
+	FilesPerPartition uint32
 }
 
 func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapter, error) {
@@ -103,15 +105,27 @@ func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapt
 		}
 	}
 
+	ledgersPerFileInt, _ := getIntValue(config["ledgers_per_file"])
+	if ledgersPerFileInt == 0 {
+		ledgersPerFileInt = 64 // default value
+	}
+
+	filesPerPartitionInt, _ := getIntValue(config["files_per_partition"])
+	if filesPerPartitionInt == 0 {
+		filesPerPartitionInt = 10 // default value
+	}
+
 	bufferConfig := BufferedStorageConfig{
-		BucketName:  bucketName,
-		Network:     network,
-		BufferSize:  uint32(bufferSizeInt),
-		NumWorkers:  uint32(numWorkersInt),
-		RetryLimit:  uint32(retryLimitInt),
-		RetryWait:   uint32(retryWaitInt),
-		StartLedger: startLedger,
-		EndLedger:   endLedger,
+		BucketName:        bucketName,
+		Network:           network,
+		BufferSize:        uint32(bufferSizeInt),
+		NumWorkers:        uint32(numWorkersInt),
+		RetryLimit:        uint32(retryLimitInt),
+		RetryWait:         uint32(retryWaitInt),
+		StartLedger:       startLedger,
+		EndLedger:         endLedger,
+		LedgersPerFile:    uint32(ledgersPerFileInt),
+		FilesPerPartition: uint32(filesPerPartitionInt),
 	}
 
 	log.Printf("Parsed configuration: start_ledger=%d, end_ledger=%d, bucket=%s, network=%s",
@@ -136,8 +150,8 @@ func (adapter *BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 
 	// Create DataStore configuration
 	schema := datastore.DataStoreSchema{
-		LedgersPerFile:    uint32(1), // Process one ledger at a time for better control
-		FilesPerPartition: uint32(1),
+		LedgersPerFile:    adapter.config.LedgersPerFile,
+		FilesPerPartition: adapter.config.FilesPerPartition,
 	}
 
 	dataStoreConfig := datastore.DataStoreConfig{

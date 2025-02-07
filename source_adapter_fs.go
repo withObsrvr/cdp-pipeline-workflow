@@ -19,14 +19,16 @@ type FSBufferedStorageSourceAdapter struct {
 }
 
 type FSBufferedStorageConfig struct {
-	BasePath    string
-	BufferSize  uint32
-	NumWorkers  uint32
-	RetryLimit  uint32
-	RetryWait   uint32
-	Network     string
-	StartLedger uint32
-	EndLedger   uint32
+	BasePath          string
+	BufferSize        uint32
+	NumWorkers        uint32
+	RetryLimit        uint32
+	RetryWait         uint32
+	Network           string
+	StartLedger       uint32
+	EndLedger         uint32
+	LedgersPerFile    uint32
+	FilesPerPartition uint32
 }
 
 func NewFSBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapter, error) {
@@ -103,6 +105,18 @@ func NewFSBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAda
 		return nil, errors.New("end_ledger must be greater than start_ledger")
 	}
 
+	// Get LedgersPerFile with default
+	ledgersPerFileInt, _ := getIntValue(config["ledgers_per_file"])
+	if ledgersPerFileInt == 0 {
+		ledgersPerFileInt = 64 // default value
+	}
+
+	// Get FilesPerPartition with default
+	filesPerPartitionInt, _ := getIntValue(config["files_per_partition"])
+	if filesPerPartitionInt == 0 {
+		filesPerPartitionInt = 10 // default value
+	}
+
 	return &FSBufferedStorageSourceAdapter{
 		config: fsConfig,
 	}, nil
@@ -118,8 +132,8 @@ func (adapter *FSBufferedStorageSourceAdapter) Run(ctx context.Context) error {
 
 	// Create DataStore configuration
 	schema := datastore.DataStoreSchema{
-		LedgersPerFile:    uint32(1),
-		FilesPerPartition: uint32(1),
+		LedgersPerFile:    adapter.config.LedgersPerFile,
+		FilesPerPartition: adapter.config.FilesPerPartition,
 	}
 
 	log.Printf("Created schema with LedgersPerFile=%d, FilesPerPartition=%d",

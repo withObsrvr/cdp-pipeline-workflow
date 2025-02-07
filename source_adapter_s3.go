@@ -20,17 +20,19 @@ type S3BufferedStorageSourceAdapter struct {
 }
 
 type S3BufferedStorageConfig struct {
-	BucketName     string
-	Region         string
-	Endpoint       string
-	ForcePathStyle bool
-	BufferSize     uint32
-	NumWorkers     uint32
-	RetryLimit     uint32
-	RetryWait      uint32
-	Network        string
-	StartLedger    uint32
-	EndLedger      uint32
+	BucketName        string
+	Region            string
+	Endpoint          string
+	ForcePathStyle    bool
+	BufferSize        uint32
+	NumWorkers        uint32
+	RetryLimit        uint32
+	RetryWait         uint32
+	Network           string
+	StartLedger       uint32
+	EndLedger         uint32
+	LedgersPerFile    uint32
+	FilesPerPartition uint32
 }
 
 func NewS3BufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapter, error) {
@@ -108,19 +110,33 @@ func NewS3BufferedStorageSourceAdapter(config map[string]interface{}) (SourceAda
 		retryWaitInt = 5
 	}
 
+	// Get LedgersPerFile with default
+	ledgersPerFileInt, _ := getIntValue(config["ledgers_per_file"])
+	if ledgersPerFileInt == 0 {
+		ledgersPerFileInt = 64 // default value
+	}
+
+	// Get FilesPerPartition with default
+	filesPerPartitionInt, _ := getIntValue(config["files_per_partition"])
+	if filesPerPartitionInt == 0 {
+		filesPerPartitionInt = 10 // default value
+	}
+
 	return &S3BufferedStorageSourceAdapter{
 		config: S3BufferedStorageConfig{
-			BucketName:     bucketName,
-			Region:         region,
-			Endpoint:       endpoint,
-			ForcePathStyle: forcePathStyle,
-			BufferSize:     uint32(bufferSizeInt),
-			NumWorkers:     uint32(numWorkersInt),
-			RetryLimit:     uint32(retryLimitInt),
-			RetryWait:      uint32(retryWaitInt),
-			Network:        network,
-			StartLedger:    startLedger,
-			EndLedger:      endLedger,
+			BucketName:        bucketName,
+			Region:            region,
+			Endpoint:          endpoint,
+			ForcePathStyle:    forcePathStyle,
+			BufferSize:        uint32(bufferSizeInt),
+			NumWorkers:        uint32(numWorkersInt),
+			RetryLimit:        uint32(retryLimitInt),
+			RetryWait:         uint32(retryWaitInt),
+			Network:           network,
+			StartLedger:       startLedger,
+			EndLedger:         endLedger,
+			LedgersPerFile:    uint32(ledgersPerFileInt),
+			FilesPerPartition: uint32(filesPerPartitionInt),
 		},
 	}, nil
 }
@@ -138,8 +154,8 @@ func (adapter *S3BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 	}
 
 	schema := datastore.DataStoreSchema{
-		LedgersPerFile:    uint32(1), // Process one ledger at a time for better control
-		FilesPerPartition: uint32(64000),
+		LedgersPerFile:    adapter.config.LedgersPerFile,
+		FilesPerPartition: adapter.config.FilesPerPartition,
 	}
 
 	dataStoreConfig := datastore.DataStoreConfig{

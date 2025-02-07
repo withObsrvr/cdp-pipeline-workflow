@@ -19,15 +19,17 @@ type GCSBufferedStorageSourceAdapter struct {
 }
 
 type GCSBufferedStorageConfig struct {
-	BucketName  string
-	BufferSize  uint32
-	NumWorkers  uint32
-	RetryLimit  uint32
-	RetryWait   uint32
-	Network     string
-	StartLedger uint32
-	EndLedger   uint32
-	AccessToken string
+	BucketName        string
+	BufferSize        uint32
+	NumWorkers        uint32
+	RetryLimit        uint32
+	RetryWait         uint32
+	Network           string
+	StartLedger       uint32
+	EndLedger         uint32
+	AccessToken       string
+	LedgersPerFile    uint32
+	FilesPerPartition uint32
 }
 
 func NewGCSBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapter, error) {
@@ -91,6 +93,18 @@ func NewGCSBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAd
 		retryWaitInt = 5
 	}
 
+	// Get LedgersPerFile with default
+	ledgersPerFileInt, _ := getIntValue(config["ledgers_per_file"])
+	if ledgersPerFileInt == 0 {
+		ledgersPerFileInt = 64 // default value
+	}
+
+	// Get FilesPerPartition with default
+	filesPerPartitionInt, _ := getIntValue(config["files_per_partition"])
+	if filesPerPartitionInt == 0 {
+		filesPerPartitionInt = 10 // default value
+	}
+
 	// Get end ledger with same type handling as start ledger
 	endLedgerRaw, ok := config["end_ledger"]
 	var endLedger uint32
@@ -141,8 +155,8 @@ func (adapter *GCSBufferedStorageSourceAdapter) Run(ctx context.Context) error {
 
 	// Create DataStore configuration
 	schema := datastore.DataStoreSchema{
-		LedgersPerFile:    uint32(1), // Process one ledger at a time for better control
-		FilesPerPartition: uint32(64000),
+		LedgersPerFile:    adapter.config.LedgersPerFile,
+		FilesPerPartition: adapter.config.FilesPerPartition,
 	}
 
 	dataStoreConfig := datastore.DataStoreConfig{
