@@ -6,12 +6,11 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/withObsrvr/cdp-pipeline-workflow/cdp"
-	"github.com/withObsrvr/cdp-pipeline-workflow/ledgerbackend"
-
 	"github.com/stellar/go/xdr"
-	"github.com/withObsrvr/cdp-pipeline-workflow/datastore"
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
+	cdp "github.com/withObsrvr/stellar-cdp"
+	datastore "github.com/withObsrvr/stellar-datastore"
+	ledgerbackend "github.com/withObsrvr/stellar-ledgerbackend"
 )
 
 type GCSBufferedStorageSourceAdapter struct {
@@ -143,7 +142,7 @@ func (adapter *GCSBufferedStorageSourceAdapter) Run(ctx context.Context) error {
 	// Create DataStore configuration
 	schema := datastore.DataStoreSchema{
 		LedgersPerFile:    uint32(1), // Process one ledger at a time for better control
-		FilesPerPartition: uint32(1),
+		FilesPerPartition: uint32(64000),
 	}
 
 	dataStoreConfig := datastore.DataStoreConfig{

@@ -2,36 +2,38 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
 	"github.com/pkg/errors"
-	cdp "github.com/withObsrvr/stellar-cdp"
-	ledgerbackend "github.com/withObsrvr/stellar-ledgerbackend"
-
 	"github.com/stellar/go/xdr"
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
-
+	cdp "github.com/withObsrvr/stellar-cdp"
 	datastore "github.com/withObsrvr/stellar-datastore"
+	ledgerbackend "github.com/withObsrvr/stellar-ledgerbackend"
 )
 
-type BufferedStorageSourceAdapter struct {
-	config     BufferedStorageConfig
+type S3BufferedStorageSourceAdapter struct {
+	config     S3BufferedStorageConfig
 	processors []cdpProcessor.Processor
 }
 
-type BufferedStorageConfig struct {
-	BucketName  string
-	BufferSize  uint32
-	NumWorkers  uint32
-	RetryLimit  uint32
-	RetryWait   uint32
-	Network     string
-	StartLedger uint32
-	EndLedger   uint32
+type S3BufferedStorageConfig struct {
+	BucketName     string
+	Region         string
+	Endpoint       string
+	ForcePathStyle bool
+	BufferSize     uint32
+	NumWorkers     uint32
+	RetryLimit     uint32
+	RetryWait      uint32
+	Network        string
+	StartLedger    uint32
+	EndLedger      uint32
 }
 
-func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapter, error) {
+func NewS3BufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapter, error) {
 	// Helper function to safely convert interface{} to int
 	getIntValue := func(v interface{}) (int, bool) {
 		switch i := v.(type) {
@@ -45,7 +47,7 @@ func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapt
 		return 0, false
 	}
 
-	// Get start ledger with more flexible type handling
+	// Get required configuration values
 	startLedgerRaw, ok := config["start_ledger"]
 	if !ok {
 		return nil, errors.New("start_ledger must be specified")
@@ -56,9 +58,25 @@ func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapt
 	}
 	startLedger := uint32(startLedgerInt)
 
+	// Add after startLedger handling
+	endLedger := uint32(0)
+	endLedgerRaw, ok := config["end_ledger"]
+	if ok {
+		endLedgerInt, ok := getIntValue(endLedgerRaw)
+		if !ok {
+			return nil, errors.New("invalid end_ledger value")
+		}
+		endLedger = uint32(endLedgerInt)
+	}
+
 	bucketName, ok := config["bucket_name"].(string)
 	if !ok {
 		return nil, errors.New("bucket_name is missing")
+	}
+
+	region, ok := config["region"].(string)
+	if !ok {
+		return nil, errors.New("region must be specified")
 	}
 
 	network, ok := config["network"].(string)
@@ -66,7 +84,10 @@ func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapt
 		return nil, errors.New("network must be specified")
 	}
 
-	// Get other config values with defaults
+	// Optional configuration values with defaults
+	endpoint, _ := config["endpoint"].(string)
+	forcePathStyle, _ := config["force_path_style"].(bool)
+
 	bufferSizeInt, _ := getIntValue(config["buffer_size"])
 	if bufferSizeInt == 0 {
 		bufferSizeInt = 1024
@@ -87,64 +108,48 @@ func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapt
 		retryWaitInt = 5
 	}
 
-	// Get end ledger with same type handling as start ledger
-	endLedgerRaw, ok := config["end_ledger"]
-	var endLedger uint32
-	if ok {
-		endLedgerInt, ok := getIntValue(endLedgerRaw)
-		if !ok {
-			return nil, errors.New("invalid end_ledger value")
-		}
-		endLedger = uint32(endLedgerInt)
-
-		// Validate end ledger is greater than start ledger
-		if endLedger > 0 && endLedger < startLedger {
-			return nil, errors.New("end_ledger must be greater than start_ledger")
-		}
-	}
-
-	bufferConfig := BufferedStorageConfig{
-		BucketName:  bucketName,
-		Network:     network,
-		BufferSize:  uint32(bufferSizeInt),
-		NumWorkers:  uint32(numWorkersInt),
-		RetryLimit:  uint32(retryLimitInt),
-		RetryWait:   uint32(retryWaitInt),
-		StartLedger: startLedger,
-		EndLedger:   endLedger,
-	}
-
-	log.Printf("Parsed configuration: start_ledger=%d, end_ledger=%d, bucket=%s, network=%s",
-		startLedger, endLedger, bucketName, network)
-
-	return &BufferedStorageSourceAdapter{
-		config: bufferConfig,
+	return &S3BufferedStorageSourceAdapter{
+		config: S3BufferedStorageConfig{
+			BucketName:     bucketName,
+			Region:         region,
+			Endpoint:       endpoint,
+			ForcePathStyle: forcePathStyle,
+			BufferSize:     uint32(bufferSizeInt),
+			NumWorkers:     uint32(numWorkersInt),
+			RetryLimit:     uint32(retryLimitInt),
+			RetryWait:      uint32(retryWaitInt),
+			Network:        network,
+			StartLedger:    startLedger,
+			EndLedger:      endLedger,
+		},
 	}, nil
 }
 
-func (adapter *BufferedStorageSourceAdapter) Subscribe(receiver cdpProcessor.Processor) {
-	adapter.processors = append(adapter.processors, receiver)
+func (adapter *S3BufferedStorageSourceAdapter) Subscribe(processor cdpProcessor.Processor) {
+	adapter.processors = append(adapter.processors, processor)
 }
 
-func (adapter *BufferedStorageSourceAdapter) Run(ctx context.Context) error {
-	log.Printf("Starting BufferedStorageSourceAdapter from ledger %d", adapter.config.StartLedger)
+func (adapter *S3BufferedStorageSourceAdapter) Run(ctx context.Context) error {
+	log.Printf("Starting S3BufferedStorageSourceAdapter from ledger %d", adapter.config.StartLedger)
 	if adapter.config.EndLedger > 0 {
 		log.Printf("Will process until ledger %d", adapter.config.EndLedger)
 	} else {
 		log.Printf("Will process indefinitely from start ledger")
 	}
 
-	// Create DataStore configuration
 	schema := datastore.DataStoreSchema{
 		LedgersPerFile:    uint32(1), // Process one ledger at a time for better control
-		FilesPerPartition: uint32(1),
+		FilesPerPartition: uint32(64000),
 	}
 
 	dataStoreConfig := datastore.DataStoreConfig{
-		Type:   "GCS",
+		Type:   "S3",
 		Schema: schema,
 		Params: map[string]string{
-			"destination_bucket_path": adapter.config.BucketName,
+			"bucket_name":      adapter.config.BucketName,
+			"region":           adapter.config.Region,
+			"endpoint":         adapter.config.Endpoint,
+			"force_path_style": fmt.Sprintf("%v", adapter.config.ForcePathStyle),
 		},
 	}
 
@@ -160,6 +165,25 @@ func (adapter *BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 		BufferedStorageConfig: bufferedConfig,
 	}
 
+	// Create datastore config
+	datastoreConfig := datastore.DataStoreConfig{
+		Type: "S3",
+		Params: map[string]string{
+			"bucket_name":      adapter.config.BucketName,
+			"region":           adapter.config.Region,
+			"endpoint":         adapter.config.Endpoint,
+			"force_path_style": fmt.Sprintf("%v", adapter.config.ForcePathStyle),
+		},
+		Schema: schema,
+	}
+
+	// Create datastore
+	store, err := datastore.NewDataStore(ctx, datastoreConfig)
+	if err != nil {
+		return errors.Wrap(err, "failed to create S3 datastore")
+	}
+	defer store.Close()
+
 	// Create ledger range based on configuration
 	var ledgerRange ledgerbackend.Range
 	if adapter.config.EndLedger > 0 {
@@ -173,11 +197,11 @@ func (adapter *BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 
 	log.Printf("Starting ledger processing with range: %v", ledgerRange)
 
-	processedLedgers := 0
+	var processedLedgers uint32
 	lastLogTime := time.Now()
 	lastLedgerTime := time.Now()
 
-	err := cdp.ApplyLedgerMetadata(
+	err = cdp.ApplyLedgerMetadata(
 		ledgerRange,
 		publisherConfig,
 		ctx,
@@ -186,7 +210,7 @@ func (adapter *BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 			ledgerProcessingTime := currentTime.Sub(lastLedgerTime)
 			lastLedgerTime = currentTime
 
-			log.Printf("Starting to process ledger %d (took %v since last ledger)",
+			log.Printf("Processing ledger %d (took %v since last ledger)",
 				lcm.LedgerSequence(), ledgerProcessingTime)
 
 			if err := adapter.processLedger(ctx, lcm); err != nil {
@@ -197,7 +221,7 @@ func (adapter *BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 			processedLedgers++
 			if time.Since(lastLogTime) > time.Second*10 {
 				rate := float64(processedLedgers) / time.Since(lastLogTime).Seconds()
-				log.Printf("Processed %d ledgers so far (%.2f ledgers/sec)",
+				log.Printf("Processed %d ledgers (%.2f ledgers/sec)",
 					processedLedgers, rate)
 				lastLogTime = time.Now()
 			}
@@ -207,35 +231,22 @@ func (adapter *BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 	)
 
 	if err != nil {
-		log.Printf("Pipeline error: %v", err)
-		return err
+		return errors.Wrap(err, "pipeline error")
 	}
 
-	duration := time.Since(lastLogTime)
-	rate := float64(processedLedgers) / duration.Seconds()
-	log.Printf("Pipeline completed successfully. Processed %d ledgers in %v (%.2f ledgers/sec)",
-		processedLedgers, duration, rate)
 	return nil
 }
 
-func (adapter *BufferedStorageSourceAdapter) processLedger(ctx context.Context, ledger xdr.LedgerCloseMeta) error {
+func (adapter *S3BufferedStorageSourceAdapter) processLedger(ctx context.Context, ledger xdr.LedgerCloseMeta) error {
 	sequence := ledger.LedgerSequence()
-	log.Printf("Processing ledger %d", sequence)
-
 	for _, processor := range adapter.processors {
-
 		if err := processor.Process(ctx, cdpProcessor.Message{Payload: ledger}); err != nil {
-			log.Printf("Error processing ledger %d in processor %T: %v",
-				sequence, processor, err)
-			return errors.Wrap(err, "error in processor")
+			return errors.Wrapf(err, "error processing ledger %d", sequence)
 		}
-		log.Printf("Successfully processed ledger %d in processor %T",
-			sequence, processor)
 	}
-
 	return nil
 }
 
-func (adapter *BufferedStorageSourceAdapter) Close() error {
+func (adapter *S3BufferedStorageSourceAdapter) Close() error {
 	return nil
 }

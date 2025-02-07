@@ -74,6 +74,10 @@ func createSourceAdapter(sourceConfig SourceConfig) (SourceAdapter, error) {
 		return NewSorobanSourceAdapter(sourceConfig.Config)
 	case "GCSBufferedStorageSourceAdapter":
 		return NewGCSBufferedStorageSourceAdapter(sourceConfig.Config)
+	case "FSBufferedStorageSourceAdapter":
+		return NewFSBufferedStorageSourceAdapter(sourceConfig.Config)
+	case "S3BufferedStorageSourceAdapter":
+		return NewS3BufferedStorageSourceAdapter(sourceConfig.Config)
 	// Add more source types as needed
 	default:
 		return nil, fmt.Errorf("unsupported source type: %s", sourceConfig.Type)

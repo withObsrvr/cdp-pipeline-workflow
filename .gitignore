@@ -18,6 +18,8 @@ cdp-pipeline-workflow.pdf
 *.xlsx
 *.secret.yaml
 *.duckdb
+stellar-datastore.md
+stellar-galexie.md
 
 # Dependency directories (remove the comment below to include it)
 vendor/
