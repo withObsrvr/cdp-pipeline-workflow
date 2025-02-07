@@ -203,6 +203,8 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSavePaymentsToRedis(consumerConfig.Config)
 	case "SaveLatestLedgerToRedis":
 		return consumer.NewSaveLatestLedgerRedis(consumerConfig.Config)
+	case "SaveLatestLedgerToExcel":
+		return consumer.NewSaveLatestLedgerToExcel(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}

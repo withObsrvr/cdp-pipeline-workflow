@@ -5,24 +5,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/withObsrvr/cdp-pipeline-workflow/processor"
-	"github.com/xuri/excelize/v2"
+	"github.com/withObsrvr/cdp-pipeline-workflow/utils"
 )
 
 type SaveToExcel struct {
 	filePath   string
+	writer     *utils.ExcelWriter
 	processors []processor.Processor
 }
 
 func NewSaveToExcel(config map[string]interface{}) (*SaveToExcel, error) {
 	filePath, ok := config["file_path"].(string)
 	if !ok {
-		return nil, fmt.Errorf("invalid configuration for SaveToExcel: missing 'file_path'")
+		return nil, fmt.Errorf("invalid configuration: missing 'file_path'")
 	}
 
-	return &SaveToExcel{filePath: filePath}, nil
+	headers := []string{"Timestamp", "BuyerAccountId", "SellerAccountId", "AssetCode", "Amount", "Memo"}
+	writer, err := utils.NewExcelWriter(filePath, "Payments", headers)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Excel writer: %w", err)
+	}
+
+	return &SaveToExcel{
+		filePath: filePath,
+		writer:   writer,
+	}, nil
 }
 
 func (c *SaveToExcel) Subscribe(processor processor.Processor) {
@@ -31,20 +40,6 @@ func (c *SaveToExcel) Subscribe(processor processor.Processor) {
 
 func (c *SaveToExcel) Process(ctx context.Context, msg processor.Message) error {
 	log.Printf("Processing message in SaveToExcel")
-	f, err := excelize.OpenFile(c.filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			f = excelize.NewFile()
-			f.SetSheetName("Sheet1", "Payments")
-			headers := []string{"Timestamp", "BuyerAccountId", "SellerAccountId", "AssetCode", "Amount"}
-			for i, h := range headers {
-				cell, _ := excelize.CoordinatesToCellName(i+1, 1)
-				f.SetCellValue("Payments", cell, h)
-			}
-		} else {
-			return fmt.Errorf("error opening Excel file: %w", err)
-		}
-	}
 
 	var payment AppPayment
 	payloadBytes, ok := msg.Payload.([]byte)
@@ -56,12 +51,6 @@ func (c *SaveToExcel) Process(ctx context.Context, msg processor.Message) error 
 		return err
 	}
 
-	rows, err := f.GetRows("Payments")
-	if err != nil {
-		return err
-	}
-	rowNum := len(rows) + 1
-
 	values := []interface{}{
 		payment.Timestamp,
 		payment.BuyerAccountId,
@@ -70,16 +59,22 @@ func (c *SaveToExcel) Process(ctx context.Context, msg processor.Message) error 
 		payment.Amount,
 		payment.Memo,
 	}
-	for i, v := range values {
-		cell, _ := excelize.CoordinatesToCellName(i+1, rowNum)
-		f.SetCellValue("Payments", cell, v)
+
+	if err := c.writer.AppendRow(values); err != nil {
+		return fmt.Errorf("failed to append row: %w", err)
 	}
 
-	if err := f.SaveAs(c.filePath); err != nil {
-		return err
+	if err := c.writer.Save(); err != nil {
+		return fmt.Errorf("failed to save Excel file: %w", err)
 	}
 
-	// log.Printf("Payment saved to Excel: %v", payment)
+	return nil
+}
+
+func (c *SaveToExcel) Close() error {
+	if c.writer != nil {
+		return c.writer.Close()
+	}
 	return nil
 }
 
