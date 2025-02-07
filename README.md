@@ -4,7 +4,10 @@ A data pipeline for processing Stellar blockchain data, with support for payment
 
 ## Features
 
-- Processes Stellar blockchain data from Google Cloud Storage
+- Processes Stellar blockchain data from multiple sources:
+  - Amazon S3
+  - Google Cloud Storage (with OAuth or Service Account)
+  - Local filesystem
 - Transforms operations into standardized formats
 - Supports both payment and create account operations(WIP)
 - Outputs to multiple destinations (MongoDB, ZeroMQ)
@@ -12,42 +15,59 @@ A data pipeline for processing Stellar blockchain data, with support for payment
 ## Prerequisites
 
 - Go 1.22 or later
-- Access to Google Cloud Storage
+- Access to one of:
+  - Amazon S3
+  - Google Cloud Storage
+  - Local filesystem
 - MongoDB instance
 - ZeroMQ (optional)
 
 ## Configuration
 
-The pipeline is configured using YAML files. Example configuration:
+The pipeline is configured using YAML files. Example configurations:
+
+### S3 Source Configuration
 
 ```yaml
 pipeline:
   name: PaymentPipeline
   source:
-    type: BufferedStorageSourceAdapter
+    type: S3BufferedStorageSourceAdapter
+    config:
+      bucket_name: "your-bucket"
+      region: "us-east-1"
+      network: "testnet"
+      buffer_size: 640
+      num_workers: 10
+      start_ledger: 2
+      end_ledger: 1000  # optional
+      ledgers_per_file: 64  # optional, default: 64
+      files_per_partition: 10  # optional, default: 10
+```
+
+### GCS OAuth Configuration
+```yaml
+pipeline:
+  name: PaymentPipeline
+  source:
+    type: GCSBufferedStorageSourceAdapter
     config:
       bucket_name: "your-bucket"
       network: "testnet"
       buffer_size: 640
       num_workers: 10
-      start_ledger: 539328
+      start_ledger: 2
+      access_token: "your-oauth-token"
+      ledgers_per_file: 64
+      files_per_partition: 10
 ```
 
-Save to MongoDB example configuration. Needs Google Cloud Storage bucket name, Mongodb URI, mongodb database name and mongodb collection name.
-
+### MongoDB Consumer Configuration
 ```yaml
 pipelines:
   PaymentPipeline:
     source:
-      type: BufferedStorageSourceAdapter
-      config:
-        bucket_name: "bucket-name"
-        network: "testnet"
-        buffer_size: 640
-        num_workers: 10
-        retry_limit: 3
-        retry_wait: 5
-        start_ledger: 539328
+      # ... source configuration as above ...
     processors:
       - type: TransformToAppPayment
         config:
@@ -69,15 +89,41 @@ go get github.com/withObsrvr/cdp-pipeline-workflow
 
 ## Usage
 
+For GCS authentication:
 ```bash
 export GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
-./cdp-pipeline-workflow
+./cdp-pipeline-workflow -config /path/to/config.yaml
 ```
 
-or
-
+For S3 authentication:
 ```bash
-GOOGLE_APPLICATION_CREDENTIALS=$HOME/.config/gcloud/application_default_credentials.json ./cdp-pipeline-workflow
+export AWS_ACCESS_KEY_ID=your_access_key
+export AWS_SECRET_ACCESS_KEY=your_secret_key
+./cdp-pipeline-workflow -config /path/to/config.yaml
 ```
 
+For GCS OAuth authentication, you'll need to:
 
+1. Create a Google Cloud OAuth 2.0 Client ID:
+   - Go to Google Cloud Console -> APIs & Services -> Credentials
+   - Create a new OAuth 2.0 Client ID
+   - Download the client configuration file
+
+2. Get an OAuth token using the Google OAuth 2.0 Playground:
+   - Visit https://developers.google.com/oauthplayground/
+   - Configure OAuth 2.0 with your client ID and secret
+   - Select and authorize the "Google Cloud Storage API v1"
+   - Exchange authorization code for tokens
+   - Copy the Access Token
+
+3. Use the token in your configuration:
+
+```yaml
+pipeline:
+  source:
+    type: GCSBufferedStorageSourceAdapter
+    config:
+      access_token: "your-access-token"
+``` 
+
+Note: OAuth tokens are temporary and will expire. For production use, consider using service account authentication instead.

@@ -122,15 +122,17 @@ func NewGCSBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAd
 	}
 
 	bufferConfig := GCSBufferedStorageConfig{
-		BucketName:  bucketName,
-		Network:     network,
-		BufferSize:  uint32(bufferSizeInt),
-		NumWorkers:  uint32(numWorkersInt),
-		RetryLimit:  uint32(retryLimitInt),
-		RetryWait:   uint32(retryWaitInt),
-		StartLedger: startLedger,
-		EndLedger:   endLedger,
-		AccessToken: accessToken,
+		BucketName:        bucketName,
+		Network:           network,
+		BufferSize:        uint32(bufferSizeInt),
+		NumWorkers:        uint32(numWorkersInt),
+		RetryLimit:        uint32(retryLimitInt),
+		RetryWait:         uint32(retryWaitInt),
+		StartLedger:       startLedger,
+		EndLedger:         endLedger,
+		AccessToken:       accessToken,
+		LedgersPerFile:    uint32(ledgersPerFileInt),
+		FilesPerPartition: uint32(filesPerPartitionInt),
 	}
 
 	log.Printf("Parsed configuration: start_ledger=%d, end_ledger=%d, bucket=%s, network=%s",

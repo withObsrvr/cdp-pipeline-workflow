@@ -146,6 +146,8 @@ func (adapter *S3BufferedStorageSourceAdapter) Subscribe(processor cdpProcessor.
 }
 
 func (adapter *S3BufferedStorageSourceAdapter) Run(ctx context.Context) error {
+	startTime := time.Now()
+
 	log.Printf("Starting S3BufferedStorageSourceAdapter from ledger %d", adapter.config.StartLedger)
 	if adapter.config.EndLedger > 0 {
 		log.Printf("Will process until ledger %d", adapter.config.EndLedger)
@@ -249,6 +251,11 @@ func (adapter *S3BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 	if err != nil {
 		return errors.Wrap(err, "pipeline error")
 	}
+
+	duration := time.Since(startTime)
+	ledgersPerSecond := float64(processedLedgers) / duration.Seconds()
+	log.Printf("Pipeline completed successfully. Processed %d ledgers in %v (%.2f ledgers/sec)",
+		processedLedgers, duration, ledgersPerSecond)
 
 	return nil
 }
