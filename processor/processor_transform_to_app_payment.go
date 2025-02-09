@@ -11,10 +11,8 @@ import (
 
 	"github.com/stellar/go/amount"
 	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/ingest/ledger"
 	"github.com/stellar/go/xdr"
-	"github.com/withObsrvr/cdp-pipeline-workflow/ingest"
-	"github.com/withObsrvr/cdp-pipeline-workflow/ledger"
-	"github.com/withObsrvr/cdp-pipeline-workflow/utils"
 )
 
 type TransformToAppPayment struct {
@@ -321,7 +319,7 @@ func (t *TransformToAppPayment) createAppPaymentFromClaimableBalance(
 	var claimedAmount xdr.Int64
 	var asset xdr.Asset
 	var creator string
-	
+
 	for _, change := range changes {
 		if xdr.LedgerEntryChangeType(change.Type) != xdr.LedgerEntryChangeTypeLedgerEntryRemoved {
 			continue

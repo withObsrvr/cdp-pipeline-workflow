@@ -8,8 +8,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/withObsrvr/cdp-pipeline-workflow/ingest"
-	"github.com/withObsrvr/cdp-pipeline-workflow/ledger"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/ingest/ledger"
 	"github.com/stellar/go/xdr"
 )
 
