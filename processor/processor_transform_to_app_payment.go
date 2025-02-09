@@ -7,10 +7,13 @@ import (
 	"io"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/stellar/go/amount"
 	"github.com/stellar/go/ingest"
 	"github.com/stellar/go/xdr"
+	"github.com/withObsrvr/cdp-pipeline-workflow/ingest"
+	"github.com/withObsrvr/cdp-pipeline-workflow/ledger"
 	"github.com/withObsrvr/cdp-pipeline-workflow/utils"
 )
 
@@ -73,15 +76,17 @@ func (t *TransformToAppPayment) Process(ctx context.Context, msg Message) error 
 
 	ledgerTxReader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(t.networkPassphrase, ledgerCloseMeta)
 	if err != nil {
-		return fmt.Errorf("failed to create reader for ledger %v: %w", ledgerCloseMeta.LedgerSequence(), err)
+		return fmt.Errorf("failed to create reader for ledger %v: %w", ledger.Sequence(ledgerCloseMeta), err)
 	}
 	defer ledgerTxReader.Close()
 
-	rawCloseTime, err := utils.CloseTime(ledgerCloseMeta)
-	if err != nil {
-		return fmt.Errorf("error getting close time: %w", err)
-	}
-	closeTime := uint(rawCloseTime.Unix())
+	// Use the new ledger utility function to get a proper timestamp.
+	closedAt := ledger.ClosedAt(ledgerCloseMeta)
+	closedAtStr := closedAt.UTC().Format(time.RFC3339)
+
+	// Optionally, you could also extract the ledger hash if needed.
+	ledgerHash := ledger.Hash(ledgerCloseMeta)
+
 	// Process all transactions in the ledger
 	for {
 		tx, err := ledgerTxReader.Read()
@@ -109,28 +114,32 @@ func (t *TransformToAppPayment) Process(ctx context.Context, msg Message) error 
 
 			switch op.Body.Type {
 			case xdr.OperationTypePayment:
-				payment = t.createAppPaymentFromPaymentOp(op.Body.MustPaymentOp(), opSourceAccount, closeTime, ledgerSeq, memo)
+				payment = t.createAppPaymentFromPaymentOp(op.Body.MustPaymentOp(), opSourceAccount, uint(closedAt.Unix()), ledgerSeq, memo)
 
 			case xdr.OperationTypePathPaymentStrictReceive:
-				payment = t.createAppPaymentFromPathPaymentStrictReceiveOp(op.Body.MustPathPaymentStrictReceiveOp(), opSourceAccount, closeTime, ledgerSeq, memo)
+				payment = t.createAppPaymentFromPathPaymentStrictReceiveOp(op.Body.MustPathPaymentStrictReceiveOp(), opSourceAccount, uint(closedAt.Unix()), ledgerSeq, memo)
 
 			case xdr.OperationTypePathPaymentStrictSend:
-				payment = t.createAppPaymentFromPathPaymentStrictSendOp(op.Body.MustPathPaymentStrictSendOp(), opSourceAccount, closeTime, ledgerSeq, memo)
+				payment = t.createAppPaymentFromPathPaymentStrictSendOp(op.Body.MustPathPaymentStrictSendOp(), opSourceAccount, uint(closedAt.Unix()), ledgerSeq, memo)
 
 			case xdr.OperationTypeAccountMerge:
-				payment, err = t.createAppPaymentFromAccountMerge(tx, i, opSourceAccount, closeTime, ledgerSeq, memo)
+				payment, err = t.createAppPaymentFromAccountMerge(tx, i, opSourceAccount, uint(closedAt.Unix()), ledgerSeq, memo)
 				if err != nil {
 					return fmt.Errorf("error processing account merge: %w", err)
 				}
 
 			case xdr.OperationTypeClaimClaimableBalance:
-				payment, err = t.createAppPaymentFromClaimableBalance(tx, i, opSourceAccount, closeTime, ledgerSeq, memo)
+				payment, err = t.createAppPaymentFromClaimableBalance(tx, i, opSourceAccount, uint(closedAt.Unix()), ledgerSeq, memo)
 				if err != nil {
 					return fmt.Errorf("error processing claimable balance: %w", err)
 				}
 			}
 
 			if payment != nil {
+				// You can attach additional ledger metadata to your payment if desired.
+				payment.LedgerHash = ledgerHash
+				payment.ClosedAt = closedAtStr
+
 				if err := t.forwardAppPayment(ctx, *payment); err != nil {
 					return fmt.Errorf("error forwarding payment: %w", err)
 				}
@@ -158,6 +167,17 @@ func extractMemo(envelope xdr.TransactionEnvelope) string {
 	}
 }
 
+func getAccountAddress(account *xdr.MuxedAccount) string {
+	if account == nil {
+		return ""
+	}
+	addr, err := account.GetAddress()
+	if err == nil && addr != "" {
+		return addr
+	}
+	return account.Address()
+}
+
 func (t *TransformToAppPayment) createAppPaymentFromPaymentOp(
 	paymentOp xdr.PaymentOp,
 	sourceAccount *xdr.MuxedAccount,
@@ -167,8 +187,8 @@ func (t *TransformToAppPayment) createAppPaymentFromPaymentOp(
 ) *AppPayment {
 	return &AppPayment{
 		Timestamp:            fmt.Sprintf("%d", closeTime),
-		SourceAccountId:      paymentOp.Destination.Address(),
-		DestinationAccountId: sourceAccount.Address(),
+		SourceAccountId:      getAccountAddress(&paymentOp.Destination),
+		DestinationAccountId: getAccountAddress(sourceAccount),
 		AssetCode:            paymentOp.Asset.StringCanonical(),
 		Amount:               amount.String(paymentOp.Amount),
 		Type:                 "payment",
@@ -293,7 +313,6 @@ func (t *TransformToAppPayment) createAppPaymentFromClaimableBalance(
 	memo string,
 ) (*AppPayment, error) {
 	claimOp := tx.Envelope.Operations()[opIndex].Body.MustClaimClaimableBalanceOp()
-
 	changes, err := tx.GetOperationChanges(uint32(opIndex))
 	if err != nil {
 		return nil, fmt.Errorf("error getting operation changes: %w", err)
@@ -302,9 +321,9 @@ func (t *TransformToAppPayment) createAppPaymentFromClaimableBalance(
 	var claimedAmount xdr.Int64
 	var asset xdr.Asset
 	var creator string
-
+	
 	for _, change := range changes {
-		if change.Type != xdr.LedgerEntryType(xdr.LedgerEntryChangeTypeLedgerEntryRemoved) {
+		if xdr.LedgerEntryChangeType(change.Type) != xdr.LedgerEntryChangeTypeLedgerEntryRemoved {
 			continue
 		}
 
@@ -438,4 +457,12 @@ type AppPayment struct {
 	Type                 string `json:"type"`
 	Memo                 string `json:"memo"`
 	LedgerSequence       uint32 `json:"ledger_sequence"`
+	// New fields
+	FeeCharged      string `json:"fee_charged,omitempty"`
+	FeePayer        string `json:"fee_payer,omitempty"`
+	Successful      bool   `json:"successful"`
+	ResultCode      string `json:"result_code,omitempty"`
+	TransactionHash string `json:"transaction_hash,omitempty"`
+	LedgerHash      string `json:"ledger_hash,omitempty"`
+	ClosedAt        string `json:"closed_at,omitempty"`
 }

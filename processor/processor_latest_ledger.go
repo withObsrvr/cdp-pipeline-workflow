@@ -8,7 +8,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/stellar/go/ingest"
+	"github.com/withObsrvr/cdp-pipeline-workflow/ingest"
+	"github.com/withObsrvr/cdp-pipeline-workflow/ledger"
 	"github.com/stellar/go/xdr"
 )
 
@@ -66,12 +67,12 @@ func (p *LatestLedgerProcessor) Process(ctx context.Context, msg Message) error 
 	}
 	defer txReader.Close()
 
-	// Initialize metrics
+	// Use ledger helper functions for improved extraction
 	metrics := LatestLedger{
-		Sequence: ledgerCloseMeta.LedgerSequence(),
-		Hash:     ledgerCloseMeta.LedgerHash().HexString(),
-		BaseFee:  uint32(ledgerCloseMeta.LedgerHeaderHistoryEntry().Header.BaseFee),
-		ClosedAt: time.Unix(int64(ledgerCloseMeta.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime), 0),
+		Sequence: ledger.Sequence(ledgerCloseMeta),
+		Hash:     ledger.Hash(ledgerCloseMeta),
+		BaseFee:  ledger.BaseFee(ledgerCloseMeta),
+		ClosedAt: ledger.ClosedAt(ledgerCloseMeta),
 	}
 
 	// Process each transaction
@@ -96,11 +97,11 @@ func (p *LatestLedgerProcessor) Process(ctx context.Context, msg Message) error 
 		}
 
 		// Track Soroban metrics
-		if hasSorobanData := hasSorobanTransaction(tx); hasSorobanData {
+		if hasSorobanTransaction(tx) {
 			metrics.SorobanTxCount++
-			sorobanMetrics := getSorobanMetrics(tx)
-			metrics.TotalSorobanFees += sorobanMetrics.resourceFee
-			metrics.TotalResourceInstructions += uint64(sorobanMetrics.instructions)
+			sMetrics := getSorobanMetrics(tx)
+			metrics.TotalSorobanFees += sMetrics.resourceFee
+			metrics.TotalResourceInstructions += uint64(sMetrics.instructions)
 		}
 	}
 
@@ -147,7 +148,7 @@ func hasSorobanTransaction(tx ingest.LedgerTransaction) bool {
 
 func getSorobanMetrics(tx ingest.LedgerTransaction) sorobanMetrics {
 	var sorobanData xdr.SorobanTransactionData
-	var metrics sorobanMetrics
+	var sMetrics sorobanMetrics
 
 	switch tx.Envelope.Type {
 	case xdr.EnvelopeTypeEnvelopeTypeTx:
@@ -156,10 +157,10 @@ func getSorobanMetrics(tx ingest.LedgerTransaction) sorobanMetrics {
 		sorobanData, _ = tx.Envelope.FeeBump.Tx.InnerTx.V1.Tx.Ext.GetSorobanData()
 	}
 
-	metrics.resourceFee = int64(sorobanData.ResourceFee)
-	metrics.instructions = uint32(sorobanData.Resources.Instructions)
-	metrics.readBytes = uint32(sorobanData.Resources.ReadBytes)
-	metrics.writeBytes = uint32(sorobanData.Resources.WriteBytes)
+	sMetrics.resourceFee = int64(sorobanData.ResourceFee)
+	sMetrics.instructions = uint32(sorobanData.Resources.Instructions)
+	sMetrics.readBytes = uint32(sorobanData.Resources.ReadBytes)
+	sMetrics.writeBytes = uint32(sorobanData.Resources.WriteBytes)
 
-	return metrics
+	return sMetrics
 }
