@@ -7,9 +7,11 @@ import (
 	"io"
 	"log"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/stellar/go/amount"
+	"github.com/stellar/go/ingest/ledger"
 	"github.com/stellar/go/xdr"
 
 	"github.com/stellar/go/ingest"
@@ -24,6 +26,14 @@ const (
 	Week  AnalyticsPeriod = "7d"
 	Month AnalyticsPeriod = "30d"
 )
+
+// TradeWindowEntry is used to store individual trade contributions within a sliding window.
+type TradeWindowEntry struct {
+	Timestamp     time.Time
+	Price         float64
+	BaseVolume    float64
+	CounterVolume float64
+}
 
 // MarketMetrics represents market analysis data for a trading pair
 type MarketMetrics struct {
@@ -45,6 +55,9 @@ type MarketMetrics struct {
 	AskVolume        float64   `json:"ask_volume"`
 	Spread           float64   `json:"spread"`
 	SpreadMidPoint   float64   `json:"spread_midpoint"`
+
+	// TradesWindow holds individual trade entries in the last 24 hours.
+	TradesWindow []TradeWindowEntry `json:"-"`
 }
 
 // MarketMetricsProcessor processes ledger data into market metrics
@@ -52,6 +65,7 @@ type MarketMetricsProcessor struct {
 	processors        []Processor
 	networkPassphrase string
 	metrics           map[string]*MarketMetrics // key is pair_name
+	metricsMu         sync.Mutex                // protects metrics
 }
 
 // NewMarketMetricsProcessor creates a new market metrics processor
@@ -91,7 +105,9 @@ func (p *MarketMetricsProcessor) Process(ctx context.Context, msg Message) error
 		}
 
 		for _, op := range tx.Envelope.Operations() {
-			trade, err := p.extractTradeFromOperation(op, tx, int64(ledgerCloseMeta.LedgerSequence()))
+			// Get the ledger close time from the ledger meta
+			ledgerCloseTime := ledger.ClosedAt(ledgerCloseMeta)
+			trade, err := p.extractTradeFromOperation(op, tx, ledgerCloseTime.Unix())
 			if err != nil {
 				log.Printf("Error extracting trade: %v", err)
 				continue
@@ -100,8 +116,7 @@ func (p *MarketMetricsProcessor) Process(ctx context.Context, msg Message) error
 				metrics := p.calculateMetrics(trade, op.Body.Type)
 				if metrics != nil {
 					if err := p.processMetrics(ctx, metrics); err != nil {
-						log.Printf("Error processing metrics for pair %s: %v",
-							metrics.PairName, err)
+						log.Printf("Error processing metrics for pair %s: %v", metrics.PairName, err)
 					}
 				}
 			}
@@ -116,65 +131,109 @@ func (p *MarketMetricsProcessor) Subscribe(processor Processor) {
 	p.processors = append(p.processors, processor)
 }
 
+// calculateMetrics aggregates trade data using a sliding window (last 24 hours).
+// It purges old data, recalculates aggregate metrics, and logs processing time for instrumentation.
 func (p *MarketMetricsProcessor) calculateMetrics(trade *AppTrade, opType xdr.OperationType) *MarketMetrics {
+	// Begin instrumentation time.
+	startTime := time.Now()
+
 	if trade.SellAsset == "" || trade.BuyAsset == "" {
-		log.Printf("Warning: Invalid trade assets - Sell: %s, Buy: %s",
-			trade.SellAsset, trade.BuyAsset)
+		log.Printf("Warning: Invalid trade assets - Sell: %s, Buy: %s", trade.SellAsset, trade.BuyAsset)
 		return nil
 	}
 
 	pairName := fmt.Sprintf("%s/%s", trade.SellAsset, trade.BuyAsset)
+	p.metricsMu.Lock()
+	defer p.metricsMu.Unlock()
 	metrics, exists := p.metrics[pairName]
 	if !exists {
 		metrics = &MarketMetrics{
-			PairName:   pairName,
-			BaseAsset:  trade.SellAsset,
-			QuoteAsset: trade.BuyAsset,
-			Type:       "trade", // Set default type
+			PairName:     pairName,
+			BaseAsset:    trade.SellAsset,
+			QuoteAsset:   trade.BuyAsset,
+			Type:         "trade",
+			TradesWindow: make([]TradeWindowEntry, 0),
 		}
 		p.metrics[pairName] = metrics
 	}
 
-	// Convert Unix timestamp to time.Time
-	timestampInt, err := strconv.ParseInt(trade.Timestamp, 10, 64)
+	// Parse trade timestamp (stored as RFC3339).
+	tradeTime, err := time.Parse(time.RFC3339, trade.Timestamp)
 	if err != nil {
-		log.Printf("Error parsing timestamp: %v", err)
+		log.Printf("Error parsing trade timestamp: %v", err)
 		return nil
 	}
 
-	// Create UTC timestamp
-	tradeTime := time.Unix(timestampInt, 0).UTC()
-
-	price := trade.Price
+	// Parse volume and price.
 	baseAmount, _ := strconv.ParseFloat(trade.SellAmount, 64)
-	counterAmount := baseAmount * price
+	counterAmount := baseAmount * trade.Price
 
-	// Update metrics
-	metrics.TradeCount24h++
-	metrics.BaseVolume24h += baseAmount
-	metrics.CounterVolume24h += counterAmount
+	// Append new trade into the sliding window.
+	newEntry := TradeWindowEntry{
+		Timestamp:     tradeTime,
+		Price:         trade.Price,
+		BaseVolume:    baseAmount,
+		CounterVolume: counterAmount,
+	}
+	metrics.TradesWindow = append(metrics.TradesWindow, newEntry)
 
-	if metrics.Open24h == 0 {
-		metrics.Open24h = price
+	// Purge trades older than 24 hours relative to current tradeTime.
+	windowDuration := 24 * time.Hour
+	cutoff := tradeTime.Add(-windowDuration)
+	var updatedWindow []TradeWindowEntry
+	for _, entry := range metrics.TradesWindow {
+		if entry.Timestamp.After(cutoff) {
+			updatedWindow = append(updatedWindow, entry)
+		}
+	}
+	metrics.TradesWindow = updatedWindow
+
+	// Recompute metrics based on the sliding window.
+	var open, close, high, low, sumBase, sumCounter float64
+	var count int64
+	if len(metrics.TradesWindow) > 0 {
+		count = int64(len(metrics.TradesWindow))
+		open = metrics.TradesWindow[0].Price                            // oldest trade
+		close = metrics.TradesWindow[len(metrics.TradesWindow)-1].Price // newest trade
+		high = open
+		low = open
+		for _, entry := range metrics.TradesWindow {
+			if entry.Price > high {
+				high = entry.Price
+			}
+			if entry.Price < low {
+				low = entry.Price
+			}
+			sumBase += entry.BaseVolume
+			sumCounter += entry.CounterVolume
+		}
 	}
 
-	if price > metrics.High24h {
-		metrics.High24h = price
+	// Update aggregated metrics.
+	metrics.TradeCount24h = count
+	metrics.Open24h = open
+	metrics.Close24h = close
+	metrics.High24h = high
+	metrics.Low24h = low
+	metrics.BaseVolume24h = sumBase
+	metrics.CounterVolume24h = sumCounter
+	if open > 0 {
+		metrics.Change24h = ((close - open) / open) * 100
+	} else {
+		metrics.Change24h = 0
 	}
-
-	if price < metrics.Low24h || metrics.Low24h == 0 {
-		metrics.Low24h = price
-	}
-
-	metrics.Close24h = price
 	metrics.LastTradeAt = tradeTime
 	metrics.GeneratedAt = time.Now()
-	metrics.Change24h = ((metrics.Close24h - metrics.Open24h) / metrics.Open24h) * 100
+	metrics.Spread = high - low
+	if high > 0 && low > 0 {
+		metrics.SpreadMidPoint = (high + low) / 2
+	}
 
-	// Calculate spread and mid point
-	metrics.Spread = metrics.High24h - metrics.Low24h
-	if metrics.High24h > 0 && metrics.Low24h > 0 {
-		metrics.SpreadMidPoint = (metrics.High24h + metrics.Low24h) / 2
+	// Instrumentation: measure processing duration.
+	elapsed := time.Since(startTime)
+	// Log if processing took longer than 10 milliseconds (adjust threshold as needed).
+	if elapsed > 10*time.Millisecond {
+		log.Printf("calculateMetrics for pair %s took %s", pairName, elapsed)
 	}
 
 	return metrics
@@ -203,7 +262,7 @@ func (p *MarketMetricsProcessor) processMetrics(ctx context.Context, metrics *Ma
 		Type:           metrics.Type,
 	}
 
-	// Validate required fields
+	// Validate required fields.
 	if analytics.TradePair == "" || analytics.TradePair == "/" {
 		return fmt.Errorf("missing trade_pair in data")
 	}
@@ -222,8 +281,10 @@ func (p *MarketMetricsProcessor) processMetrics(ctx context.Context, metrics *Ma
 }
 
 func (p *MarketMetricsProcessor) extractTradeFromOperation(op xdr.Operation, tx ingest.LedgerTransaction, closeTime int64) (*AppTrade, error) {
+	// Create a trade using the new ledger close time. We convert the Unix timestamp
+	// into an RFC3339-formatted string so that downstream processors can parse it.
 	trade := &AppTrade{
-		Timestamp: fmt.Sprintf("%d", closeTime),
+		Timestamp: time.Unix(closeTime, 0).UTC().Format(time.RFC3339),
 		Type:      "trade",
 		SellerId:  tx.Envelope.SourceAccount().ToAccountId().Address(),
 	}
@@ -237,7 +298,6 @@ func (p *MarketMetricsProcessor) extractTradeFromOperation(op xdr.Operation, tx 
 		trade.BuyAmount = amount.String(offer.BuyAmount)
 		trade.Price = float64(offer.Price.N) / float64(offer.Price.D)
 		trade.OrderbookID = fmt.Sprintf("%d", offer.OfferId)
-
 	case xdr.OperationTypeManageSellOffer:
 		offer := op.Body.ManageSellOfferOp
 		trade.SellAsset = offer.Selling.StringCanonical()
@@ -246,12 +306,11 @@ func (p *MarketMetricsProcessor) extractTradeFromOperation(op xdr.Operation, tx 
 		trade.BuyAmount = amount.String(offer.Amount)
 		trade.Price = float64(offer.Price.N) / float64(offer.Price.D)
 		trade.OrderbookID = fmt.Sprintf("%d", offer.OfferId)
-
 	default:
 		return nil, nil
 	}
 
-	// Extract asset details
+	// Extract asset details (if needed).
 	sellAssetDetails, err := parseAssetDetails(trade.SellAsset)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing sell asset: %w", err)

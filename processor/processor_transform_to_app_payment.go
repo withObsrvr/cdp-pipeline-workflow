@@ -425,11 +425,17 @@ func (t *TransformToAppPayment) shouldProcessPayment(payment AppPayment) bool {
 }
 
 func (t *TransformToAppPayment) forwardAppPayment(ctx context.Context, payment AppPayment) error {
-	// Check if payment meets filter criteria
+	// Start instrumentation timer.
+	startTime := time.Now()
+
+	// Check if payment meets filter criteria.
 	if !t.shouldProcessPayment(payment) {
-		log.Printf("Skipping payment that doesn't meet filter criteria")
+		log.Printf("Skipping payment that doesn't meet filter criteria: %+v", payment)
 		return nil
 	}
+
+	// Mark the payment as successful since it passed all processing steps.
+	payment.Successful = true
 
 	jsonBytes, err := json.Marshal(payment)
 	if err != nil {
@@ -440,6 +446,14 @@ func (t *TransformToAppPayment) forwardAppPayment(ctx context.Context, payment A
 		if err := processor.Process(ctx, Message{Payload: jsonBytes}); err != nil {
 			return fmt.Errorf("error in processor chain: %w", err)
 		}
+	}
+
+	elapsed := time.Since(startTime)
+	// Log the processing time if it exceeds 10ms (adjust threshold as needed)
+	if elapsed > 10*time.Millisecond {
+		log.Printf("forwardAppPayment took %s for payment: %+v", elapsed, payment)
+	} else {
+		log.Printf("Processed payment in %s", elapsed)
 	}
 
 	log.Printf("Successfully forwarded payment: %+v", payment)

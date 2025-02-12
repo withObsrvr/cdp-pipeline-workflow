@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -131,7 +132,6 @@ func (p *TransformToTickerAssetProcessor) extractAssetData(op xdr.Operation, tx 
 		LastChecked:     time.Now(),
 		FirstSeenLedger: ledgerSeqNum,
 	}
-
 	var err error
 	switch op.Body.Type {
 	case xdr.OperationTypeSetTrustLineFlags:
@@ -151,13 +151,18 @@ func (p *TransformToTickerAssetProcessor) extractAssetData(op xdr.Operation, tx 
 		asset.Type = "claimable_balance"
 		err = p.populateFromClaimableBalance(op, asset)
 	default:
-		return nil, fmt.Errorf("unsupported operation type: %s", op.Body.Type)
+		s := strings.ToLower(cleanString(op.Body.Type.String()))
+		if s == "create_claimable_balance" {
+			asset.OperationType = "create_claimable_balance"
+			asset.Type = "claimable_balance"
+			err = p.populateFromClaimableBalance(op, asset)
+		} else {
+			return nil, fmt.Errorf("unsupported operation type: %s", s)
+		}
 	}
-
 	if err != nil {
 		return nil, err
 	}
-
 	return asset, nil
 }
 
@@ -203,7 +208,40 @@ func (p *TransformToTickerAssetProcessor) populateFromChangeTrust(op xdr.Operati
 		asset.Code = "XLM"
 		asset.AssetType = "native"
 		asset.Issuer = ""
+	case xdr.AssetTypeAssetTypePoolShare:
+		// Handle pool shares by deriving a descriptive pool id from liquidity pool parameters.
+		asset.AssetType = "liquidity_pool_share"
+		if changeTrust.Line.LiquidityPool != nil {
+			lp := changeTrust.Line.LiquidityPool
+
+			// Extract AssetA code from ConstantProduct parameters.
+			var assetACode string
+			switch lp.ConstantProduct.AssetA.Type {
+			case xdr.AssetTypeAssetTypeNative:
+				assetACode = "XLM"
+			default:
+				assetACode = cleanString(lp.ConstantProduct.AssetA.GetCode())
+			}
+
+			// Extract AssetB code from ConstantProduct parameters.
+			var assetBCode string
+			switch lp.ConstantProduct.AssetB.Type {
+			case xdr.AssetTypeAssetTypeNative:
+				assetBCode = "XLM"
+			default:
+				assetBCode = cleanString(lp.ConstantProduct.AssetB.GetCode())
+			}
+
+			// Create a descriptive liquidity pool identifier.
+			// For example, it will look like: "lp:XLM-USD:30"
+			asset.Issuer = fmt.Sprintf("lp:%s-%s:%d", assetACode, assetBCode, lp.ConstantProduct.Fee)
+			asset.Code = "POOL"
+		} else {
+			asset.Code = "POOL"
+			asset.Issuer = "unknown-pool"
+		}
 	default:
+		// For the remaining asset types, use the standard conversion.
 		xdrAsset := changeTrust.Line.ToAsset()
 		if xdrAsset == (xdr.Asset{}) {
 			return fmt.Errorf("invalid asset in change trust operation")
@@ -212,7 +250,6 @@ func (p *TransformToTickerAssetProcessor) populateFromChangeTrust(op xdr.Operati
 		asset.Issuer = xdrAsset.GetIssuer()
 		asset.AssetType = getAssetTypeString(changeTrust.Line.Type)
 	}
-
 	return nil
 }
 
@@ -240,7 +277,9 @@ func (p *TransformToTickerAssetProcessor) populateFromPayment(op xdr.Operation, 
 }
 
 func (p *TransformToTickerAssetProcessor) populateFromClaimableBalance(op xdr.Operation, asset *TickerAsset) error {
+	log.Println("populateFromClaimableBalance called")
 	claimableBalance := op.Body.CreateClaimableBalanceOp
+	log.Printf("claimableBalance asset type: %v", claimableBalance.Asset.Type)
 
 	switch claimableBalance.Asset.Type {
 	case xdr.AssetTypeAssetTypeNative:

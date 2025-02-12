@@ -205,6 +205,8 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveLatestLedgerRedis(consumerConfig.Config)
 	case "SaveLatestLedgerToExcel":
 		return consumer.NewSaveLatestLedgerToExcel(consumerConfig.Config)
+	case "AnthropicClaude":
+		return consumer.NewAnthropicClaudeConsumer(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}

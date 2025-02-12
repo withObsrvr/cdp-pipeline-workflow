@@ -115,7 +115,7 @@ func (p *TransformToMarketCapProcessor) Process(ctx context.Context, msg Message
 }
 
 // Helper function to parse asset string into code and issuer
-func parseAsset(asset string) (code string, issuer string) {
+func parseMarketAsset(asset string) (code string, issuer string) {
 	parts := strings.Split(asset, ":")
 	if len(parts) == 1 {
 		return parts[0], "" // Native asset
@@ -124,7 +124,7 @@ func parseAsset(asset string) (code string, issuer string) {
 }
 
 func (p *TransformToMarketCapProcessor) processFromMetrics(ctx context.Context, metrics *MarketMetrics) *MarketCapAnalytics {
-	baseAsset, baseIssuer := parseAsset(metrics.BaseAsset)
+	baseAsset, baseIssuer := parseMarketAsset(metrics.BaseAsset)
 
 	return &MarketCapAnalytics{
 		Asset:          baseAsset,

@@ -12,6 +12,7 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/stellar/go/amount"
 	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/ingest/ledger"
 	"github.com/stellar/go/xdr"
 )
 
@@ -28,12 +29,12 @@ type TokenPrice struct {
 	LowPrice24h       float64   `json:"low_price_24h"`
 	PriceChange24h    float64   `json:"price_change_24h"`
 	Type              string    `json:"type"`
-	MarketCap         float64   `json:"market_cap"`
-	CirculatingSupply float64   `json:"circulating_supply"`
-	Rank              int       `json:"rank"`
-	PriceChange1h     float64   `json:"price_change_1h"`
-	PriceChange7d     float64   `json:"price_change_7d"`
-	SparklineData     []float64 `json:"sparkline_data"`
+	MarketCap         float64   `json:"market_cap,omitempty"`
+	CirculatingSupply float64   `json:"circulating_supply,omitempty"`
+	Rank              int       `json:"rank,omitempty"`
+	PriceChange1h     float64   `json:"price_change_1h,omitempty"`
+	PriceChange7d     float64   `json:"price_change_7d,omitempty"`
+	SparklineData     []float64 `json:"sparkline_data,omitempty"`
 }
 
 type RedisConfig struct {
@@ -70,25 +71,17 @@ type ProcessorMetrics struct {
 	BatchSize         int
 }
 
-type TradeValidationError struct {
-	Field string
-	Error error
-}
-
-type PriceMetrics struct {
-	Volume24h      float64
-	NumTrades24h   int64
-	HighPrice24h   float64
-	LowPrice24h    float64
-	PriceChange24h float64
-	FirstPrice     float64
-	LastPrice      float64
-}
-
+// NewTransformToTokenPrice creates a new TransformToTokenPrice processor.
+// It uses the provided config to initialize Redis and other settings.
 func NewTransformToTokenPrice(config map[string]interface{}) (*TransformToTokenPrice, error) {
 	redisConfig, err := parseRedisConfig(config)
 	if err != nil {
 		return nil, err
+	}
+
+	networkPassphrase, ok := config["network_passphrase"].(string)
+	if !ok || networkPassphrase == "" {
+		return nil, fmt.Errorf("missing network_passphrase in configuration")
 	}
 
 	redisClient := redis.NewClient(&redis.Options{
@@ -100,46 +93,56 @@ func NewTransformToTokenPrice(config map[string]interface{}) (*TransformToTokenP
 		ReadTimeout: redisConfig.ReadTimeout,
 	})
 
-	// Test connection
 	ctx := context.Background()
 	if err := redisClient.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %v", err)
 	}
 
 	return &TransformToTokenPrice{
-		networkPassphrase: redisConfig.KeyPrefix,
+		networkPassphrase: networkPassphrase,
 		redisClient:       redisClient,
 	}, nil
 }
 
+// Subscribe adds a downstream processor to which the token price messages will be forwarded.
 func (t *TransformToTokenPrice) Subscribe(processor Processor) {
 	t.processors = append(t.processors, processor)
 }
 
+// Process reads ledger transactions, extracts trade data from offer management operations,
+// calculates the token price metrics, and forwards the price information to downstream processors.
 func (t *TransformToTokenPrice) Process(ctx context.Context, msg Message) error {
 	log.Printf("Processing message in TransformToTokenPrice")
+
 	ledgerCloseMeta, err := ExtractLedgerCloseMeta(msg)
 	if err != nil {
 		return fmt.Errorf("failed to extract ledger close meta: %w", err)
 	}
 
+	closeTime := ledger.ClosedAt(ledgerCloseMeta)
+
 	ledgerTxReader, err := CreateTransactionReader(ledgerCloseMeta, t.networkPassphrase)
 	if err != nil {
 		return fmt.Errorf("failed to create transaction reader: %w", err)
 	}
+	defer ledgerTxReader.Close()
 
-	closeTime := uint32(ledgerCloseMeta.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime)
-
-	var transaction ingest.LedgerTransaction
+	// Loop over each transaction in the ledger.
 	for {
-		transaction, err = ledgerTxReader.Read()
+		transaction, err := ledgerTxReader.Read()
 		if err == io.EOF {
 			break
 		}
+		// Instead of aborting on an "unknown tx hash" error, log and skip the offending transaction.
 		if err != nil {
+			if strings.Contains(err.Error(), "unknown tx hash") {
+				log.Printf("Skipping transaction due to unknown tx hash error: %v", err)
+				continue
+			}
 			return fmt.Errorf("error reading transaction: %w", err)
 		}
 
+		// Iterate over operations to find trade offers.
 		for _, op := range transaction.Envelope.Operations() {
 			switch op.Body.Type {
 			case xdr.OperationTypeManageBuyOffer, xdr.OperationTypeManageSellOffer:
@@ -149,17 +152,13 @@ func (t *TransformToTokenPrice) Process(ctx context.Context, msg Message) error 
 					continue
 				}
 
-				// Validate trade data
 				if trade.SellAsset == "" || trade.BuyAsset == "" ||
 					trade.SellAmount == "" || trade.BuyAmount == "" {
-					return fmt.Errorf("invalid trade data: missing required fields")
+					log.Printf("Skipping trade due to missing required fields")
+					continue
 				}
 
-				// Calculate price from trade
-				ts, err := parseTimestamp(trade.Timestamp)
-				if err != nil {
-					return fmt.Errorf("error parsing timestamp: %w", err)
-				}
+				timestamp := closeTime
 
 				// Extract asset details
 				baseAsset, baseIssuer := parseAsset(trade.SellAsset)
@@ -167,45 +166,50 @@ func (t *TransformToTokenPrice) Process(ctx context.Context, msg Message) error 
 
 				log.Printf("Processing trade for price calculation: %+v", trade)
 
-				// Get 24h metrics from Redis
+				// Build the Redis key for historical prices and query the 24h window.
 				tsKey := fmt.Sprintf("%sprice:%s:%s:history", "stellar:", baseAsset, quoteAsset)
-
-				// Get last 24h window
 				now := time.Now()
 				start := now.Add(-24 * time.Hour).Unix()
 
-				// Get all prices in last 24h
-				prices, err := t.redisClient.ZRangeByScoreWithScores(ctx, tsKey, &redis.ZRangeBy{
+				redisCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				prices, err := t.redisClient.ZRangeByScoreWithScores(redisCtx, tsKey, &redis.ZRangeBy{
 					Min: fmt.Sprintf("%d", start),
 					Max: fmt.Sprintf("%d", now.Unix()),
 				}).Result()
+				cancel()
+				if err != nil {
+					t.metrics.RedisErrors++
+					log.Printf("Error fetching historical prices from Redis key %s: %v", tsKey, err)
+				}
 
+				// Calculate simple metrics: volume, high, and low prices.
 				var volume24h float64
-				var highPrice24h float64 = trade.Price // Start with current price
-				var lowPrice24h float64 = trade.Price  // Start with current price
+				highPrice24h := trade.Price
+				lowPrice24h := trade.Price
 
-				// Get current trade volume
 				sellAmount, _ := strconv.ParseFloat(trade.SellAmount, 64)
-				volume24h = sellAmount // Initialize with current trade volume
+				volume24h = sellAmount
 
-				// Add historical volumes
-				if len(prices) > 0 {
-					// Iterate through prices to find high/low
-					for _, p := range prices {
-						price := p.Member.(string)
-						priceFloat, _ := strconv.ParseFloat(price, 64)
-
-						if priceFloat > highPrice24h {
-							highPrice24h = priceFloat
-						}
-						if priceFloat < lowPrice24h {
-							lowPrice24h = priceFloat
-						}
+				for _, p := range prices {
+					priceStr, ok := p.Member.(string)
+					if !ok {
+						continue
+					}
+					priceFloat, err := strconv.ParseFloat(priceStr, 64)
+					if err != nil {
+						continue
+					}
+					if priceFloat > highPrice24h {
+						highPrice24h = priceFloat
+					}
+					if priceFloat < lowPrice24h {
+						lowPrice24h = priceFloat
 					}
 				}
 
+				// Prepare the token price payload.
 				payload := &TokenPrice{
-					Timestamp:    ts,
+					Timestamp:    timestamp,
 					BaseAsset:    baseAsset,
 					BaseIssuer:   baseIssuer,
 					QuoteAsset:   quoteAsset,
@@ -217,11 +221,11 @@ func (t *TransformToTokenPrice) Process(ctx context.Context, msg Message) error 
 					Type:         "token_price",
 				}
 
+				// Forward the token price to downstream processors.
 				if err := ForwardToProcessors(ctx, payload, t.processors); err != nil {
 					return fmt.Errorf("error forwarding token price: %w", err)
 				}
 				log.Printf("Successfully forwarded trade: %+v", trade)
-
 			}
 		}
 	}
@@ -229,13 +233,14 @@ func (t *TransformToTokenPrice) Process(ctx context.Context, msg Message) error 
 	return nil
 }
 
-func (t *TransformToTokenPrice) extractTradeFromOperation(op xdr.Operation, tx ingest.LedgerTransaction, closeTime uint32) (*AppTrade, error) {
+// extractTradeFromOperation converts offer management operations into a standardized AppTrade.
+// It supports both ManageBuyOffer and ManageSellOffer types.
+func (t *TransformToTokenPrice) extractTradeFromOperation(op xdr.Operation, tx ingest.LedgerTransaction, closeTime time.Time) (*AppTrade, error) {
 	trade := &AppTrade{
-		Timestamp: fmt.Sprintf("%d", closeTime),
+		Timestamp: fmt.Sprintf("%d", closeTime.Unix()),
 		Type:      "trade",
 		SellerId:  tx.Envelope.SourceAccount().ToAccountId().Address(),
 	}
-
 	switch op.Body.Type {
 	case xdr.OperationTypeManageBuyOffer:
 		offer := op.Body.MustManageBuyOfferOp()
@@ -243,145 +248,42 @@ func (t *TransformToTokenPrice) extractTradeFromOperation(op xdr.Operation, tx i
 		trade.BuyAsset = offer.Buying.StringCanonical()
 		trade.SellAmount = amount.String(offer.BuyAmount)
 		trade.BuyAmount = amount.String(offer.BuyAmount)
+		if offer.Price.D == 0 {
+			return nil, fmt.Errorf("invalid price denominator is 0")
+		}
 		trade.Price = float64(offer.Price.N) / float64(offer.Price.D)
 		trade.OrderbookID = fmt.Sprintf("%d", offer.OfferId)
-
 	case xdr.OperationTypeManageSellOffer:
 		offer := op.Body.MustManageSellOfferOp()
 		trade.SellAsset = offer.Selling.StringCanonical()
 		trade.BuyAsset = offer.Buying.StringCanonical()
 		trade.SellAmount = amount.String(offer.Amount)
 		trade.BuyAmount = amount.String(offer.Amount)
+		if offer.Price.D == 0 {
+			return nil, fmt.Errorf("invalid price denominator is 0")
+		}
 		trade.Price = float64(offer.Price.N) / float64(offer.Price.D)
 		trade.OrderbookID = fmt.Sprintf("%d", offer.OfferId)
-
 	default:
-		return nil, nil
+		return nil, fmt.Errorf("unsupported operation type: %v", op.Body.Type)
 	}
-
-	// Validate trade data
-	if trade.SellAsset == "" || trade.BuyAsset == "" ||
-		trade.SellAmount == "" || trade.BuyAmount == "" {
-		return nil, nil // Skip invalid trades without error
+	if trade.SellAsset == "" || trade.BuyAsset == "" {
+		return nil, fmt.Errorf("trade asset details missing")
 	}
-
-	// Parse asset details
-	sellAssetDetails, err := t.parseAssetDetails(trade.SellAsset)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing sell asset: %w", err)
-	}
-	trade.SellAssetDetails = sellAssetDetails
-
-	buyAssetDetails, err := t.parseAssetDetails(trade.BuyAsset)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing buy asset: %w", err)
-	}
-	trade.BuyAssetDetails = buyAssetDetails
-
 	return trade, nil
 }
 
-func (t *TransformToTokenPrice) storeAssetInfo(ctx context.Context, asset AssetDetails) error {
-	key := fmt.Sprintf("stellar:asset:%s:%s", asset.Code, asset.Issuer)
-
-	err := t.redisClient.HSet(ctx, key,
-		map[string]interface{}{
-			"code":         asset.Code,
-			"issuer":       asset.Issuer,
-			"type":         asset.Type,
-			"last_updated": time.Now().Format(time.RFC3339),
-		}).Err()
-	if err != nil {
-		return err
-	}
-
-	// Update assets set
-	assetKey := fmt.Sprintf("%s:%s", asset.Code, asset.Issuer)
-	return t.redisClient.SAdd(ctx, "stellar:assets", assetKey).Err()
-}
-
-func (t *TransformToTokenPrice) getAssetStats(ctx context.Context, code, issuer string) (*AssetStats, error) {
-	key := fmt.Sprintf("stellar:asset:%s:%s", code, issuer)
-
-	data, err := t.redisClient.HGetAll(ctx, key).Result()
-	if err != nil {
-		return nil, err
-	}
-
-	stats := &AssetStats{}
-	stats.CirculatingSupply, _ = strconv.ParseFloat(data["circulating_supply"], 64)
-	stats.NumHolders, _ = strconv.ParseUint(data["num_holders"], 10, 64)
-	stats.TotalSupply, _ = strconv.ParseFloat(data["total_supply"], 64)
-	stats.BalanceAuthorized, _ = strconv.ParseFloat(data["balance_authorized"], 64)
-	stats.BalanceAuthLiabilities, _ = strconv.ParseFloat(data["balance_auth_liabilities"], 64)
-
-	return stats, nil
-}
-
-func (t *TransformToTokenPrice) parseAssetDetails(assetStr string) (AssetDetails, error) {
+// parseAsset splits an asset string into its code and issuer parts.
+// It expects the asset string to be formatted as "CODE:ISSUER". If no colon is found, the entire string is returned as the asset code.
+func parseAsset(assetStr string) (string, string) {
 	parts := strings.Split(assetStr, ":")
-
-	details := AssetDetails{}
-
-	if len(parts) == 1 && parts[0] == "native" {
-		details.Code = "XLM"
-		details.Type = "native"
-	} else if len(parts) == 2 {
-		details.Code = parts[0]
-		details.Issuer = parts[1]
-		details.Type = "credit_alphanum4"
-		if len(parts[0]) > 4 {
-			details.Type = "credit_alphanum12"
-		}
-	} else {
-		return details, fmt.Errorf("invalid asset format: %s", assetStr)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
 	}
-
-	return details, nil
+	return assetStr, ""
 }
 
-func (t *TransformToTokenPrice) GetMetrics() ProcessorMetrics {
-	return t.metrics
-}
-
-func (t *TransformToTokenPrice) get24hMetrics(ctx context.Context, baseAsset, quoteAsset string, tradeTime time.Time) (*PriceMetrics, error) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	tsKey := fmt.Sprintf("%sprice:%s:%s:history", "stellar:", baseAsset, quoteAsset)
-	start := tradeTime.Add(-24 * time.Hour).Unix()
-	end := tradeTime.Unix()
-
-	prices, err := t.redisClient.ZRangeByScoreWithScores(timeoutCtx, tsKey, &redis.ZRangeBy{
-		Min: fmt.Sprintf("%d", start),
-		Max: fmt.Sprintf("%d", end),
-	}).Result()
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get 24h metrics: %w", err)
-	}
-
-	// Process prices and return metrics
-	return calculatePriceMetrics(prices), nil
-}
-
-func (t *TransformToTokenPrice) validateTrade(trade *AppTrade) error {
-	var validationErrors []TradeValidationError
-
-	if trade.SellAsset == "" {
-		validationErrors = append(validationErrors, TradeValidationError{
-			Field: "SellAsset",
-			Error: fmt.Errorf("sell asset is required"),
-		})
-	}
-	// Add other validations...
-
-	if len(validationErrors) > 0 {
-		return fmt.Errorf("trade validation failed: %v", validationErrors)
-	}
-	return nil
-}
-
+// Cleanup closes the Redis connection.
 func (t *TransformToTokenPrice) Cleanup(ctx context.Context) error {
 	if t.redisClient != nil {
 		if err := t.redisClient.Close(); err != nil {
@@ -435,46 +337,4 @@ func parseRedisConfig(config map[string]interface{}) (RedisConfig, error) {
 	redisConfig.ReadTimeout = 5 * time.Second // default timeout
 
 	return redisConfig, nil
-}
-
-func calculatePriceMetrics(prices []redis.Z) *PriceMetrics {
-	metrics := &PriceMetrics{
-		NumTrades24h: int64(len(prices)),
-	}
-
-	if len(prices) == 0 {
-		return metrics
-	}
-
-	// Initialize with first price
-	firstPrice, _ := strconv.ParseFloat(prices[0].Member.(string), 64)
-	metrics.FirstPrice = firstPrice
-	metrics.HighPrice24h = firstPrice
-	metrics.LowPrice24h = firstPrice
-
-	// Process all prices
-	for _, p := range prices {
-		price, _ := strconv.ParseFloat(p.Member.(string), 64)
-
-		// Update high/low
-		if price > metrics.HighPrice24h {
-			metrics.HighPrice24h = price
-		}
-		if price < metrics.LowPrice24h {
-			metrics.LowPrice24h = price
-		}
-
-		// Add to volume (assuming score is volume)
-		metrics.Volume24h += p.Score
-	}
-
-	// Get last price and calculate change
-	lastPrice, _ := strconv.ParseFloat(prices[len(prices)-1].Member.(string), 64)
-	metrics.LastPrice = lastPrice
-
-	if metrics.FirstPrice > 0 {
-		metrics.PriceChange24h = ((lastPrice - metrics.FirstPrice) / metrics.FirstPrice) * 100
-	}
-
-	return metrics
 }

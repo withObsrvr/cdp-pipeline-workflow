@@ -101,10 +101,9 @@ func (r *SaveToRedis) Process(ctx context.Context, msg processor.Message) error 
 		return fmt.Errorf("error unmarshaling payload: %w", err)
 	}
 
-	// Get operation type from operation_type field
+	// Get operation type from operation_type field (or fallback to the older "type")
 	operationType, ok := data["operation_type"].(string)
 	if !ok || operationType == "" {
-		// Fallback to type field for backward compatibility
 		operationType, ok = data["type"].(string)
 		if !ok || operationType == "" {
 			return fmt.Errorf("missing operation type in payload")
@@ -125,6 +124,8 @@ func (r *SaveToRedis) Process(ctx context.Context, msg processor.Message) error 
 		return r.processOffer(ctx, data)
 	case "set_trust_line_flags":
 		return r.processSetTrustLineFlags(ctx, data)
+	case "create_claimable_balance":
+		return r.processClaimableBalance(ctx, data)
 	case "asset_stats":
 		return r.handleAssetStats(ctx, data)
 	default:
@@ -507,6 +508,38 @@ func (r *SaveToRedis) processSetTrustLineFlags(ctx context.Context, data map[str
 	}
 	_, err := pipe.Exec(ctx)
 	return err
+}
+
+func (r *SaveToRedis) processClaimableBalance(ctx context.Context, data map[string]interface{}) error {
+	// Extract required fields
+	code, ok := data["code"].(string)
+	if !ok || code == "" {
+		return fmt.Errorf("missing or invalid asset code in claimable balance data")
+	}
+	issuer, _ := data["issuer"].(string) // Issuer might be empty for native assets
+
+	// Create Redis key similar to other asset processors
+	key := fmt.Sprintf("%sasset:%s:%s", r.keyPrefix, code, issuer)
+
+	// Prepare the data to store in Redis.
+	redisData := map[string]interface{}{
+		"asset_code":     code,
+		"asset_issuer":   issuer,
+		"asset_type":     data["asset_type"],
+		"operation_type": "create_claimable_balance",
+		"amount":         data["amount"],
+		"last_updated":   time.Now().Format(time.RFC3339),
+		// Add any additional fields you might need
+	}
+
+	pipe := r.client.Pipeline()
+	pipe.HSet(ctx, key, redisData)
+	pipe.Expire(ctx, key, r.ttl)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("error executing Redis pipeline for create_claimable_balance: %w", err)
+	}
+
+	return nil
 }
 
 func (r *SaveToRedis) storeJSON(ctx context.Context, key string, data interface{}) error {
