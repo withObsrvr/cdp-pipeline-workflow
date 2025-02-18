@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/stellar/go/ingest"
@@ -57,7 +58,7 @@ func (p *LatestLedgerProcessor) Process(ctx context.Context, msg Message) error 
 		return fmt.Errorf("expected xdr.LedgerCloseMeta, got %T", msg.Payload)
 	}
 
-	// Create transaction reader
+	// Create a transaction reader using the network passphrase.
 	txReader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(
 		p.networkPassphrase,
 		ledgerCloseMeta,
@@ -67,7 +68,7 @@ func (p *LatestLedgerProcessor) Process(ctx context.Context, msg Message) error 
 	}
 	defer txReader.Close()
 
-	// Use ledger helper functions for improved extraction
+	// Extract basic ledger fields using helper functions.
 	metrics := LatestLedger{
 		Sequence: ledger.Sequence(ledgerCloseMeta),
 		Hash:     ledger.Hash(ledgerCloseMeta),
@@ -75,17 +76,23 @@ func (p *LatestLedgerProcessor) Process(ctx context.Context, msg Message) error 
 		ClosedAt: ledger.ClosedAt(ledgerCloseMeta),
 	}
 
-	// Process each transaction
+	// Process each transaction. If a transaction cannot be read due to an "unknown tx hash" error,
+	// we log a warning and skip it.
 	for {
 		tx, err := txReader.Read()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
+			// Check if the error is due to an unknown transaction hash.
+			if strings.Contains(err.Error(), "unknown tx hash") {
+				log.Printf("Warning: skipping transaction due to error: %v", err)
+				continue
+			}
 			return fmt.Errorf("error reading transaction: %v", err)
 		}
 
-		// Update basic transaction metrics
+		// Update metrics based on transaction data.
 		metrics.TransactionCount++
 		metrics.OperationCount += len(tx.Envelope.Operations())
 		metrics.TotalFeeCharged += int64(tx.Result.Result.FeeCharged)
@@ -96,7 +103,7 @@ func (p *LatestLedgerProcessor) Process(ctx context.Context, msg Message) error 
 			metrics.FailedTxCount++
 		}
 
-		// Track Soroban metrics
+		// Process Soroban metrics, if present.
 		if hasSorobanTransaction(tx) {
 			metrics.SorobanTxCount++
 			sMetrics := getSorobanMetrics(tx)
@@ -117,7 +124,7 @@ func (p *LatestLedgerProcessor) Process(ctx context.Context, msg Message) error 
 		float64(metrics.SuccessfulTxCount)/float64(metrics.TransactionCount)*100,
 	)
 
-	// Forward to next processors
+	// Forward to the next set of processors.
 	for _, processor := range p.processors {
 		if err := processor.Process(ctx, Message{Payload: jsonBytes}); err != nil {
 			return fmt.Errorf("error in processor chain: %w", err)

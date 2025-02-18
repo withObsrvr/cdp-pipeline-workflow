@@ -78,6 +78,8 @@ func createSourceAdapter(sourceConfig SourceConfig) (SourceAdapter, error) {
 		return NewFSBufferedStorageSourceAdapter(sourceConfig.Config)
 	case "S3BufferedStorageSourceAdapter":
 		return NewS3BufferedStorageSourceAdapter(sourceConfig.Config)
+	case "RPCSourceAdapter":
+		return NewRPCSourceAdapter(sourceConfig.Config)
 	// Add more source types as needed
 	default:
 		return nil, fmt.Errorf("unsupported source type: %s", sourceConfig.Type)
@@ -158,6 +160,12 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewAccountEffectProcessor(processorConfig.Config)
 	case "LedgerChanges":
 		return processor.NewLedgerChangeProcessor(processorConfig.Config)
+	case "LatestLedgerRPC":
+		return processor.NewLatestLedgerRPCProcessor(processorConfig.Config)
+	case "GetEventsRPC":
+		return processor.NewGetEventsRPCProcessor(processorConfig.Config)
+	case "StdoutSink":
+		return processor.NewStdoutSink(), nil
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}
@@ -207,6 +215,8 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveLatestLedgerToExcel(consumerConfig.Config)
 	case "AnthropicClaude":
 		return consumer.NewAnthropicClaudeConsumer(consumerConfig.Config)
+	case "StdoutConsumer":
+		return consumer.NewStdoutConsumer(), nil
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}
