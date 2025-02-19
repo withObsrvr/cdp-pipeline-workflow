@@ -2,11 +2,14 @@ package processor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
 	"time"
 )
+
+// Assuming Event is your contract event type (alias to ContractEvent)
 
 type ContractFilterProcessor struct {
 	processors []Processor
@@ -35,18 +38,34 @@ func (p *ContractFilterProcessor) Subscribe(processor Processor) {
 }
 
 func (p *ContractFilterProcessor) Process(ctx context.Context, msg Message) error {
-	event, ok := msg.Payload.(Event)
-	if !ok {
-		return fmt.Errorf("expected Event, got %T", msg.Payload)
+	// Log the payload type for debugging.
+	log.Printf("ContractFilterProcessor: received message payload type: %T", msg.Payload)
+
+	var event ContractEvent
+	switch payload := msg.Payload.(type) {
+	case []byte:
+		if err := json.Unmarshal(payload, &event); err != nil {
+			log.Printf("ContractFilterProcessor: error decoding event: %v", err)
+			return nil
+		}
+	case ContractEvent:
+		event = payload
+	default:
+		log.Printf("ContractFilterProcessor: unexpected payload type: %T", msg.Payload)
+		return nil
 	}
+
+	// Log every contract ID encountered
+	log.Printf("ContractFilterProcessor: encountered event with contractID: %s", event.ContractID)
 
 	p.mu.Lock()
 	p.stats.ProcessedEvents++
 	p.stats.LastEventTime = time.Now()
 	p.mu.Unlock()
 
-	// Filter events by contract ID
+	// Filter events by contract ID; log if not matching
 	if event.ContractID != p.contractID {
+		log.Printf("ContractFilterProcessor: event contractID %s does not match filter %s; skipping", event.ContractID, p.contractID)
 		return nil
 	}
 
@@ -54,7 +73,7 @@ func (p *ContractFilterProcessor) Process(ctx context.Context, msg Message) erro
 	p.stats.FilteredEvents++
 	p.mu.Unlock()
 
-	log.Printf("Processing filtered event for contract %s: %+v", p.contractID, event)
+	log.Printf("ContractFilterProcessor: processing filtered event for contract %s: %+v", p.contractID, event)
 
 	// Forward filtered event to downstream processors
 	for _, processor := range p.processors {
