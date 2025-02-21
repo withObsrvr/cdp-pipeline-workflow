@@ -10,6 +10,7 @@ cdp-pipeline-workflow
 *.test
 cdp-pipeline-workflow.md
 cdp-pipeline-workflow.pdf
+zephyr-programs.md
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
@@ -18,6 +19,8 @@ cdp-pipeline-workflow.pdf
 *.xlsx
 *.secret.yaml
 *.duckdb
+*.duckdb.wal
+*.duckdb-wal
 stellar-datastore.md
 stellar-galexie.md
 
