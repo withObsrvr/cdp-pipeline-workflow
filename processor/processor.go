@@ -2,11 +2,14 @@ package processor
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strconv"
 	"time"
 
+	"github.com/stellar/go/hash"
 	"github.com/stellar/go/ingest"
 	"github.com/stellar/go/xdr"
 )
@@ -103,4 +106,125 @@ type Event struct {
 	TxHash     string      `json:"txHash"`
 	Topic      interface{} `json:"topic"`
 	Value      interface{} `json:"value"`
+}
+
+// New utility functions for processing Stellar data
+
+// ExtractEntryFromIngestChange gets the most recent state of an entry from an ingestion change
+func ExtractEntryFromIngestChange(change ingest.Change) (xdr.LedgerEntry, xdr.LedgerEntryChangeType, bool, error) {
+	switch changeType := change.LedgerEntryChangeType(); changeType {
+	case xdr.LedgerEntryChangeTypeLedgerEntryCreated, xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
+		return *change.Post, changeType, false, nil
+	case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
+		return *change.Pre, changeType, true, nil
+	default:
+		return xdr.LedgerEntry{}, changeType, false, fmt.Errorf("unable to extract ledger entry type from change")
+	}
+}
+
+// ExtractEntryFromXDRChange gets the most recent state of an entry from an ingestion change
+func ExtractEntryFromXDRChange(change xdr.LedgerEntryChange) (xdr.LedgerEntry, xdr.LedgerEntryChangeType, bool, error) {
+	switch change.Type {
+	case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
+		return *change.Created, change.Type, false, nil
+	case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
+		return *change.Updated, change.Type, false, nil
+	case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
+		return *change.State, change.Type, true, nil
+	default:
+		return xdr.LedgerEntry{}, change.Type, false, fmt.Errorf("unable to extract ledger entry type from change")
+	}
+}
+
+// TimePointToUTCTimeStamp converts an xdr TimePoint to UTC time.Time
+func TimePointToUTCTimeStamp(providedTime xdr.TimePoint) (time.Time, error) {
+	intTime := int64(providedTime)
+	if intTime < 0 {
+		return time.Time{}, fmt.Errorf("negative timepoint provided: %d", intTime)
+	}
+	return time.Unix(intTime, 0).UTC(), nil
+}
+
+// GetLedgerCloseTime extracts the close time from a ledger
+func GetLedgerCloseTime(lcm xdr.LedgerCloseMeta) (time.Time, error) {
+	return TimePointToUTCTimeStamp(lcm.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime)
+}
+
+// GetLedgerSequence extracts the sequence number from a ledger
+func GetLedgerSequence(lcm xdr.LedgerCloseMeta) uint32 {
+	return uint32(lcm.LedgerHeaderHistoryEntry().Header.LedgerSeq)
+}
+
+// LedgerEntryToLedgerKeyHash generates a unique hash for a ledger entry
+func LedgerEntryToLedgerKeyHash(ledgerEntry xdr.LedgerEntry) (string, error) {
+	ledgerKey, err := ledgerEntry.LedgerKey()
+	if err != nil {
+		return "", fmt.Errorf("failed to get ledger key: %w", err)
+	}
+
+	ledgerKeyByte, err := ledgerKey.MarshalBinary()
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal ledger key: %w", err)
+	}
+
+	hashedLedgerKeyByte := hash.Hash(ledgerKeyByte)
+	return hex.EncodeToString(hashedLedgerKeyByte[:]), nil
+}
+
+// ConvertStroopValueToReal converts stroop values to real XLM values
+func ConvertStroopValueToReal(input xdr.Int64) (float64, error) {
+	rat := big.NewRat(int64(input), int64(10000000))
+	output, _ := rat.Float64()
+	return output, nil
+}
+
+// HashToHexString converts an XDR Hash to a hex string
+func HashToHexString(inputHash xdr.Hash) string {
+	return hex.EncodeToString(inputHash[:])
+}
+
+// Price represents the price of an asset as a fraction
+type Price struct {
+	Numerator   int32 `json:"n"`
+	Denominator int32 `json:"d"`
+}
+
+// Path is a representation of an asset without an ID that forms part of a path in a path payment
+type Path struct {
+	AssetCode   string `json:"asset_code"`
+	AssetIssuer string `json:"asset_issuer"`
+	AssetType   string `json:"asset_type"`
+}
+
+type SponsorshipOutput struct {
+	Operation      xdr.Operation
+	OperationIndex uint32
+}
+
+// TestTransaction transaction meta
+type TestTransaction struct {
+	Index         uint32
+	EnvelopeXDR   string
+	ResultXDR     string
+	FeeChangesXDR string
+	MetaXDR       string
+	Hash          string
+}
+
+type Asset struct {
+	Code   string `json:"code"`
+	Issuer string `json:"issuer,omitempty"`
+	Type   string `json:"type"` // native, credit_alphanum4, credit_alphanum12
+}
+
+// ExtractEntryFromChange gets the most recent state of an entry from an ingestio change, as well as if the entry was deleted
+func ExtractEntryFromChange(change ingest.Change) (xdr.LedgerEntry, xdr.LedgerEntryChangeType, bool, error) {
+	switch changeType := change.LedgerEntryChangeType(); changeType {
+	case xdr.LedgerEntryChangeTypeLedgerEntryCreated, xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
+		return *change.Post, changeType, false, nil
+	case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
+		return *change.Pre, changeType, true, nil
+	default:
+		return xdr.LedgerEntry{}, changeType, false, fmt.Errorf("unable to extract ledger entry type from change")
+	}
 }

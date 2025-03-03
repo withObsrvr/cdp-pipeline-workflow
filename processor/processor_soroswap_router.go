@@ -136,15 +136,13 @@ func (p *SoroswapRouterProcessor) Process(ctx context.Context, msg Message) erro
 	for _, entry := range eventData.V0.Data.Map {
 		switch entry.Key.Sym {
 		case "path":
-			// Path is an array of contract addresses
+			// Handle swap event path
 			if entry.Val.Vec != nil && len(entry.Val.Vec) >= 2 {
-				// First token in path
 				if entry.Val.Vec[0].Address.ContractId != nil {
 					if contractID, err := encodeContractID(entry.Val.Vec[0].Address.ContractId); err == nil {
 						routerEvent.TokenA = contractID
 					}
 				}
-				// Last token in path
 				if entry.Val.Vec[len(entry.Val.Vec)-1].Address.ContractId != nil {
 					if contractID, err := encodeContractID(entry.Val.Vec[len(entry.Val.Vec)-1].Address.ContractId); err == nil {
 						routerEvent.TokenB = contractID
@@ -152,26 +150,48 @@ func (p *SoroswapRouterProcessor) Process(ctx context.Context, msg Message) erro
 				}
 			}
 		case "amounts":
-			// Amounts is an array of i128 values
+			// Handle swap event amounts
 			if entry.Val.Vec != nil && len(entry.Val.Vec) >= 2 {
-				// First amount
 				routerEvent.AmountA = fmt.Sprintf("%d", entry.Val.Vec[0].I128.Lo)
-				// Last amount
 				routerEvent.AmountB = fmt.Sprintf("%d", entry.Val.Vec[len(entry.Val.Vec)-1].I128.Lo)
 			}
+		case "token0", "token_a":
+			// Handle add/remove event token A
+			if entry.Val.Address.ContractId != nil {
+				if contractID, err := encodeContractID(entry.Val.Address.ContractId); err == nil {
+					routerEvent.TokenA = contractID
+				}
+			}
+		case "token1", "token_b":
+			// Handle add/remove event token B
+			if entry.Val.Address.ContractId != nil {
+				if contractID, err := encodeContractID(entry.Val.Address.ContractId); err == nil {
+					routerEvent.TokenB = contractID
+				}
+			}
+		case "amount0", "amount_a":
+			// Handle add/remove event amount A
+			routerEvent.AmountA = fmt.Sprintf("%d", entry.Val.I128.Lo)
+		case "amount1", "amount_b":
+			// Handle add/remove event amount B
+			routerEvent.AmountB = fmt.Sprintf("%d", entry.Val.I128.Lo)
 		case "to":
 			if entry.Val.Address.AccountId != nil && entry.Val.Address.AccountId.Ed25519 != nil {
 				if accountID, err := strkey.Encode(strkey.VersionByteAccountID, entry.Val.Address.AccountId.Ed25519); err == nil {
 					routerEvent.Account = accountID
 				}
 			} else if entry.Val.Address.ContractId != nil {
-				// Handle ContractId (C... addresses)
 				if contractID, err := encodeContractID(entry.Val.Address.ContractId); err == nil {
 					routerEvent.Account = contractID
-					log.Printf("Extracted account from ContractId: %s", routerEvent.Account)
 				}
 			}
 		}
+	}
+
+	// Add validation before forwarding the event
+	if routerEvent.TokenA == "" || routerEvent.TokenB == "" ||
+		routerEvent.AmountA == "" || routerEvent.AmountB == "" {
+		log.Printf("Warning: Incomplete event data detected: %+v", routerEvent)
 	}
 
 	// Add debug logging after data extraction

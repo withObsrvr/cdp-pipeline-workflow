@@ -172,6 +172,10 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewSoroswapNewPairProcessor(processorConfig.Config)
 	case "SoroswapRouter":
 		return processor.NewSoroswapRouterProcessor(processorConfig.Config)
+	case "Soroswap":
+		return processor.NewSoroswapProcessor(processorConfig.Config)
+	case "ProcessAccountDataFull":
+		return processor.NewProcessAccountDataFull(processorConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}
@@ -227,6 +231,14 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveSoroswapPairsToDuckDB(consumerConfig.Config)
 	case "SaveSoroswapRouterToDuckDB":
 		return consumer.NewSaveSoroswapRouterToDuckDB(consumerConfig.Config)
+	case "SaveSoroswapToDuckDB":
+		return consumer.NewSaveSoroswapToDuckDB(consumerConfig.Config)
+	case "SaveAccountDataToDuckDB":
+		return consumer.NewSaveAccountDataToDuckDB(consumerConfig.Config)
+	case "SaveSoroswapPairsToSQLite":
+		return consumer.NewSaveSoroswapPairsToSQLite(consumerConfig.Config)
+	case "SaveSoroswapRouterToSQLite":
+		return consumer.NewSaveSoroswapRouterToSQLite(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}

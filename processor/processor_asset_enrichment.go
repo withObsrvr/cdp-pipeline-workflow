@@ -239,9 +239,3 @@ func (p *AssetEnrichmentProcessor) Close() error {
 	}
 	return nil
 }
-
-type Asset struct {
-	Code   string
-	Issuer string
-	Type   string
-}

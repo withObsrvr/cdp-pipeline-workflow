@@ -9,13 +9,16 @@ require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.30.3
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/gorilla/websocket v1.5.3
+	github.com/guregu/null v4.0.0+incompatible
+	github.com/jackc/pgx/v5 v5.7.2
 	github.com/lib/pq v1.10.9
 	github.com/marcboeker/go-duckdb v1.8.3
+	github.com/mattn/go-sqlite3 v1.14.6
 	github.com/pkg/errors v0.9.1
 	github.com/redis/go-redis/v9 v9.7.0
 	github.com/sendgrid/sendgrid-go v3.16.0+incompatible
 	github.com/slack-go/slack v0.15.0
-	github.com/stellar/go v0.0.0-20250206164042-6dc6d2f3dfb4
+	github.com/stellar/go v0.0.0-20250213232608-c453f8b35c75
 	github.com/withObsrvr/stellar-cdp v0.0.0-20241220082310-1a8c717a9c8f
 	github.com/withObsrvr/stellar-datastore v0.0.0-20250207023055-4074500adc35
 	github.com/withObsrvr/stellar-ledgerbackend v0.0.0-20241220092445-b96fa5b9c924
@@ -86,6 +89,9 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.4 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.1 // indirect
 	github.com/hashicorp/golang-lru v1.0.2 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/jmoiron/sqlx v1.3.5 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect

@@ -2,7 +2,6 @@ package processor
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -11,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stellar/go/hash"
 	"github.com/stellar/go/ingest"
 	"github.com/stellar/go/strkey"
 	"github.com/stellar/go/xdr"
@@ -364,14 +362,6 @@ func (p *ContractLedgerReader) GetStats() struct {
 	return p.stats
 }
 
-// Helper function to convert ledger entry to hash
-func LedgerEntryToLedgerKeyHash(ledgerEntry xdr.LedgerEntry) string {
-	ledgerKey, _ := ledgerEntry.LedgerKey()
-	ledgerKeyByte, _ := ledgerKey.MarshalBinary()
-	hashedLedgerKeyByte := hash.Hash(ledgerKeyByte)
-	return hex.EncodeToString(hashedLedgerKeyByte[:])
-}
-
 // Add these type definitions after the existing var block
 type AssetFromContractDataFunc func(ledgerEntry xdr.LedgerEntry, passphrase string) *xdr.Asset
 type ContractBalanceFromContractDataFunc func(ledgerEntry xdr.LedgerEntry, passphrase string) ([32]byte, *big.Int, bool)
@@ -408,7 +398,7 @@ func NewTransformContractDataStruct(assetFrom AssetFromContractDataFunc, contrac
 
 // Add this method to TransformContractDataStruct
 func (t *TransformContractDataStruct) TransformContractData(change xdr.LedgerEntryChange, passphrase string, header xdr.LedgerHeaderHistoryEntry) (ContractDataOutput, error, bool) {
-	ledgerEntry, changeType, outputDeleted, err := ExtractEntryFromChange(change)
+	ledgerEntry, changeType, outputDeleted, err := ExtractEntryFromXDRChange(change)
 	if err != nil {
 		return ContractDataOutput{}, err, false
 	}
@@ -423,7 +413,10 @@ func (t *TransformContractDataStruct) TransformContractData(change xdr.LedgerEnt
 		return ContractDataOutput{}, nil, false
 	}
 
-	ledgerKeyHash := LedgerEntryToLedgerKeyHash(ledgerEntry)
+	ledgerKeyHash, err := LedgerEntryToLedgerKeyHash(ledgerEntry)
+	if err != nil {
+		return ContractDataOutput{}, err, false
+	}
 
 	var contractDataAssetType string
 	var contractDataAssetCode string
@@ -478,18 +471,4 @@ func (t *TransformContractDataStruct) TransformContractData(change xdr.LedgerEnt
 	}
 
 	return transformedData, nil, true
-}
-
-// Add this helper function
-func ExtractEntryFromChange(change xdr.LedgerEntryChange) (xdr.LedgerEntry, xdr.LedgerEntryChangeType, bool, error) {
-	switch change.Type {
-	case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
-		return *change.Created, change.Type, false, nil
-	case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
-		return *change.Updated, change.Type, false, nil
-	case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
-		return *change.State, change.Type, true, nil
-	default:
-		return xdr.LedgerEntry{}, change.Type, false, fmt.Errorf("unable to extract ledger entry type from change")
-	}
 }
