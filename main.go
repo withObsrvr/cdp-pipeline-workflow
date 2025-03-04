@@ -166,10 +166,6 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewGetEventsRPCProcessor(processorConfig.Config)
 	case "StdoutSink":
 		return processor.NewStdoutSink(), nil
-	case "SoroswapSync":
-		return processor.NewSoroswapSyncProcessor(processorConfig.Config)
-	case "SoroswapNewPair":
-		return processor.NewSoroswapNewPairProcessor(processorConfig.Config)
 	case "SoroswapRouter":
 		return processor.NewSoroswapRouterProcessor(processorConfig.Config)
 	case "Soroswap":
@@ -231,8 +227,6 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveSoroswapPairsToDuckDB(consumerConfig.Config)
 	case "SaveSoroswapRouterToDuckDB":
 		return consumer.NewSaveSoroswapRouterToDuckDB(consumerConfig.Config)
-	case "SaveSoroswapToDuckDB":
-		return consumer.NewSaveSoroswapToDuckDB(consumerConfig.Config)
 	case "SaveAccountDataToDuckDB":
 		return consumer.NewSaveAccountDataToDuckDB(consumerConfig.Config)
 	case "SaveSoroswapPairsToSQLite":

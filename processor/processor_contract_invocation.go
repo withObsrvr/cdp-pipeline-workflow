@@ -16,13 +16,48 @@ import (
 
 // ContractInvocation represents a contract invocation event
 type ContractInvocation struct {
-	Timestamp       time.Time `json:"timestamp"`
-	LedgerSequence  uint32    `json:"ledger_sequence"`
-	TransactionHash string    `json:"transaction_hash"`
-	ContractID      string    `json:"contract_id"`
-	InvokingAccount string    `json:"invoking_account"`
-	FunctionName    string    `json:"function_name,omitempty"`
-	Successful      bool      `json:"successful"`
+	Timestamp        time.Time         `json:"timestamp"`
+	LedgerSequence   uint32            `json:"ledger_sequence"`
+	TransactionHash  string            `json:"transaction_hash"`
+	ContractID       string            `json:"contract_id"`
+	InvokingAccount  string            `json:"invoking_account"`
+	FunctionName     string            `json:"function_name,omitempty"`
+	Successful       bool              `json:"successful"`
+	DiagnosticEvents []DiagnosticEvent `json:"diagnostic_events,omitempty"`
+	ContractCalls    []ContractCall    `json:"contract_calls,omitempty"`
+	StateChanges     []StateChange     `json:"state_changes,omitempty"`
+	TtlExtensions    []TtlExtension    `json:"ttl_extensions,omitempty"`
+}
+
+// DiagnosticEvent represents a diagnostic event emitted during contract execution
+type DiagnosticEvent struct {
+	ContractID string          `json:"contract_id"`
+	Topics     []string        `json:"topics"`
+	Data       json.RawMessage `json:"data"`
+}
+
+// ContractCall represents a contract-to-contract call
+type ContractCall struct {
+	FromContract string `json:"from_contract"`
+	ToContract   string `json:"to_contract"`
+	Function     string `json:"function"`
+	Successful   bool   `json:"successful"`
+}
+
+// StateChange represents a contract state change
+type StateChange struct {
+	ContractID string          `json:"contract_id"`
+	Key        string          `json:"key"`
+	OldValue   json.RawMessage `json:"old_value,omitempty"`
+	NewValue   json.RawMessage `json:"new_value,omitempty"`
+	Operation  string          `json:"operation"` // "create", "update", "delete"
+}
+
+// TtlExtension represents a TTL extension for a contract
+type TtlExtension struct {
+	ContractID string `json:"contract_id"`
+	OldTtl     uint32 `json:"old_ttl"`
+	NewTtl     uint32 `json:"new_ttl"`
 }
 
 type ContractInvocationProcessor struct {
@@ -173,6 +208,18 @@ func (p *ContractInvocationProcessor) processContractInvocation(
 		}
 	}
 
+	// Extract diagnostic events
+	invocation.DiagnosticEvents = p.extractDiagnosticEvents(tx, opIndex)
+
+	// Extract contract-to-contract calls
+	invocation.ContractCalls = p.extractContractCalls(tx, opIndex)
+
+	// Extract state changes
+	invocation.StateChanges = p.extractStateChanges(tx, opIndex)
+
+	// Extract TTL extensions
+	invocation.TtlExtensions = p.extractTtlExtensions(tx, opIndex)
+
 	return invocation, nil
 }
 
@@ -201,4 +248,168 @@ func (p *ContractInvocationProcessor) GetStats() struct {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.stats
+}
+
+// extractDiagnosticEvents extracts diagnostic events from transaction meta
+func (p *ContractInvocationProcessor) extractDiagnosticEvents(tx ingest.LedgerTransaction, opIndex int) []DiagnosticEvent {
+	var events []DiagnosticEvent
+
+	// Check if we have diagnostic events in the transaction meta
+	if tx.UnsafeMeta.V == 3 {
+		sorobanMeta := tx.UnsafeMeta.V3.SorobanMeta
+		if sorobanMeta != nil && sorobanMeta.Events != nil {
+			for _, event := range sorobanMeta.Events {
+				// Convert contract ID
+				contractIDBytes := event.ContractId
+				contractID, err := strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
+				if err != nil {
+					log.Printf("Error encoding contract ID for diagnostic event: %v", err)
+					continue
+				}
+
+				// Convert topics to strings
+				var topics []string
+				for _, topic := range event.Body.V0.Topics {
+					// For simplicity, we'll just convert to JSON
+					topicJSON, err := json.Marshal(topic)
+					if err != nil {
+						log.Printf("Error marshaling topic: %v", err)
+						continue
+					}
+					topics = append(topics, string(topicJSON))
+				}
+
+				// Convert data to JSON
+				dataJSON, err := json.Marshal(event.Body.V0.Data)
+				if err != nil {
+					log.Printf("Error marshaling event data: %v", err)
+					continue
+				}
+
+				events = append(events, DiagnosticEvent{
+					ContractID: contractID,
+					Topics:     topics,
+					Data:       dataJSON,
+				})
+			}
+		}
+	}
+
+	return events
+}
+
+// extractContractCalls extracts contract calls from transaction meta
+func (p *ContractInvocationProcessor) extractContractCalls(tx ingest.LedgerTransaction, opIndex int) []ContractCall {
+	var calls []ContractCall
+
+	// Check if we have Soroban meta in the transaction
+	if tx.UnsafeMeta.V == 3 {
+		sorobanMeta := tx.UnsafeMeta.V3.SorobanMeta
+		if sorobanMeta != nil {
+			// Process diagnostic events which may contain contract calls
+			if len(sorobanMeta.DiagnosticEvents) > 0 {
+				// Log diagnostic events for debugging
+				log.Printf("Found %d diagnostic events", len(sorobanMeta.DiagnosticEvents))
+
+				// Future implementation will process these events
+				// when the XDR structure is better understood
+			}
+		}
+	}
+
+	return calls
+}
+
+// processInvocation processes a contract invocation and extracts contract calls
+// This method is currently unused but will be used in future implementations
+// when the XDR structure includes the necessary fields
+//
+//nolint:unused
+func (p *ContractInvocationProcessor) processInvocation(
+	invocation *xdr.SorobanAuthorizedInvocation,
+	fromContract string,
+	calls *[]ContractCall,
+) {
+	if invocation == nil {
+		return
+	}
+
+	// Get the contract ID for this invocation
+	var contractID string
+	if invocation.Function.Type == xdr.SorobanAuthorizedFunctionTypeSorobanAuthorizedFunctionTypeContractFn {
+		contractIDBytes := invocation.Function.ContractFn.ContractAddress.ContractId
+		var err error
+		contractID, err = strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
+		if err != nil {
+			log.Printf("Error encoding contract ID for invocation: %v", err)
+			return
+		}
+	}
+
+	// Get the function name
+	var functionName string
+	if invocation.Function.Type == xdr.SorobanAuthorizedFunctionTypeSorobanAuthorizedFunctionTypeContractFn {
+		functionName = string(invocation.Function.ContractFn.FunctionName)
+	}
+
+	// If we have both a from and to contract, record the call
+	if fromContract != "" && contractID != "" && fromContract != contractID {
+		*calls = append(*calls, ContractCall{
+			FromContract: fromContract,
+			ToContract:   contractID,
+			Function:     functionName,
+			Successful:   true, // We don't have success info at this level
+		})
+	}
+
+	// Process sub-invocations
+	for _, subInvocation := range invocation.SubInvocations {
+		p.processInvocation(&subInvocation, contractID, calls)
+	}
+}
+
+// extractStateChanges extracts state changes from transaction meta
+func (p *ContractInvocationProcessor) extractStateChanges(tx ingest.LedgerTransaction, opIndex int) []StateChange {
+	var changes []StateChange
+
+	// Check if we have Soroban meta in the transaction
+	if tx.UnsafeMeta.V == 3 {
+		sorobanMeta := tx.UnsafeMeta.V3.SorobanMeta
+		if sorobanMeta != nil {
+			// Based on the debug output, there's no direct state changes field
+			// State changes would need to be extracted from other transaction data
+
+			// Process events which may contain state change information
+			if len(sorobanMeta.Events) > 0 {
+				for _, _event := range sorobanMeta.Events {
+					// Process events for state changes
+					// Implementation depends on the structure of ContractEvent
+					_ = _event // Placeholder until implementation is complete
+				}
+			}
+		}
+	}
+
+	return changes
+}
+
+// extractTtlExtensions extracts TTL extensions from transaction meta
+func (p *ContractInvocationProcessor) extractTtlExtensions(tx ingest.LedgerTransaction, opIndex int) []TtlExtension {
+	var extensions []TtlExtension
+
+	// Check if we have Soroban meta in the transaction
+	if tx.UnsafeMeta.V == 3 {
+		sorobanMeta := tx.UnsafeMeta.V3.SorobanMeta
+		if sorobanMeta != nil {
+			// Based on the debug output, SorobanTransactionMeta has:
+			// - Events
+			// - ReturnValue
+			// - DiagnosticEvents
+			// But no TTL extension information in this version
+
+			// If TTL extensions are added in future versions, they would be processed here
+		}
+	}
+
+	return extensions
 }

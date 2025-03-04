@@ -9,13 +9,12 @@ import (
 	"time"
 )
 
-// Assuming Event is your contract event type (alias to ContractEvent)
-
+// ContractFilterProcessor filters events by contract ID
 type ContractFilterProcessor struct {
-	processors []Processor
-	contractID string
-	mu         sync.RWMutex
-	stats      struct {
+	processors  []Processor
+	contractIDs map[string]bool // Using a map for O(1) lookups
+	mu          sync.RWMutex
+	stats       struct {
 		ProcessedEvents uint64
 		FilteredEvents  uint64
 		LastEventTime   time.Time
@@ -23,13 +22,34 @@ type ContractFilterProcessor struct {
 }
 
 func NewContractFilterProcessor(config map[string]interface{}) (*ContractFilterProcessor, error) {
-	contractID, ok := config["contract_id"].(string)
-	if !ok {
-		return nil, fmt.Errorf("contract_id must be specified")
+	contractIDs := make(map[string]bool)
+
+	// Handle single contract_id (string)
+	if contractID, ok := config["contract_id"].(string); ok && contractID != "" {
+		contractIDs[contractID] = true
+	}
+
+	// Handle contract_ids (array)
+	if contractIDsArray, ok := config["contract_ids"].([]interface{}); ok {
+		for _, id := range contractIDsArray {
+			if strID, ok := id.(string); ok && strID != "" {
+				contractIDs[strID] = true
+			}
+		}
+	}
+
+	if len(contractIDs) == 0 {
+		return nil, fmt.Errorf("at least one contract_id must be specified (via contract_id or contract_ids)")
+	}
+
+	// Log the contract IDs we're filtering for
+	log.Printf("ContractFilterProcessor: Filtering for %d contract IDs", len(contractIDs))
+	for id := range contractIDs {
+		log.Printf("ContractFilterProcessor: Will filter for contract ID: %s", id)
 	}
 
 	return &ContractFilterProcessor{
-		contractID: contractID,
+		contractIDs: contractIDs,
 	}, nil
 }
 
@@ -64,8 +84,8 @@ func (p *ContractFilterProcessor) Process(ctx context.Context, msg Message) erro
 	p.mu.Unlock()
 
 	// Filter events by contract ID; log if not matching
-	if event.ContractID != p.contractID {
-		log.Printf("ContractFilterProcessor: event contractID %s does not match filter %s; skipping", event.ContractID, p.contractID)
+	if !p.contractIDs[event.ContractID] {
+		log.Printf("ContractFilterProcessor: event contractID %s does not match any filter; skipping", event.ContractID)
 		return nil
 	}
 
@@ -73,7 +93,7 @@ func (p *ContractFilterProcessor) Process(ctx context.Context, msg Message) erro
 	p.stats.FilteredEvents++
 	p.mu.Unlock()
 
-	log.Printf("ContractFilterProcessor: processing filtered event for contract %s: %+v", p.contractID, event)
+	log.Printf("ContractFilterProcessor: processing filtered event for contract %s", event.ContractID)
 
 	// Forward filtered event to downstream processors
 	for _, processor := range p.processors {
