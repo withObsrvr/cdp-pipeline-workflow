@@ -10,7 +10,8 @@ A data pipeline for processing Stellar blockchain data, with support for payment
   - Local filesystem
 - Transforms operations into standardized formats
 - Supports both payment and create account operations(WIP)
-- Outputs to multiple destinations (MongoDB, ZeroMQ)
+- Outputs to multiple destinations (MongoDB, ZeroMQ, PostgreSQL, DuckDB)
+- Processes account data and stores it in PostgreSQL or DuckDB
 
 ## Prerequisites
 
@@ -79,6 +80,67 @@ pipelines:
           database: "mongodb-db"
           collection: "mongodb-collection"
           connect_timeout: 10  # seconds
+```
+
+### PostgreSQL Account Data Consumer Configuration
+```yaml
+pipelines:
+  AccountDataPostgreSQLPipeline:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "your-bucket"
+        network: "mainnet"
+        num_workers: 4
+        retry_limit: 3
+        retry_wait: 5
+        start_ledger: 55808000
+        end_ledger: 55808350
+        ledgers_per_file: 1
+        files_per_partition: 64000
+        buffer_size: 1
+    processors:
+      - type: AccountData
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+    consumers:
+      - type: SaveAccountDataToPostgreSQL
+        config:
+          host: "localhost"
+          port: 5432
+          database: "stellar_accounts"
+          username: "postgres"
+          password: "your-password"
+          sslmode: "disable"
+          max_open_conns: 10
+          max_idle_conns: 5
+```
+
+### DuckDB Account Data Consumer Configuration
+```yaml
+pipelines:
+  AccountDataDuckDBPipeline:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "your-bucket"
+        network: "mainnet"
+        num_workers: 4
+        retry_limit: 3
+        retry_wait: 5
+        start_ledger: 55808000
+        end_ledger: 55808350
+        ledgers_per_file: 1
+        files_per_partition: 64000
+        buffer_size: 1
+    processors:
+      - type: AccountData
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+    consumers:
+      - type: SaveAccountDataToDuckDB
+        config:
+          db_path: "data/stellar_accounts.duckdb"
 ```
 
 ## Installation

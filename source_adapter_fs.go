@@ -110,12 +110,14 @@ func NewFSBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAda
 	if ledgersPerFileInt == 0 {
 		ledgersPerFileInt = 64 // default value
 	}
+	fsConfig.LedgersPerFile = uint32(ledgersPerFileInt)
 
 	// Get FilesPerPartition with default
 	filesPerPartitionInt, _ := getIntValue(config["files_per_partition"])
 	if filesPerPartitionInt == 0 {
 		filesPerPartitionInt = 10 // default value
 	}
+	fsConfig.FilesPerPartition = uint32(filesPerPartitionInt)
 
 	return &FSBufferedStorageSourceAdapter{
 		config: fsConfig,

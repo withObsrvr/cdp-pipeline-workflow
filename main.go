@@ -100,12 +100,16 @@ func createProcessors(processorConfigs []processor.ProcessorConfig) ([]processor
 
 func createProcessor(processorConfig processor.ProcessorConfig) (processor.Processor, error) {
 	switch processorConfig.Type {
-	case "FilterPayments":
-		return processor.NewFilterPayments(processorConfig.Config)
+	case "CreateAccount":
+		return processor.NewCreateAccount(processorConfig.Config)
+	case "AccountData":
+		return processor.NewProcessAccountData(processorConfig.Config)
+	case "ProcessAccountDataFull":
+		return processor.NewProcessAccountData(processorConfig.Config)
 	case "TransformToAppPayment":
 		return processor.NewTransformToAppPayment(processorConfig.Config)
-	case "CreateAccountTransformer":
-		return processor.NewCreateAccount(processorConfig.Config)
+	case "FilterPayments":
+		return processor.NewFilterPayments(processorConfig.Config)
 	case "TransformToAppTrade":
 		return processor.NewTransformToAppTrade(processorConfig.Config)
 	case "TransformToAppTrustline":
@@ -130,8 +134,6 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewTransformToMarketAnalytics(processorConfig.Config)
 	case "TransformToAppAccount":
 		return processor.NewTransformToAppAccount(processorConfig.Config)
-	case "ProcessAccountData":
-		return processor.NewProcessAccountData(processorConfig.Config)
 	case "BlankProcessor":
 		return processor.NewBlankProcessor(processorConfig.Config)
 	case "LedgerReader":
@@ -170,8 +172,6 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewSoroswapRouterProcessor(processorConfig.Config)
 	case "Soroswap":
 		return processor.NewSoroswapProcessor(processorConfig.Config)
-	case "ProcessAccountDataFull":
-		return processor.NewProcessAccountDataFull(processorConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}
@@ -227,12 +227,16 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveSoroswapPairsToDuckDB(consumerConfig.Config)
 	case "SaveSoroswapRouterToDuckDB":
 		return consumer.NewSaveSoroswapRouterToDuckDB(consumerConfig.Config)
+	case "SaveAccountDataToPostgreSQL":
+		return consumer.NewSaveAccountDataToPostgreSQL(consumerConfig.Config)
 	case "SaveAccountDataToDuckDB":
 		return consumer.NewSaveAccountDataToDuckDB(consumerConfig.Config)
-	case "SaveSoroswapPairsToSQLite":
-		return consumer.NewSaveSoroswapPairsToSQLite(consumerConfig.Config)
-	case "SaveSoroswapRouterToSQLite":
-		return consumer.NewSaveSoroswapRouterToSQLite(consumerConfig.Config)
+	case "SaveContractEventsToPostgreSQL":
+		return consumer.NewSaveContractEventsToPostgreSQL(consumerConfig.Config)
+	case "SaveSoroswapToPostgreSQL":
+		return consumer.NewSaveSoroswapToPostgreSQL(consumerConfig.Config)
+	case "SaveContractInvocationsToPostgreSQL":
+		return consumer.NewSaveContractInvocationsToPostgreSQL(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}
