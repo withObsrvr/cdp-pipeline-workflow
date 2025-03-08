@@ -116,6 +116,32 @@ pipelines:
           max_idle_conns: 5
 ```
 
+### Connecting to Remote PostgreSQL Servers
+
+When connecting to remote PostgreSQL servers, you may need to adjust your configuration:
+
+1. **Use IP Address**: For remote servers, consider using the IP address directly instead of the hostname to avoid DNS resolution issues.
+2. **Correct Port**: Make sure to use the correct port for your PostgreSQL server (default is 5432, but cloud providers often use different ports).
+3. **SSL Mode**: For secure connections, set `sslmode` to "require" or "verify-full".
+4. **Connection Timeout**: Add a `connect_timeout` parameter (in seconds) to prevent long waits during connection attempts.
+
+Example configuration for a remote PostgreSQL server:
+
+```yaml
+consumers:
+  - type: SaveSoroswapToPostgreSQL
+    config:
+      host: "157.245.248.243"  # IP address of the remote server
+      port: 23548              # Custom port used by the cloud provider
+      database: "defaultdb"
+      username: "dbuser"
+      password: "your-secure-password"
+      sslmode: "require"       # Required for secure connections
+      max_open_conns: 10
+      max_idle_conns: 5
+      connect_timeout: 30      # 30 seconds timeout
+```
+
 ### DuckDB Account Data Consumer Configuration
 ```yaml
 pipelines:

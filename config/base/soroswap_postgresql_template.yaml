@@ -1,0 +1,38 @@
+pipelines:
+  SoroswapPipeline:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "your-bucket-name"
+        network: "mainnet"  # or "testnet"
+        num_workers: 10
+        retry_limit: 3
+        retry_wait: 5
+        start_ledger: 55808000  # Adjust as needed
+        end_ledger: 55808350    # Adjust as needed
+        ledgers_per_file: 1
+        files_per_partition: 64000
+        buffer_size: 10
+    processors:
+      - type: ContractEvent
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"  # Use "Test SDF Network ; September 2015" for testnet
+      - type: Soroswap
+        config: {}
+    consumers:
+      - type: SaveSoroswapToPostgreSQL
+        config:
+          # Connection details for your PostgreSQL server
+          # For remote servers, consider using the IP address directly to avoid DNS issues
+          host: "your-postgresql-host"
+          port: 5432  # Default PostgreSQL port, adjust as needed
+          database: "your-database-name"
+          username: "your-username"
+          password: "your-password"
+          # Use "require" for secure connections, "disable" for local development
+          sslmode: "require"
+          # Connection pool settings
+          max_open_conns: 10
+          max_idle_conns: 5
+          # Connection timeout in seconds
+          connect_timeout: 30 

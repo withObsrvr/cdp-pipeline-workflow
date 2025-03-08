@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/withObsrvr/cdp-pipeline-workflow/processor"
@@ -25,11 +26,13 @@ func NewSaveContractEventsToPostgreSQL(config map[string]interface{}) (*SaveCont
 		return nil, fmt.Errorf("invalid PostgreSQL configuration: %w", err)
 	}
 
-	// Build connection string
+	// Build connection string with timeout
 	connStr := fmt.Sprintf(
-		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s",
-		pgConfig.Host, pgConfig.Port, pgConfig.Database, pgConfig.Username, pgConfig.Password, pgConfig.SSLMode,
+		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s connect_timeout=%d",
+		pgConfig.Host, pgConfig.Port, pgConfig.Database, pgConfig.Username, pgConfig.Password, pgConfig.SSLMode, pgConfig.ConnectTimeout,
 	)
+
+	log.Printf("Connecting to PostgreSQL at %s:%d...", pgConfig.Host, pgConfig.Port)
 
 	// Connect to PostgreSQL
 	db, err := sql.Open("postgres", connStr)
@@ -41,10 +44,15 @@ func NewSaveContractEventsToPostgreSQL(config map[string]interface{}) (*SaveCont
 	db.SetMaxOpenConns(pgConfig.MaxOpenConns)
 	db.SetMaxIdleConns(pgConfig.MaxIdleConns)
 
-	// Test connection
-	if err := db.Ping(); err != nil {
+	// Test connection with context timeout
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(pgConfig.ConnectTimeout)*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(ctx); err != nil {
 		return nil, fmt.Errorf("failed to ping PostgreSQL: %w", err)
 	}
+
+	log.Printf("Successfully connected to PostgreSQL at %s:%d", pgConfig.Host, pgConfig.Port)
 
 	// Initialize schema
 	if err := initializeContractEventsSchema(db); err != nil {

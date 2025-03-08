@@ -19,14 +19,15 @@ type SaveToPostgreSQL struct {
 }
 
 type PostgresConfig struct {
-	Host         string
-	Port         int
-	Database     string
-	Username     string
-	Password     string
-	SSLMode      string
-	MaxOpenConns int
-	MaxIdleConns int
+	Host           string
+	Port           int
+	Database       string
+	Username       string
+	Password       string
+	SSLMode        string
+	MaxOpenConns   int
+	MaxIdleConns   int
+	ConnectTimeout int
 }
 
 const initSchema = `
@@ -166,17 +167,32 @@ func NewSaveToPostgreSQL(config map[string]interface{}) (*SaveToPostgreSQL, erro
 func parsePostgresConfig(config map[string]interface{}) (PostgresConfig, error) {
 	var pgConfig PostgresConfig
 
+	log.Printf("PostgreSQL config: %+v", config)
+
 	host, ok := config["host"].(string)
 	if !ok {
 		return pgConfig, fmt.Errorf("missing host in config")
 	}
 	pgConfig.Host = host
 
+	// Debug port value
+	portValue := config["port"]
+	log.Printf("Port value: %v (type: %T)", portValue, portValue)
+
 	port, ok := config["port"].(float64)
 	if !ok {
-		pgConfig.Port = 5432 // Default PostgreSQL port
+		log.Printf("Port not a float64, trying int")
+		portInt, ok := config["port"].(int)
+		if ok {
+			pgConfig.Port = portInt
+			log.Printf("Port set to %d from int", pgConfig.Port)
+		} else {
+			log.Printf("Port not an int either, using default 5432")
+			pgConfig.Port = 5432 // Default PostgreSQL port
+		}
 	} else {
 		pgConfig.Port = int(port)
+		log.Printf("Port set to %d from float64", pgConfig.Port)
 	}
 
 	database, ok := config["database"].(string)
@@ -197,7 +213,7 @@ func parsePostgresConfig(config map[string]interface{}) (PostgresConfig, error) 
 	}
 	pgConfig.Password = password
 
-	sslMode, ok := config["ssl_mode"].(string)
+	sslMode, ok := config["sslmode"].(string)
 	if !ok {
 		pgConfig.SSLMode = "disable" // Default to disable
 	} else {
@@ -207,12 +223,16 @@ func parsePostgresConfig(config map[string]interface{}) (PostgresConfig, error) 
 	// Set connection pool defaults
 	pgConfig.MaxOpenConns = 25
 	pgConfig.MaxIdleConns = 5
+	pgConfig.ConnectTimeout = 30 // Default to 30 seconds
 
 	if maxOpen, ok := config["max_open_conns"].(float64); ok {
 		pgConfig.MaxOpenConns = int(maxOpen)
 	}
 	if maxIdle, ok := config["max_idle_conns"].(float64); ok {
 		pgConfig.MaxIdleConns = int(maxIdle)
+	}
+	if connectTimeout, ok := config["connect_timeout"].(float64); ok {
+		pgConfig.ConnectTimeout = int(connectTimeout)
 	}
 
 	return pgConfig, nil

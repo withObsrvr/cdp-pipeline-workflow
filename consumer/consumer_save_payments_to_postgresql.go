@@ -40,6 +40,7 @@ type Payment struct {
 type PaymentsPostgreSQLConfig struct {
 	ConnectionString string
 	BatchSize        int
+	ConnectTimeout   int
 }
 
 func parsePaymentsPostgreSQLConfig(config map[string]interface{}) (PaymentsPostgreSQLConfig, error) {
@@ -47,18 +48,60 @@ func parsePaymentsPostgreSQLConfig(config map[string]interface{}) (PaymentsPostg
 
 	// Set default batch size
 	pgConfig.BatchSize = 1000
+	pgConfig.ConnectTimeout = 30 // Default to 30 seconds
 
 	// Override with config if provided
-	if batchSize, ok := config["batch_size"].(int); ok {
-		pgConfig.BatchSize = batchSize
+	if batchSize, ok := config["batch_size"].(float64); ok {
+		pgConfig.BatchSize = int(batchSize)
 	}
 
-	// Get connection string
-	connStr, ok := config["connection_string"].(string)
-	if !ok || connStr == "" {
-		return pgConfig, fmt.Errorf("missing or empty connection_string in config")
+	if connectTimeout, ok := config["connect_timeout"].(float64); ok {
+		pgConfig.ConnectTimeout = int(connectTimeout)
 	}
-	pgConfig.ConnectionString = connStr
+
+	// Check if connection string is provided directly
+	connStr, ok := config["connection_string"].(string)
+	if ok && connStr != "" {
+		pgConfig.ConnectionString = connStr
+		return pgConfig, nil
+	}
+
+	// Otherwise, build connection string from individual parameters
+	host, ok := config["host"].(string)
+	if !ok {
+		return pgConfig, fmt.Errorf("missing host in config")
+	}
+
+	port := 5432 // Default PostgreSQL port
+	if portVal, ok := config["port"].(float64); ok {
+		port = int(portVal)
+	}
+
+	database, ok := config["database"].(string)
+	if !ok {
+		return pgConfig, fmt.Errorf("missing database in config")
+	}
+
+	username, ok := config["username"].(string)
+	if !ok {
+		return pgConfig, fmt.Errorf("missing username in config")
+	}
+
+	password, ok := config["password"].(string)
+	if !ok {
+		return pgConfig, fmt.Errorf("missing password in config")
+	}
+
+	sslMode := "disable" // Default to disable
+	if sslModeVal, ok := config["sslmode"].(string); ok {
+		sslMode = sslModeVal
+	}
+
+	// Build connection string
+	pgConfig.ConnectionString = fmt.Sprintf(
+		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s connect_timeout=%d",
+		host, port, database, username, password, sslMode, pgConfig.ConnectTimeout,
+	)
 
 	return pgConfig, nil
 }
@@ -69,14 +112,22 @@ func NewSavePaymentToPostgreSQL(config map[string]interface{}) (*SavePaymentToPo
 		return nil, err
 	}
 
+	log.Printf("Connecting to PostgreSQL with connection string: %s", pgConfig.ConnectionString)
+
 	db, err := sql.Open("postgres", pgConfig.ConnectionString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to PostgreSQL: %v", err)
 	}
 
-	if err := db.Ping(); err != nil {
+	// Test connection with context timeout
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(pgConfig.ConnectTimeout)*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(ctx); err != nil {
 		return nil, fmt.Errorf("failed to ping PostgreSQL: %v", err)
 	}
+
+	log.Printf("Successfully connected to PostgreSQL")
 
 	if err := initializePaymentDatabase(db); err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %v", err)
