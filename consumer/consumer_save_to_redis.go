@@ -2,6 +2,7 @@ package consumer
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -21,11 +22,13 @@ type SaveToRedis struct {
 }
 
 type RedisConfig struct {
-	Address   string
-	Password  string
-	DB        int
-	KeyPrefix string
-	TTLHours  int
+	Address       string
+	Password      string
+	DB            int
+	KeyPrefix     string
+	TTLHours      int
+	UseTLS        bool
+	ConnectionURL string
 }
 
 func NewSaveToRedis(config map[string]interface{}) (*SaveToRedis, error) {
@@ -35,18 +38,44 @@ func NewSaveToRedis(config map[string]interface{}) (*SaveToRedis, error) {
 		return nil, err
 	}
 
-	// Create Redis client
-	client := redis.NewClient(&redis.Options{
-		Addr:     redisConfig.Address,
-		Password: redisConfig.Password,
-		DB:       redisConfig.DB,
-	})
+	var client *redis.Client
+
+	// Check if we're using a Redis URL
+	if redisConfig.ConnectionURL != "" {
+		// Use Redis URL (supports both redis:// and rediss://)
+		opt, err := redis.ParseURL(redisConfig.ConnectionURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Redis URL: %v", err)
+		}
+		client = redis.NewClient(opt)
+		log.Printf("Connecting to Redis using URL: %s", redisConfig.ConnectionURL)
+	} else {
+		// Create Redis options
+		opts := &redis.Options{
+			Addr:      redisConfig.Address,
+			Password:  redisConfig.Password,
+			DB:        redisConfig.DB,
+			TLSConfig: nil, // Default to no TLS
+		}
+
+		// Enable TLS if specified
+		if redisConfig.UseTLS {
+			opts.TLSConfig = &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			}
+		}
+
+		client = redis.NewClient(opts)
+		log.Printf("Connecting to Redis at %s (TLS: %v)...", redisConfig.Address, redisConfig.UseTLS)
+	}
 
 	// Test connection
 	ctx := context.Background()
 	if err := client.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %v", err)
 	}
+
+	log.Printf("Successfully connected to Redis")
 
 	ttl := time.Duration(redisConfig.TTLHours) * time.Hour
 
@@ -60,30 +89,45 @@ func NewSaveToRedis(config map[string]interface{}) (*SaveToRedis, error) {
 func parseRedisConfig(config map[string]interface{}) (RedisConfig, error) {
 	var redisConfig RedisConfig
 
-	addr, ok := config["address"].(string)
-	if !ok {
-		return redisConfig, fmt.Errorf("missing Redis address")
-	}
-	redisConfig.Address = addr
+	// Check for Redis URL first
+	if url, ok := config["redis_url"].(string); ok && url != "" {
+		redisConfig.ConnectionURL = url
+	} else {
+		// Get Redis address
+		address, ok := config["redis_address"].(string)
+		if !ok {
+			return redisConfig, fmt.Errorf("missing redis_address in config")
+		}
+		redisConfig.Address = address
 
-	if password, ok := config["password"].(string); ok {
-		redisConfig.Password = password
+		// Get Redis password (optional)
+		if password, ok := config["redis_password"].(string); ok {
+			redisConfig.Password = password
+		}
+
+		// Get Redis DB (optional, default to 0)
+		if db, ok := config["redis_db"].(float64); ok {
+			redisConfig.DB = int(db)
+		}
+
+		// Check if TLS is enabled
+		if useTLS, ok := config["use_tls"].(bool); ok {
+			redisConfig.UseTLS = useTLS
+		}
 	}
 
-	if db, ok := config["db"].(float64); ok {
-		redisConfig.DB = int(db)
-	}
-
+	// Get key prefix (optional, default to "stellar:")
 	if prefix, ok := config["key_prefix"].(string); ok {
 		redisConfig.KeyPrefix = prefix
 	} else {
 		redisConfig.KeyPrefix = "stellar:"
 	}
 
+	// Get TTL in hours (optional, default to 24)
 	if ttl, ok := config["ttl_hours"].(float64); ok {
 		redisConfig.TTLHours = int(ttl)
 	} else {
-		redisConfig.TTLHours = 24 // Default 24 hours TTL
+		redisConfig.TTLHours = 24
 	}
 
 	return redisConfig, nil

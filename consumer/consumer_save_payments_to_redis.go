@@ -2,6 +2,7 @@ package consumer
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -25,35 +26,84 @@ type RedisPaymentConfig struct {
 }
 
 func NewSavePaymentsToRedis(config map[string]interface{}) (*SavePaymentsToRedis, error) {
-	// Parse configuration
-	connStr, ok := config["connection_string"].(string)
-	if !ok || connStr == "" {
-		return nil, fmt.Errorf("missing or empty connection_string in config")
-	}
+	var client *redis.Client
 
+	// Check if we're using a Redis URL or individual connection parameters
+	connStr, hasConnStr := config["connection_string"].(string)
+	redisURL, hasRedisURL := config["redis_url"].(string)
+
+	// Set default key prefix
 	keyPrefix, _ := config["key_prefix"].(string)
 	if keyPrefix == "" {
 		keyPrefix = "stellar:payments:"
 	}
 
+	// Set default TTL
 	ttlHours := 24 // Default 24 hours TTL
 	if ttl, ok := config["ttl_hours"].(float64); ok {
 		ttlHours = int(ttl)
 	}
 
-	// Create Redis client
-	opt, err := redis.ParseURL(connStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid connection string: %w", err)
-	}
+	// Handle connection based on provided parameters
+	if hasRedisURL {
+		// Use Redis URL (supports both redis:// and rediss://)
+		opt, err := redis.ParseURL(redisURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Redis URL: %w", err)
+		}
+		client = redis.NewClient(opt)
+		log.Printf("Connecting to Redis using URL: %s", redisURL)
+	} else if hasConnStr {
+		// Legacy connection string support
+		opt, err := redis.ParseURL(connStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid connection string: %w", err)
+		}
+		client = redis.NewClient(opt)
+		log.Printf("Connecting to Redis using connection string: %s", connStr)
+	} else {
+		// Use individual connection parameters
+		address, ok := config["redis_address"].(string)
+		if !ok {
+			return nil, fmt.Errorf("missing redis_address in config")
+		}
 
-	client := redis.NewClient(opt)
+		password, _ := config["redis_password"].(string)
+
+		dbNum := 0
+		if db, ok := config["redis_db"].(float64); ok {
+			dbNum = int(db)
+		}
+
+		// Check if TLS is enabled
+		useTLS, _ := config["use_tls"].(bool)
+
+		// Create Redis options
+		opts := &redis.Options{
+			Addr:      address,
+			Password:  password,
+			DB:        dbNum,
+			TLSConfig: nil, // Default to no TLS
+		}
+
+		// Enable TLS if specified
+		if useTLS {
+			opts.TLSConfig = &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			}
+		}
+
+		client = redis.NewClient(opts)
+		log.Printf("Connecting to Redis at %s (TLS: %v)...", address, useTLS)
+	}
 
 	// Test connection
 	ctx := context.Background()
 	if err := client.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
+
+	log.Printf("Successfully connected to Redis")
 
 	return &SavePaymentsToRedis{
 		client:    client,

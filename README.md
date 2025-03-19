@@ -142,6 +142,43 @@ consumers:
       connect_timeout: 30      # 30 seconds timeout
 ```
 
+### Connecting to Secure Redis Servers
+
+When connecting to managed Redis services that require TLS (rediss://), you have two options:
+
+1. **Use Individual Connection Parameters with TLS**:
+   ```yaml
+   consumers:
+     - type: SaveLatestLedgerToRedis
+       config:
+         redis_address: "your-redis-host.example.com:6380"
+         redis_password: "your-redis-password"
+         redis_db: 0
+         key_prefix: "stellar:ledger:"
+         use_tls: true  # Enable TLS for secure connections
+   ```
+
+2. **Use Redis URL**:
+   ```yaml
+   consumers:
+     - type: SaveLatestLedgerToRedis
+       config:
+         redis_url: "rediss://user:password@your-redis-host.example.com:6380/0"
+         key_prefix: "stellar:ledger:"
+   ```
+
+For local development without TLS, you can use:
+```yaml
+consumers:
+  - type: SaveLatestLedgerToRedis
+    config:
+      redis_address: "localhost:6379"
+      redis_password: ""
+      redis_db: 0
+      key_prefix: "stellar:ledger:"
+      use_tls: false
+```
+
 ### DuckDB Account Data Consumer Configuration
 ```yaml
 pipelines:

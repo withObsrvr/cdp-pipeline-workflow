@@ -2,6 +2,7 @@ package consumer
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -30,17 +31,53 @@ func NewSaveLatestLedgerRedis(config map[string]interface{}) (*SaveLatestLedgerR
 		keyPrefix = "stellar:ledger:"
 	}
 
-	client := redis.NewClient(&redis.Options{
-		Addr:     address,
-		Password: password,
-		DB:       dbNum,
-	})
+	// Check if TLS is enabled
+	useTLS, _ := config["use_tls"].(bool)
+
+	// Create Redis options
+	opts := &redis.Options{
+		Addr:      address,
+		Password:  password,
+		DB:        dbNum,
+		TLSConfig: nil, // Default to no TLS
+	}
+
+	// Enable TLS if specified
+	if useTLS {
+		opts.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+	}
+
+	// Check if we're using a Redis URL instead of address
+	redisURL, isURL := config["redis_url"].(string)
+	if isURL {
+		// Parse the Redis URL
+		parsedOpts, err := redis.ParseURL(redisURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse Redis URL: %v", err)
+		}
+
+		// Use the parsed options but keep our TLS config if specified
+		opts = parsedOpts
+		if useTLS {
+			opts.TLSConfig = &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			}
+		}
+	}
+
+	log.Printf("Connecting to Redis at %s (TLS: %v)...", opts.Addr, useTLS)
+
+	client := redis.NewClient(opts)
 
 	// Test connection
 	ctx := context.Background()
 	if err := client.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %v", err)
 	}
+
+	log.Printf("Successfully connected to Redis at %s", opts.Addr)
 
 	return &SaveLatestLedgerRedis{
 		client:    client,
