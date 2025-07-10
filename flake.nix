@@ -190,13 +190,13 @@
           REGISTRY="''${2:-docker.io}"
           
           echo "Loading container image..."
-          ${nerdctl}/bin/nerdctl load < ${container-prod}
+          ${pkgs.nerdctl}/bin/nerdctl load < ${container-prod}
           
           echo "Tagging image..."
-          ${nerdctl}/bin/nerdctl tag "$IMAGE_NAME:latest" "$REGISTRY/$IMAGE_NAME:$TAG"
+          ${pkgs.nerdctl}/bin/nerdctl tag "$IMAGE_NAME:latest" "$REGISTRY/$IMAGE_NAME:$TAG"
           
           echo "Pushing to DockerHub..."
-          ${nerdctl}/bin/nerdctl push "$REGISTRY/$IMAGE_NAME:$TAG"
+          ${pkgs.nerdctl}/bin/nerdctl push "$REGISTRY/$IMAGE_NAME:$TAG"
           
           echo "Successfully pushed $REGISTRY/$IMAGE_NAME:$TAG"
         '';
@@ -209,13 +209,13 @@
           REGISTRY="''${2:-docker.io}"
           
           echo "Loading container image..."
-          ${nerdctl}/bin/nerdctl load < ${container-dev}
+          ${pkgs.nerdctl}/bin/nerdctl load < ${container-dev}
           
           echo "Tagging image..."
-          ${nerdctl}/bin/nerdctl tag "$IMAGE_NAME:latest" "$REGISTRY/$IMAGE_NAME:$TAG"
+          ${pkgs.nerdctl}/bin/nerdctl tag "$IMAGE_NAME:latest" "$REGISTRY/$IMAGE_NAME:$TAG"
           
           echo "Pushing to DockerHub..."
-          ${nerdctl}/bin/nerdctl push "$REGISTRY/$IMAGE_NAME:$TAG"
+          ${pkgs.nerdctl}/bin/nerdctl push "$REGISTRY/$IMAGE_NAME:$TAG"
           
           echo "Successfully pushed $REGISTRY/$IMAGE_NAME:$TAG"
         '';
