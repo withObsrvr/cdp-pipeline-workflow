@@ -229,22 +229,19 @@
             # Go development
             go_1_23
             
-            # System dependencies
-          ] ++ systemDeps ++ devTools ++ [
-            # Push scripts
-            pushToProd
-            pushToDev
-          ];
+            # System dependencies and development tools
+          ] ++ systemDeps ++ devTools;
 
           shellHook = ''
             echo "🚀 CDP Pipeline Workflow Development Environment"
             echo ""
             echo "Available commands:"
-            echo "  nix build                    - Build the Go application"
-            echo "  nix build .#container-prod   - Build production container"
-            echo "  nix build .#container-dev    - Build development container"
-            echo "  push-to-dockerhub-prod      - Push production image to DockerHub"
-            echo "  push-to-dockerhub-dev       - Push development image to DockerHub"
+            echo "  go build -o cdp-pipeline-workflow        - Build Go application locally"
+            echo "  nix build                                - Build the Go application with Nix"
+            echo "  nix build .#container-prod               - Build production container"
+            echo "  nix build .#container-dev                - Build development container"
+            echo "  nix build .#push-to-dockerhub-prod       - Build DockerHub push script (prod)"
+            echo "  nix build .#push-to-dockerhub-dev        - Build DockerHub push script (dev)"
             echo ""
             echo "Environment setup:"
             echo "  CGO_ENABLED=1"
