@@ -47,6 +47,8 @@ go test -v ./...
 go test ./pkg/processor/...
 ```
 
+Note: The codebase currently has no test files (*_test.go). Testing relies on Docker-based integration testing and manual configuration testing.
+
 ## Architecture
 
 ### Core Components
@@ -109,8 +111,18 @@ Source -> Processor(s) -> Consumer(s)
 - Base configurations in `config/base/`
 - Secret configurations (credentials) use `.secret.yaml` extension
 - Template configurations available for common use cases
+- Environment variables can override config values (e.g., AWS_ACCESS_KEY_ID, GOOGLE_APPLICATION_CREDENTIALS)
 
 ### Docker Development
 - Development workflow uses `dockerfile.dev` with debugging tools
 - Production builds use multi-stage `dockerfile` with minimal runtime
 - `run-local.sh` script simplifies local Docker development
+- Go version: 1.23 (production), 1.22.5 (development)
+- Required system libraries: libzmq3-dev, libczmq-dev, libsodium-dev
+
+### Common Pipeline Types
+- **Ledger processing**: Process all ledger data from blockchain
+- **Payment filtering**: Extract specific payment operations
+- **Account monitoring**: Track account changes and transactions
+- **Contract events**: Monitor Soroban smart contract events
+- **Market data**: Process DEX trades and market metrics
