@@ -21,6 +21,7 @@
           zeromq
           czmq
           libsodium
+          apache-arrow
           pkg-config
           gcc
           gnumake
@@ -78,9 +79,9 @@
           # Set build environment
           preBuild = ''
             export CGO_ENABLED=1
-            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium}/include"
-            export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib"
-            export PKG_CONFIG_PATH="${pkgs.zeromq}/lib/pkgconfig:${pkgs.czmq}/lib/pkgconfig:${pkgs.libsodium}/lib/pkgconfig"
+            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium}/include -I${pkgs.apache-arrow}/include"
+            export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib -L${pkgs.apache-arrow}/lib"
+            export PKG_CONFIG_PATH="${pkgs.zeromq}/lib/pkgconfig:${pkgs.czmq}/lib/pkgconfig:${pkgs.libsodium}/lib/pkgconfig:${pkgs.apache-arrow}/lib/pkgconfig"
           '';
 
           # Skip tests as they don't exist yet
@@ -252,9 +253,9 @@
             
             # Set up CGO environment
             export CGO_ENABLED=1
-            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium}/include"
-            export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib"
-            export PKG_CONFIG_PATH="${pkgs.zeromq}/lib/pkgconfig:${pkgs.czmq}/lib/pkgconfig:${pkgs.libsodium}/lib/pkgconfig"
+            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium}/include -I${pkgs.apache-arrow}/include"
+            export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib -L${pkgs.apache-arrow}/lib"
+            export PKG_CONFIG_PATH="${pkgs.zeromq}/lib/pkgconfig:${pkgs.czmq}/lib/pkgconfig:${pkgs.libsodium}/lib/pkgconfig:${pkgs.apache-arrow}/lib/pkgconfig"
           '';
         };
 
