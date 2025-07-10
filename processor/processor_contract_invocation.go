@@ -16,17 +16,19 @@ import (
 
 // ContractInvocation represents a contract invocation event
 type ContractInvocation struct {
-	Timestamp        time.Time         `json:"timestamp"`
-	LedgerSequence   uint32            `json:"ledger_sequence"`
-	TransactionHash  string            `json:"transaction_hash"`
-	ContractID       string            `json:"contract_id"`
-	InvokingAccount  string            `json:"invoking_account"`
-	FunctionName     string            `json:"function_name,omitempty"`
-	Successful       bool              `json:"successful"`
-	DiagnosticEvents []DiagnosticEvent `json:"diagnostic_events,omitempty"`
-	ContractCalls    []ContractCall    `json:"contract_calls,omitempty"`
-	StateChanges     []StateChange     `json:"state_changes,omitempty"`
-	TtlExtensions    []TtlExtension    `json:"ttl_extensions,omitempty"`
+	Timestamp        time.Time              `json:"timestamp"`
+	LedgerSequence   uint32                 `json:"ledger_sequence"`
+	TransactionHash  string                 `json:"transaction_hash"`
+	ContractID       string                 `json:"contract_id"`
+	InvokingAccount  string                 `json:"invoking_account"`
+	FunctionName     string                 `json:"function_name,omitempty"`
+	Arguments        []json.RawMessage      `json:"arguments,omitempty"`
+	ArgumentsDecoded map[string]interface{} `json:"arguments_decoded,omitempty"`
+	Successful       bool                   `json:"successful"`
+	DiagnosticEvents []DiagnosticEvent      `json:"diagnostic_events,omitempty"`
+	ContractCalls    []ContractCall         `json:"contract_calls,omitempty"`
+	StateChanges     []StateChange          `json:"state_changes,omitempty"`
+	TtlExtensions    []TtlExtension         `json:"ttl_extensions,omitempty"`
 }
 
 // DiagnosticEvent represents a diagnostic event emitted during contract execution
@@ -199,12 +201,21 @@ func (p *ContractInvocationProcessor) processContractInvocation(
 		Successful:      successful,
 	}
 
-	// Try to get function name if available
+	// Extract function name and arguments
 	if function := invokeHostFunction.HostFunction; function.Type == xdr.HostFunctionTypeHostFunctionTypeInvokeContract {
-		if args := function.MustInvokeContract().Args; len(args) > 0 {
-			if sym, ok := args[0].GetSym(); ok {
-				invocation.FunctionName = string(sym)
+		invokeContract := function.MustInvokeContract()
+		
+		// Extract function name using robust method
+		invocation.FunctionName = extractFunctionName(invokeContract)
+		
+		// Extract and convert arguments
+		if len(invokeContract.Args) > 0 {
+			rawArgs, decodedArgs, err := extractArguments(invokeContract.Args)
+			if err != nil {
+				log.Printf("Error extracting arguments: %v", err)
 			}
+			invocation.Arguments = rawArgs
+			invocation.ArgumentsDecoded = decodedArgs
 		}
 	}
 
@@ -412,4 +423,53 @@ func (p *ContractInvocationProcessor) extractTtlExtensions(tx ingest.LedgerTrans
 	}
 
 	return extensions
+}
+
+// extractFunctionName extracts the function name from a contract invocation
+func extractFunctionName(invokeContract xdr.InvokeContractArgs) string {
+	// Primary method: Use FunctionName field directly
+	if len(invokeContract.FunctionName) > 0 {
+		return string(invokeContract.FunctionName)
+	}
+	
+	// Fallback: Check first argument if it contains function name
+	if len(invokeContract.Args) > 0 {
+		functionName := GetFunctionNameFromScVal(invokeContract.Args[0])
+		if functionName != "" {
+			return functionName
+		}
+	}
+	
+	return "unknown"
+}
+
+// extractArguments extracts and converts all function arguments
+func extractArguments(args []xdr.ScVal) ([]json.RawMessage, map[string]interface{}, error) {
+	rawArgs := make([]json.RawMessage, 0, len(args))
+	decodedArgs := make(map[string]interface{})
+	
+	for i, arg := range args {
+		// Convert ScVal to JSON-serializable format
+		converted, err := ConvertScValToJSON(arg)
+		if err != nil {
+			log.Printf("Error converting argument %d: %v", i, err)
+			converted = map[string]interface{}{
+				"error": err.Error(),
+				"type":  arg.Type.String(),
+			}
+		}
+		
+		// Store raw JSON
+		jsonBytes, err := json.Marshal(converted)
+		if err != nil {
+			log.Printf("Error marshaling argument %d: %v", i, err)
+			continue
+		}
+		rawArgs = append(rawArgs, jsonBytes)
+		
+		// Store in decoded map with index
+		decodedArgs[fmt.Sprintf("arg_%d", i)] = converted
+	}
+	
+	return rawArgs, decodedArgs, nil
 }

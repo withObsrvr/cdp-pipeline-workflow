@@ -152,6 +152,8 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewLatestLedgerProcessor(processorConfig.Config)
 	case "AccountTransaction":
 		return processor.NewAccountTransactionProcessor(processorConfig.Config)
+	case "AccountDataFilter":
+		return processor.NewAccountDataFilter(processorConfig.Config)
 	case "FilteredContractInvocation":
 		return processor.NewFilteredContractInvocationProcessor(processorConfig.Config)
 	case "AccountYearAnalytics":
