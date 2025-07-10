@@ -47,3 +47,11 @@ go.work
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Nix build outputs
+result
+result-*
+.direnv/
+
+# Nix flake lock file (optional - can be committed for reproducibility)
+# flake.lock
