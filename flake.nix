@@ -66,7 +66,7 @@
           buildInputs = systemDeps;
 
           # Enable CGO
-          CGO_ENABLED = "1";
+          env.CGO_ENABLED = "1";
 
           # Build flags
           ldflags = [
@@ -106,7 +106,7 @@
               cdp-pipeline
               coreutils
               bash
-              ca-certificates
+              cacert
               tzdata
               # Runtime libraries
               zeromq
@@ -141,7 +141,7 @@
               cdp-pipeline
               coreutils
               bash
-              ca-certificates
+              cacert
               tzdata
               # Runtime libraries
               zeromq
