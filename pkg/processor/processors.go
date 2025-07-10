@@ -2,6 +2,7 @@ package processor
 
 import (
 	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/common/types"
+	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/processor/account"
 	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/processor/base"
 	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/processor/contract/kale"
 	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/processor/contract/soroswap"
@@ -23,5 +24,10 @@ func init() {
 	// Register LatestLedger processor
 	base.RegisterProcessor("LatestLedger", func(config map[string]interface{}) (types.Processor, error) {
 		return ledger.NewLatestLedgerProcessor(config)
+	})
+
+	// Register AccountDataFilter processor
+	base.RegisterProcessor("AccountDataFilter", func(config map[string]interface{}) (types.Processor, error) {
+		return account.NewAccountDataFilterAdapter(config)
 	})
 }
