@@ -91,26 +91,43 @@ nerdctl login docker.io
 # Enter your DockerHub username and password/token
 ```
 
-#### Push Production Image
+#### Build and Push Production Image
 ```bash
-# Push production image with default tag (latest)
-push-to-dockerhub-prod
+# Build the push script and execute it
+nix build .#push-to-dockerhub-prod
+./result/bin/push-to-dockerhub-prod
 
 # Push with custom tag
-push-to-dockerhub-prod v1.0.0
+./result/bin/push-to-dockerhub-prod v1.0.0
 
 # Push to custom registry
-push-to-dockerhub-prod latest your-registry.com
+./result/bin/push-to-dockerhub-prod latest your-registry.com
 ```
 
-#### Push Development Image
+#### Build and Push Development Image
 ```bash
-# Push development image
-push-to-dockerhub-dev
+# Build the push script and execute it
+nix build .#push-to-dockerhub-dev
+./result/bin/push-to-dockerhub-dev
 
 # Push with custom tag
-push-to-dockerhub-dev v1.0.0-dev
+./result/bin/push-to-dockerhub-dev v1.0.0-dev
 ```
+
+Note: The push scripts now build containers on-demand, so you don't need to pre-build the containers.
+
+## Architecture
+
+### Separation of Concerns
+
+The Nix configuration follows a separation of concerns approach:
+
+- **Development Shell** (`nix develop`): Provides Go, system dependencies, and development tools without building the application
+- **Application Build** (`nix build`): Builds the Go application with proper CGO setup
+- **Container Builds** (`nix build .#container-*`): Creates optimized container images
+- **Push Scripts** (`nix build .#push-to-dockerhub-*`): Standalone scripts that build containers on-demand and push to registries
+
+This architecture prevents circular dependencies and allows you to enter the development environment quickly without waiting for application builds.
 
 ## Development Workflow
 
@@ -125,7 +142,7 @@ push-to-dockerhub-dev v1.0.0-dev
 
 3. **Build and test locally:**
    ```bash
-   # Quick build
+   # Quick build (in development environment)
    go build -o cdp-pipeline-workflow
    
    # Or full Nix build
@@ -140,7 +157,9 @@ push-to-dockerhub-dev v1.0.0-dev
 
 5. **Push to registry:**
    ```bash
-   push-to-dockerhub-prod
+   # Build push script and execute
+   nix build .#push-to-dockerhub-prod
+   ./result/bin/push-to-dockerhub-prod
    ```
 
 ### Environment Variables

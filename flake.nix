@@ -182,7 +182,7 @@
           };
         };
 
-        # Docker push scripts
+        # Docker push scripts (standalone - build containers on demand)
         pushToProd = pkgs.writeShellScriptBin "push-to-dockerhub-prod" ''
           set -e
           
@@ -190,8 +190,11 @@
           TAG="''${1:-latest}"
           REGISTRY="''${2:-docker.io}"
           
+          echo "Building production container..."
+          CONTAINER_PATH=$(nix build --no-link --print-out-paths .#container-prod)
+          
           echo "Loading container image..."
-          ${pkgs.nerdctl}/bin/nerdctl load < ${container-prod}
+          ${pkgs.nerdctl}/bin/nerdctl load < "$CONTAINER_PATH"
           
           echo "Tagging image..."
           ${pkgs.nerdctl}/bin/nerdctl tag "$IMAGE_NAME:latest" "$REGISTRY/$IMAGE_NAME:$TAG"
@@ -209,8 +212,11 @@
           TAG="''${1:-latest}"
           REGISTRY="''${2:-docker.io}"
           
+          echo "Building development container..."
+          CONTAINER_PATH=$(nix build --no-link --print-out-paths .#container-dev)
+          
           echo "Loading container image..."
-          ${pkgs.nerdctl}/bin/nerdctl load < ${container-dev}
+          ${pkgs.nerdctl}/bin/nerdctl load < "$CONTAINER_PATH"
           
           echo "Tagging image..."
           ${pkgs.nerdctl}/bin/nerdctl tag "$IMAGE_NAME:latest" "$REGISTRY/$IMAGE_NAME:$TAG"
@@ -253,6 +259,9 @@
             export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium}/include -I${pkgs.arrow-cpp}/include"
             export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib -L${pkgs.arrow-cpp}/lib"
             export PKG_CONFIG_PATH="${pkgs.zeromq}/lib/pkgconfig:${pkgs.czmq}/lib/pkgconfig:${pkgs.libsodium}/lib/pkgconfig:${pkgs.arrow-cpp}/lib/pkgconfig"
+            
+            # Set custom prompt to indicate Nix development environment
+            export PS1="\[\033[1;34m\][nix-cdp]\[\033[0m\] \[\033[1;32m\]\u@\h\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$ "
           '';
         };
 
