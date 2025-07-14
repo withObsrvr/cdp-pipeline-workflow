@@ -7,7 +7,7 @@ This document outlines the implementation plan for adding dual representation (r
 ## Background
 
 The Contract Events Processor already implements dual representation for topics and data fields:
-- `Topic []xdr.ScVal` (raw) + `TopicDecoded []interface{}` (decoded)
+- `Topics []xdr.ScVal` (raw) + `TopicsDecoded []interface{}` (decoded)
 - `Data json.RawMessage` (semi-raw) + `DataDecoded interface{}` (decoded)
 
 The Contract Invocation Processor should follow this pattern for better data accessibility and precision.

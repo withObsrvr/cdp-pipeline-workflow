@@ -410,43 +410,13 @@ func (p *ContractInvocationProcessor) extractStateChanges(tx ingest.LedgerTransa
 			continue
 		}
 
-		var contractID string
-		var keyRaw xdr.ScVal
-		var key string
-		var oldValueRaw, newValueRaw xdr.ScVal
-		var oldValue, newValue interface{}
-		var operation string
-
 		switch change.LedgerEntryChangeType() {
 		case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
 			if change.Post != nil && change.Post.Data.Type == xdr.LedgerEntryTypeContractData {
 				contractData := change.Post.Data.ContractData
-
-				// Extract contract ID
-				contractIDBytes := contractData.Contract.ContractId
-				contractID, err = strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
-				if err != nil {
-					log.Printf("Error encoding contract ID: %v", err)
-					continue
+				if stateChange := p.extractStateChangeFromContractData(*contractData, xdr.ScVal{}, contractData.Val, "create"); stateChange != nil {
+					changes = append(changes, *stateChange)
 				}
-
-				// Extract key
-				keyRaw = contractData.Key
-				if keyDecoded, err := ConvertScValToJSON(keyRaw); err == nil {
-					if keyStr, ok := keyDecoded.(string); ok {
-						key = keyStr
-					} else {
-						// Convert complex keys to JSON string representation
-						if keyBytes, err := json.Marshal(keyDecoded); err == nil {
-							key = string(keyBytes)
-						}
-					}
-				}
-
-				// Extract new value
-				newValueRaw = contractData.Val
-				newValue, _ = ConvertScValToJSON(newValueRaw)
-				operation = "create"
 			}
 
 		case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
@@ -456,81 +426,72 @@ func (p *ContractInvocationProcessor) extractStateChanges(tx ingest.LedgerTransa
 
 				preData := change.Pre.Data.ContractData
 				postData := change.Post.Data.ContractData
-
-				// Extract contract ID
-				contractIDBytes := postData.Contract.ContractId
-				contractID, err = strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
-				if err != nil {
-					log.Printf("Error encoding contract ID: %v", err)
-					continue
+				if stateChange := p.extractStateChangeFromContractData(*postData, preData.Val, postData.Val, "update"); stateChange != nil {
+					changes = append(changes, *stateChange)
 				}
-
-				// Extract key
-				keyRaw = postData.Key
-				if keyDecoded, err := ConvertScValToJSON(keyRaw); err == nil {
-					if keyStr, ok := keyDecoded.(string); ok {
-						key = keyStr
-					} else {
-						if keyBytes, err := json.Marshal(keyDecoded); err == nil {
-							key = string(keyBytes)
-						}
-					}
-				}
-
-				// Extract old and new values
-				oldValueRaw = preData.Val
-				oldValue, _ = ConvertScValToJSON(oldValueRaw)
-				newValueRaw = postData.Val
-				newValue, _ = ConvertScValToJSON(newValueRaw)
-				operation = "update"
 			}
 
 		case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
 			if change.Pre != nil && change.Pre.Data.Type == xdr.LedgerEntryTypeContractData {
 				contractData := change.Pre.Data.ContractData
-
-				// Extract contract ID
-				contractIDBytes := contractData.Contract.ContractId
-				contractID, err = strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
-				if err != nil {
-					log.Printf("Error encoding contract ID: %v", err)
-					continue
+				if stateChange := p.extractStateChangeFromContractData(*contractData, contractData.Val, xdr.ScVal{}, "delete"); stateChange != nil {
+					changes = append(changes, *stateChange)
 				}
-
-				// Extract key
-				keyRaw = contractData.Key
-				if keyDecoded, err := ConvertScValToJSON(keyRaw); err == nil {
-					if keyStr, ok := keyDecoded.(string); ok {
-						key = keyStr
-					} else {
-						if keyBytes, err := json.Marshal(keyDecoded); err == nil {
-							key = string(keyBytes)
-						}
-					}
-				}
-
-				// Extract old value
-				oldValueRaw = contractData.Val
-				oldValue, _ = ConvertScValToJSON(oldValueRaw)
-				operation = "delete"
 			}
-		}
-
-		if contractID != "" {
-			changes = append(changes, StateChange{
-				ContractID:  contractID,
-				KeyRaw:      keyRaw,
-				Key:         key,
-				OldValueRaw: oldValueRaw,
-				OldValue:    oldValue,
-				NewValueRaw: newValueRaw,
-				NewValue:    newValue,
-				Operation:   operation,
-			})
 		}
 	}
 
 	return changes
+}
+
+// extractStateChangeFromContractData extracts state change information from contract data
+// Helper function to reduce code duplication in extractStateChanges
+func (p *ContractInvocationProcessor) extractStateChangeFromContractData(
+	contractData xdr.ContractDataEntry,
+	oldValueRaw, newValueRaw xdr.ScVal,
+	operation string,
+) *StateChange {
+	// Extract contract ID
+	contractIDBytes := contractData.Contract.ContractId
+	contractID, err := strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
+	if err != nil {
+		log.Printf("Error encoding contract ID: %v", err)
+		return nil
+	}
+
+	// Extract key
+	keyRaw := contractData.Key
+	var key string
+	if keyDecoded, err := ConvertScValToJSON(keyRaw); err == nil {
+		if keyStr, ok := keyDecoded.(string); ok {
+			key = keyStr
+		} else {
+			// Convert complex keys to JSON string representation
+			if keyBytes, err := json.Marshal(keyDecoded); err == nil {
+				key = string(keyBytes)
+			}
+		}
+	}
+
+	// Decode values
+	var oldValue, newValue interface{}
+	if operation != "create" {
+		oldValue, _ = ConvertScValToJSON(oldValueRaw)
+	}
+	if operation != "delete" {
+		newValue, _ = ConvertScValToJSON(newValueRaw)
+	}
+
+	return &StateChange{
+		ContractID:  contractID,
+		KeyRaw:      keyRaw,
+		Key:         key,
+		OldValueRaw: oldValueRaw,
+		OldValue:    oldValue,
+		NewValueRaw: newValueRaw,
+		NewValue:    newValue,
+		Operation:   operation,
+	}
 }
 
 // extractTtlExtensions extracts TTL extensions from transaction meta
@@ -574,7 +535,11 @@ func extractFunctionName(invokeContract xdr.InvokeContractArgs) string {
 
 // extractArguments extracts and converts all function arguments with dual representation
 func extractArguments(args []xdr.ScVal) ([]xdr.ScVal, []json.RawMessage, map[string]interface{}, error) {
-	rawArgs := make([]json.RawMessage, 0, len(args))
+	// Create a copy of the input slice to avoid unintended side effects
+	argsCopy := make([]xdr.ScVal, len(args))
+	copy(argsCopy, args)
+
+	jsonRawArgs := make([]json.RawMessage, 0, len(args))
 	decodedArgs := make(map[string]interface{})
 
 	for i, arg := range args {
@@ -594,11 +559,11 @@ func extractArguments(args []xdr.ScVal) ([]xdr.ScVal, []json.RawMessage, map[str
 			log.Printf("Error marshaling argument %d: %v", i, err)
 			continue
 		}
-		rawArgs = append(rawArgs, jsonBytes)
+		jsonRawArgs = append(jsonRawArgs, jsonBytes)
 
 		// Store in decoded map with index
 		decodedArgs[fmt.Sprintf("arg_%d", i)] = converted
 	}
 
-	return args, rawArgs, decodedArgs, nil
+	return argsCopy, jsonRawArgs, decodedArgs, nil
 }
