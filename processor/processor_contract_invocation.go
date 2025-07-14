@@ -414,8 +414,10 @@ func (p *ContractInvocationProcessor) extractStateChanges(tx ingest.LedgerTransa
 		case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
 			if change.Post != nil && change.Post.Data.Type == xdr.LedgerEntryTypeContractData {
 				contractData := change.Post.Data.ContractData
-				if stateChange := p.extractStateChangeFromContractData(*contractData, xdr.ScVal{}, contractData.Val, "create"); stateChange != nil {
-					changes = append(changes, *stateChange)
+				if contractData != nil {
+					if stateChange := p.extractStateChangeFromContractData(*contractData, xdr.ScVal{}, contractData.Val, "create"); stateChange != nil {
+						changes = append(changes, *stateChange)
+					}
 				}
 			}
 
@@ -426,16 +428,20 @@ func (p *ContractInvocationProcessor) extractStateChanges(tx ingest.LedgerTransa
 
 				preData := change.Pre.Data.ContractData
 				postData := change.Post.Data.ContractData
-				if stateChange := p.extractStateChangeFromContractData(*postData, preData.Val, postData.Val, "update"); stateChange != nil {
-					changes = append(changes, *stateChange)
+				if preData != nil && postData != nil {
+					if stateChange := p.extractStateChangeFromContractData(*postData, preData.Val, postData.Val, "update"); stateChange != nil {
+						changes = append(changes, *stateChange)
+					}
 				}
 			}
 
 		case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
 			if change.Pre != nil && change.Pre.Data.Type == xdr.LedgerEntryTypeContractData {
 				contractData := change.Pre.Data.ContractData
-				if stateChange := p.extractStateChangeFromContractData(*contractData, contractData.Val, xdr.ScVal{}, "delete"); stateChange != nil {
-					changes = append(changes, *stateChange)
+				if contractData != nil {
+					if stateChange := p.extractStateChangeFromContractData(*contractData, contractData.Val, xdr.ScVal{}, "delete"); stateChange != nil {
+						changes = append(changes, *stateChange)
+					}
 				}
 			}
 		}
@@ -453,6 +459,11 @@ func (p *ContractInvocationProcessor) extractStateChangeFromContractData(
 ) *StateChange {
 	// Extract contract ID
 	contractIDBytes := contractData.Contract.ContractId
+	if contractIDBytes == nil {
+		log.Printf("Contract ID is nil in state change data")
+		return nil
+	}
+
 	contractID, err := strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
 	if err != nil {
 		log.Printf("Error encoding contract ID: %v", err)

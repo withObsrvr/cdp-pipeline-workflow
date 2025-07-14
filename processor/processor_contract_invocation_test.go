@@ -284,5 +284,34 @@ func TestExtractStateChangeFromContractData(t *testing.T) {
 	}
 }
 
+func TestExtractStateChangeFromContractDataNilChecks(t *testing.T) {
+	// Test nil handling to prevent segmentation faults
+	processor := &ContractInvocationProcessor{
+		networkPassphrase: "Test SDF Network ; September 2015",
+	}
+
+	// Test with nil ContractId
+	contractDataWithNilID := xdr.ContractDataEntry{
+		Contract: xdr.ScAddress{
+			Type:       xdr.ScAddressTypeScAddressTypeContract,
+			ContractId: nil, // This should be handled gracefully
+		},
+		Key: xdr.ScVal{
+			Type: xdr.ScValTypeScvSymbol,
+			Sym:  &[]xdr.ScSymbol{xdr.ScSymbol("balance")}[0],
+		},
+		Val: xdr.ScVal{
+			Type: xdr.ScValTypeScvU64,
+			U64:  func() *xdr.Uint64 { v := xdr.Uint64(1000); return &v }(),
+		},
+	}
+
+	// This should return nil instead of panicking
+	stateChange := processor.extractStateChangeFromContractData(contractDataWithNilID, xdr.ScVal{}, xdr.ScVal{}, "create")
+	if stateChange != nil {
+		t.Error("Expected nil state change when ContractId is nil")
+	}
+}
+
 // Note: Complex mocking of ingest.LedgerTransaction interface was removed
 // in favor of more focused unit testing of the dual representation logic
