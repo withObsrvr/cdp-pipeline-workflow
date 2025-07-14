@@ -160,6 +160,8 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewAccountYearAnalytics(processorConfig.Config)
 	case "ContractFilter":
 		return processor.NewContractFilterProcessor(processorConfig.Config)
+	case "ContractInvocationExtractor":
+		return processor.NewContractInvocationExtractor(processorConfig.Config)
 	case "AccountEffect":
 		return processor.NewAccountEffectProcessor(processorConfig.Config)
 	case "LedgerChanges":
@@ -241,6 +243,8 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveSoroswapToPostgreSQL(consumerConfig.Config)
 	case "SaveContractInvocationsToPostgreSQL":
 		return consumer.NewSaveContractInvocationsToPostgreSQL(consumerConfig.Config)
+	case "SaveExtractedContractInvocationsToPostgreSQL":
+		return consumer.NewSaveExtractedContractInvocationsToPostgreSQL(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}

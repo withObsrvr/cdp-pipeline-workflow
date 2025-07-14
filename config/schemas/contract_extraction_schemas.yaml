@@ -1,0 +1,250 @@
+# Contract Extraction Schemas Configuration
+# This file defines how to extract business data from contract invocations
+
+extraction_schemas:
+  # Carbon sink contract schema
+  carbon_sink_v1:
+    schema_name: "carbon_sink_v1"
+    function_name: "sink_carbon"
+    contract_ids:
+      - "CASJKXVOKEBFC6HRNLLZKMEFJXYS3S5GOXM5DQRD7NDPIOQHCPAOLH7O"
+    extractors:
+      funder:
+        argument_index: 0
+        field_path: "address"
+        field_type: "string"
+        required: true
+      recipient:
+        argument_index: 1
+        field_path: "address"
+        field_type: "string"
+        required: true
+      amount:
+        argument_index: 2
+        field_path: ""
+        field_type: "uint64"
+        required: true
+      project_id:
+        argument_index: 3
+        field_path: ""
+        field_type: "string"
+        required: true
+      memo_text:
+        argument_index: 4
+        field_path: ""
+        field_type: "string"
+        required: false
+        default_value: ""
+      email:
+        argument_index: 5
+        field_path: ""
+        field_type: "string"
+        required: false
+        default_value: ""
+    validation:
+      funder:
+        min_length: 56
+        max_length: 56
+        pattern: "^G[A-Z2-7]{55}$"
+      recipient:
+        min_length: 56
+        max_length: 56
+        pattern: "^G[A-Z2-7]{55}$"
+      amount:
+        min_value: 1
+        max_value: 9223372036854775807
+      project_id:
+        min_length: 1
+        max_length: 100
+      email:
+        pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+
+  # Template for funding contract schema
+  funding_v1:
+    schema_name: "funding_v1"
+    function_name: "fund_project"
+    contract_ids:
+      - "CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    extractors:
+      funder:
+        argument_index: 0
+        field_path: "address"
+        field_type: "string"
+        required: true
+      recipient:
+        argument_index: 1
+        field_path: "address"
+        field_type: "string"
+        required: true
+      amount:
+        argument_index: 2
+        field_path: ""
+        field_type: "uint64"
+        required: true
+      project_id:
+        argument_index: 3
+        field_path: ""
+        field_type: "string"
+        required: true
+      memo_text:
+        argument_index: 4
+        field_path: ""
+        field_type: "string"
+        required: false
+        default_value: ""
+      email:
+        argument_index: 5
+        field_path: ""
+        field_type: "string"
+        required: false
+        default_value: ""
+    validation:
+      funder:
+        min_length: 56
+        max_length: 56
+        pattern: "^G[A-Z2-7]{55}$"
+      recipient:
+        min_length: 56
+        max_length: 56
+        pattern: "^G[A-Z2-7]{55}$"
+      amount:
+        min_value: 1
+      project_id:
+        min_length: 1
+        max_length: 100
+      email:
+        pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+
+  # Template for donation contract schema
+  donation_v1:
+    schema_name: "donation_v1"
+    function_name: "donate"
+    contract_ids:
+      - "CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    extractors:
+      funder:
+        argument_index: 0
+        field_path: "address"
+        field_type: "string"
+        required: true
+      recipient:
+        argument_index: 1
+        field_path: "address"
+        field_type: "string"
+        required: true
+      amount:
+        argument_index: 2
+        field_path: ""
+        field_type: "uint64"
+        required: true
+      project_id:
+        argument_index: 3
+        field_path: ""
+        field_type: "string"
+        required: true
+      memo_text:
+        argument_index: 4
+        field_path: ""
+        field_type: "string"
+        required: false
+        default_value: "Anonymous donation"
+      email:
+        argument_index: 5
+        field_path: ""
+        field_type: "string"
+        required: false
+        default_value: ""
+    validation:
+      funder:
+        min_length: 56
+        max_length: 56
+        pattern: "^G[A-Z2-7]{55}$"
+      recipient:
+        min_length: 56
+        max_length: 56
+        pattern: "^G[A-Z2-7]{55}$"
+      amount:
+        min_value: 1
+      project_id:
+        min_length: 1
+        max_length: 100
+      email:
+        pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+
+  # Template for transfer contract schema
+  transfer_v1:
+    schema_name: "transfer_v1"
+    function_name: "transfer"
+    contract_ids:
+      - "CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+    extractors:
+      funder:
+        argument_index: 0
+        field_path: "address"
+        field_type: "string"
+        required: true
+      recipient:
+        argument_index: 1
+        field_path: "address"
+        field_type: "string"
+        required: true
+      amount:
+        argument_index: 2
+        field_path: ""
+        field_type: "uint64"
+        required: true
+      project_id:
+        argument_index: 3
+        field_path: ""
+        field_type: "string"
+        required: false
+        default_value: ""
+      memo_text:
+        argument_index: 4
+        field_path: ""
+        field_type: "string"
+        required: false
+        default_value: ""
+      email:
+        argument_index: 5
+        field_path: ""
+        field_type: "string"
+        required: false
+        default_value: ""
+    validation:
+      funder:
+        min_length: 56
+        max_length: 56
+        pattern: "^G[A-Z2-7]{55}$"
+      recipient:
+        min_length: 56
+        max_length: 56
+        pattern: "^G[A-Z2-7]{55}$"
+      amount:
+        min_value: 1
+      memo_text:
+        max_length: 500
+      email:
+        pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+
+# Schema documentation:
+# 
+# schema_name: Unique identifier for the schema
+# function_name: Contract function name to match
+# contract_ids: List of contract IDs that use this schema
+# 
+# extractors:
+#   field_name:
+#     argument_index: Which argument (0-based) to extract from
+#     field_path: Path within the argument (e.g., "address" for nested objects)
+#     field_type: Data type ("string", "uint64", "address")
+#     required: Whether this field is required
+#     default_value: Default value if field is missing (optional)
+#
+# validation:
+#   field_name:
+#     min_length: Minimum string length
+#     max_length: Maximum string length
+#     pattern: Regular expression pattern
+#     min_value: Minimum numeric value
+#     max_value: Maximum numeric value

@@ -67,7 +67,7 @@ func NewSaveContractInvocationsToPostgreSQL(config map[string]interface{}) (*Sav
 
 // initializeContractInvocationsSchema creates the necessary tables for contract invocations
 func initializeContractInvocationsSchema(db *sql.DB) error {
-	// Create contract_invocations table
+	// Create contract_invocations table with dual representation support
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS contract_invocations (
 			id SERIAL PRIMARY KEY,
@@ -77,6 +77,7 @@ func initializeContractInvocationsSchema(db *sql.DB) error {
 			contract_id TEXT NOT NULL,
 			invoking_account TEXT NOT NULL,
 			function_name TEXT,
+			arguments_raw JSONB,
 			arguments JSONB,
 			arguments_decoded JSONB,
 			successful BOOLEAN NOT NULL,
@@ -94,6 +95,7 @@ func initializeContractInvocationsSchema(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_contract_invocations_ledger_sequence ON contract_invocations(ledger_sequence);
 		CREATE INDEX IF NOT EXISTS idx_contract_invocations_transaction_hash ON contract_invocations(transaction_hash);
 		CREATE INDEX IF NOT EXISTS idx_contract_invocations_function_name ON contract_invocations(function_name);
+		CREATE INDEX IF NOT EXISTS idx_contract_invocations_arguments_raw_gin ON contract_invocations USING gin(arguments_raw);
 		CREATE INDEX IF NOT EXISTS idx_contract_invocations_arguments_gin ON contract_invocations USING gin(arguments);
 		CREATE INDEX IF NOT EXISTS idx_contract_invocations_arguments_decoded_gin ON contract_invocations USING gin(arguments_decoded);
 	`)
@@ -106,6 +108,12 @@ func initializeContractInvocationsSchema(db *sql.DB) error {
 	_, err = db.Exec(`
 		DO $$ 
 		BEGIN 
+			-- Add arguments_raw column if it doesn't exist
+			IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+						   WHERE table_name = 'contract_invocations' AND column_name = 'arguments_raw') THEN
+				ALTER TABLE contract_invocations ADD COLUMN arguments_raw JSONB;
+			END IF;
+			
 			-- Add arguments column if it doesn't exist
 			IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
 						   WHERE table_name = 'contract_invocations' AND column_name = 'arguments') THEN
@@ -120,6 +128,7 @@ func initializeContractInvocationsSchema(db *sql.DB) error {
 		END $$;
 		
 		-- Create GIN indexes for JSONB columns if they don't exist
+		CREATE INDEX IF NOT EXISTS idx_contract_invocations_arguments_raw_gin ON contract_invocations USING gin(arguments_raw);
 		CREATE INDEX IF NOT EXISTS idx_contract_invocations_arguments_gin ON contract_invocations USING gin(arguments);
 		CREATE INDEX IF NOT EXISTS idx_contract_invocations_arguments_decoded_gin ON contract_invocations USING gin(arguments_decoded);
 	`)
@@ -128,14 +137,16 @@ func initializeContractInvocationsSchema(db *sql.DB) error {
 		return fmt.Errorf("failed to create contract_invocations table: %w", err)
 	}
 
-	// Create diagnostic_events table
+	// Create diagnostic_events table with dual representation support
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS contract_diagnostic_events (
 			id SERIAL PRIMARY KEY,
 			invocation_id INTEGER NOT NULL REFERENCES contract_invocations(id) ON DELETE CASCADE,
 			contract_id TEXT NOT NULL,
 			topics JSONB NOT NULL,
+			topics_decoded JSONB,
 			data JSONB,
+			data_decoded JSONB,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 			
 			CONSTRAINT check_diagnostic_contract_id CHECK (length(contract_id) > 0)
@@ -143,10 +154,38 @@ func initializeContractInvocationsSchema(db *sql.DB) error {
 		
 		CREATE INDEX IF NOT EXISTS idx_diagnostic_events_invocation_id ON contract_diagnostic_events(invocation_id);
 		CREATE INDEX IF NOT EXISTS idx_diagnostic_events_contract_id ON contract_diagnostic_events(contract_id);
+		CREATE INDEX IF NOT EXISTS idx_diagnostic_events_topics_decoded_gin ON contract_diagnostic_events USING gin(topics_decoded);
+		CREATE INDEX IF NOT EXISTS idx_diagnostic_events_data_decoded_gin ON contract_diagnostic_events USING gin(data_decoded);
 	`)
 
 	if err != nil {
 		return fmt.Errorf("failed to create contract_diagnostic_events table: %w", err)
+	}
+
+	// Add migration for diagnostic events dual representation
+	_, err = db.Exec(`
+		DO $$ 
+		BEGIN 
+			-- Add topics_decoded column if it doesn't exist
+			IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+						   WHERE table_name = 'contract_diagnostic_events' AND column_name = 'topics_decoded') THEN
+				ALTER TABLE contract_diagnostic_events ADD COLUMN topics_decoded JSONB;
+			END IF;
+			
+			-- Add data_decoded column if it doesn't exist
+			IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+						   WHERE table_name = 'contract_diagnostic_events' AND column_name = 'data_decoded') THEN
+				ALTER TABLE contract_diagnostic_events ADD COLUMN data_decoded JSONB;
+			END IF;
+		END $$;
+		
+		-- Create GIN indexes for JSONB columns if they don't exist
+		CREATE INDEX IF NOT EXISTS idx_diagnostic_events_topics_decoded_gin ON contract_diagnostic_events USING gin(topics_decoded);
+		CREATE INDEX IF NOT EXISTS idx_diagnostic_events_data_decoded_gin ON contract_diagnostic_events USING gin(data_decoded);
+	`)
+
+	if err != nil {
+		return fmt.Errorf("failed to migrate diagnostic events table: %w", err)
 	}
 
 	// Create contract_calls table
@@ -257,8 +296,18 @@ func (p *SaveContractInvocationsToPostgreSQL) Process(ctx context.Context, msg p
 		}
 	}()
 
-	// Prepare arguments for database insertion
-	var argumentsJSON, argumentsDecodedJSON interface{}
+	// Prepare arguments for database insertion with dual representation
+	var argumentsRawJSON, argumentsJSON, argumentsDecodedJSON interface{}
+	
+	// Marshal raw arguments if present
+	if len(invocation.ArgumentsRaw) > 0 {
+		argsRawBytes, err := json.Marshal(invocation.ArgumentsRaw)
+		if err != nil {
+			log.Printf("Warning: failed to marshal raw arguments for invocation %s: %v", invocation.TransactionHash, err)
+		} else {
+			argumentsRawJSON = argsRawBytes
+		}
+	}
 	
 	// Marshal arguments if present
 	if len(invocation.Arguments) > 0 {
@@ -286,14 +335,15 @@ func (p *SaveContractInvocationsToPostgreSQL) Process(ctx context.Context, msg p
 		ctx,
 		`INSERT INTO contract_invocations (
 			timestamp, ledger_sequence, transaction_hash, contract_id, 
-			invoking_account, function_name, arguments, arguments_decoded, successful
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+			invoking_account, function_name, arguments_raw, arguments, arguments_decoded, successful
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
 		invocation.Timestamp,
 		invocation.LedgerSequence,
 		invocation.TransactionHash,
 		invocation.ContractID,
 		invocation.InvokingAccount,
 		invocation.FunctionName,
+		argumentsRawJSON,
 		argumentsJSON,
 		argumentsDecodedJSON,
 		invocation.Successful,
@@ -307,8 +357,8 @@ func (p *SaveContractInvocationsToPostgreSQL) Process(ctx context.Context, msg p
 	if len(invocation.DiagnosticEvents) > 0 {
 		stmt, err := tx.PrepareContext(ctx, `
 			INSERT INTO contract_diagnostic_events (
-				invocation_id, contract_id, topics, data
-			) VALUES ($1, $2, $3, $4)
+				invocation_id, contract_id, topics, topics_decoded, data, data_decoded
+			) VALUES ($1, $2, $3, $4, $5, $6)
 		`)
 		if err != nil {
 			return fmt.Errorf("failed to prepare diagnostic events statement: %w", err)
@@ -316,17 +366,38 @@ func (p *SaveContractInvocationsToPostgreSQL) Process(ctx context.Context, msg p
 		defer stmt.Close()
 
 		for _, event := range invocation.DiagnosticEvents {
-			topicsJSON, err := json.Marshal(event.Topics)
+			// Serialize raw topics as JSON (XDR structures)
+			topicsRawJSON, err := json.Marshal(event.Topics)
 			if err != nil {
-				return fmt.Errorf("failed to marshal topics: %w", err)
+				return fmt.Errorf("failed to marshal raw topics: %w", err)
+			}
+
+			// Use decoded topics for human-readable format
+			topicsDecodedJSON, err := json.Marshal(event.TopicsDecoded)
+			if err != nil {
+				return fmt.Errorf("failed to marshal decoded topics: %w", err)
+			}
+
+			// Serialize raw data as JSON (XDR structure)
+			dataRawJSON, err := json.Marshal(event.Data)
+			if err != nil {
+				return fmt.Errorf("failed to marshal raw data: %w", err)
+			}
+
+			// Use decoded data for human-readable format
+			dataDecodedJSON, err := json.Marshal(event.DataDecoded)
+			if err != nil {
+				return fmt.Errorf("failed to marshal decoded data: %w", err)
 			}
 
 			_, err = stmt.ExecContext(
 				ctx,
 				invocationID,
 				event.ContractID,
-				topicsJSON,
-				event.Data,
+				topicsRawJSON,
+				topicsDecodedJSON,
+				dataRawJSON,
+				dataDecodedJSON,
 			)
 			if err != nil {
 				return fmt.Errorf("failed to insert diagnostic event: %w", err)
@@ -421,12 +492,13 @@ func (p *SaveContractInvocationsToPostgreSQL) Process(ctx context.Context, msg p
 	}
 
 	// Enhanced logging with argument information
+	rawArgCount := len(invocation.ArgumentsRaw)
 	argCount := len(invocation.Arguments)
 	decodedArgCount := len(invocation.ArgumentsDecoded)
 	
-	if argCount > 0 || decodedArgCount > 0 {
-		log.Printf("Saved contract invocation: %s (contract: %s, function: %s, args: %d, decoded: %d)",
-			invocation.TransactionHash, invocation.ContractID, invocation.FunctionName, argCount, decodedArgCount)
+	if rawArgCount > 0 || argCount > 0 || decodedArgCount > 0 {
+		log.Printf("Saved contract invocation: %s (contract: %s, function: %s, raw_args: %d, args: %d, decoded: %d)",
+			invocation.TransactionHash, invocation.ContractID, invocation.FunctionName, rawArgCount, argCount, decodedArgCount)
 	} else {
 		log.Printf("Saved contract invocation: %s (contract: %s, function: %s)",
 			invocation.TransactionHash, invocation.ContractID, invocation.FunctionName)
