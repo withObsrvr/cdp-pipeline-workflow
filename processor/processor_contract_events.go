@@ -21,8 +21,11 @@ type ContractEvent struct {
 	TransactionHash   string           `json:"transaction_hash"`
 	ContractID        string           `json:"contract_id"`
 	Type              string           `json:"type"`
+	EventType         string           `json:"event_type"`
 	Topic             []xdr.ScVal      `json:"topic"`
+	TopicDecoded      []interface{}    `json:"topic_decoded"`
 	Data              json.RawMessage  `json:"data"`
+	DataDecoded       interface{}      `json:"data_decoded"`
 	InSuccessfulTx    bool             `json:"in_successful_tx"`
 	EventIndex        int              `json:"event_index"`
 	OperationIndex    int              `json:"operation_index"`
@@ -140,6 +143,19 @@ func filterContractEvents(diagnosticEvents []xdr.DiagnosticEvent) map[int][]xdr.
 	return events
 }
 
+// DetectEventType detects the event type from the first topic if available
+func DetectEventType(topics []xdr.ScVal) string {
+	if len(topics) > 0 {
+		eventName, err := ConvertScValToJSON(topics[0])
+		if err == nil {
+			if str, ok := eventName.(string); ok {
+				return str
+			}
+		}
+	}
+	return "unknown"
+}
+
 func (p *ContractEventProcessor) processContractEvent(
 	tx ingest.LedgerTransaction,
 	opIndex, eventIndex int,
@@ -158,6 +174,30 @@ func (p *ContractEventProcessor) processContractEvent(
 		return nil, fmt.Errorf("error marshaling event data: %w", err)
 	}
 
+	// Decode topics
+	var topicDecoded []interface{}
+	for _, topic := range event.Body.V0.Topics {
+		decoded, err := ConvertScValToJSON(topic)
+		if err != nil {
+			log.Printf("Failed to decode topic: %v", err)
+			decoded = nil
+		}
+		topicDecoded = append(topicDecoded, decoded)
+	}
+
+	// Decode event data if present
+	var dataDecoded interface{}
+	eventData := event.Body.V0.Data
+	if eventData != nil {
+		decoded, err := ConvertScValToJSON(*eventData)
+		if err != nil {
+			log.Printf("Failed to decode event data: %v", err)
+			dataDecoded = nil
+		} else {
+			dataDecoded = decoded
+		}
+	}
+
 	// Determine if event was in successful transaction
 	successful := tx.Result.Successful()
 
@@ -170,6 +210,9 @@ func (p *ContractEventProcessor) processContractEvent(
 	}
 	p.mu.Unlock()
 
+	// Detect event type from topics
+	eventType := DetectEventType(event.Body.V0.Topics)
+
 	// Create contract event record
 	contractEvent := &ContractEvent{
 		Timestamp:         time.Unix(int64(meta.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime), 0),
@@ -177,8 +220,11 @@ func (p *ContractEventProcessor) processContractEvent(
 		TransactionHash:   tx.Result.TransactionHash.HexString(),
 		ContractID:        contractID,
 		Type:              string(event.Type),
+		EventType:         eventType,
 		Topic:             event.Body.V0.Topics, // Use V0 topics from the event body
+		TopicDecoded:      topicDecoded,
 		Data:              data,
+		DataDecoded:       dataDecoded,
 		InSuccessfulTx:    successful,
 		EventIndex:        eventIndex,
 		OperationIndex:    opIndex,

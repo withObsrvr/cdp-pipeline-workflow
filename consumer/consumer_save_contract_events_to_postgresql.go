@@ -75,8 +75,11 @@ func initializeContractEventsSchema(db *sql.DB) error {
 			transaction_hash TEXT NOT NULL,
 			contract_id TEXT NOT NULL,
 			type TEXT NOT NULL,
+			event_type TEXT,
 			topic JSONB NOT NULL,
+			topic_decoded JSONB,
 			data JSONB,
+			data_decoded JSONB,
 			in_successful_tx BOOLEAN NOT NULL,
 			event_index INTEGER NOT NULL,
 			operation_index INTEGER NOT NULL,
@@ -90,6 +93,11 @@ func initializeContractEventsSchema(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_contract_events_ledger_sequence ON contract_events(ledger_sequence);
 		CREATE INDEX IF NOT EXISTS idx_contract_events_transaction_hash ON contract_events(transaction_hash);
 		CREATE INDEX IF NOT EXISTS idx_contract_events_type ON contract_events(type);
+		
+		-- Add columns if they don't exist (for existing databases)
+		ALTER TABLE contract_events ADD COLUMN IF NOT EXISTS event_type TEXT;
+		ALTER TABLE contract_events ADD COLUMN IF NOT EXISTS topic_decoded JSONB;
+		ALTER TABLE contract_events ADD COLUMN IF NOT EXISTS data_decoded JSONB;
 	`)
 
 	if err != nil {
@@ -152,22 +160,43 @@ func (p *SaveContractEventsToPostgreSQL) Process(ctx context.Context, msg proces
 		return fmt.Errorf("failed to marshal topic: %w", err)
 	}
 
+	// Convert decoded topic to JSON
+	var topicDecodedJSON []byte
+	if contractEvent.TopicDecoded != nil {
+		topicDecodedJSON, err = json.Marshal(contractEvent.TopicDecoded)
+		if err != nil {
+			return fmt.Errorf("failed to marshal topic_decoded: %w", err)
+		}
+	}
+
+	// Convert decoded data to JSON
+	var dataDecodedJSON []byte
+	if contractEvent.DataDecoded != nil {
+		dataDecodedJSON, err = json.Marshal(contractEvent.DataDecoded)
+		if err != nil {
+			return fmt.Errorf("failed to marshal data_decoded: %w", err)
+		}
+	}
+
 	// Insert contract event
 	var contractEventID int64
 	err = tx.QueryRowContext(
 		ctx,
 		`INSERT INTO contract_events (
 			timestamp, ledger_sequence, transaction_hash, contract_id, 
-			type, topic, data, in_successful_tx, event_index, 
-			operation_index, network_passphrase
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+			type, event_type, topic, topic_decoded, data, data_decoded, in_successful_tx, 
+			event_index, operation_index, network_passphrase
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
 		contractEvent.Timestamp,
 		contractEvent.LedgerSequence,
 		contractEvent.TransactionHash,
 		contractEvent.ContractID,
 		contractEvent.Type,
+		contractEvent.EventType,
 		topicJSON,
+		topicDecodedJSON,
 		contractEvent.Data,
+		dataDecodedJSON,
 		contractEvent.InSuccessfulTx,
 		contractEvent.EventIndex,
 		contractEvent.OperationIndex,
