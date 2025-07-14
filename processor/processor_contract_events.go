@@ -188,8 +188,8 @@ func (p *ContractEventProcessor) processContractEvent(
 	// Decode event data if present
 	var dataDecoded interface{}
 	eventData := event.Body.V0.Data
-	if eventData != nil {
-		decoded, err := ConvertScValToJSON(*eventData)
+	if eventData.Type != xdr.ScValTypeScvVoid {
+		decoded, err := ConvertScValToJSON(eventData)
 		if err != nil {
 			log.Printf("Failed to decode event data: %v", err)
 			dataDecoded = nil
