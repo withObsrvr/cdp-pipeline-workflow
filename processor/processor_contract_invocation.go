@@ -22,6 +22,7 @@ type ContractInvocation struct {
 	ContractID       string                 `json:"contract_id"`
 	InvokingAccount  string                 `json:"invoking_account"`
 	FunctionName     string                 `json:"function_name,omitempty"`
+	ArgumentsRaw     []xdr.ScVal            `json:"arguments_raw,omitempty"` // Raw XDR arguments
 	Arguments        []json.RawMessage      `json:"arguments,omitempty"`
 	ArgumentsDecoded map[string]interface{} `json:"arguments_decoded,omitempty"`
 	Successful       bool                   `json:"successful"`
@@ -33,9 +34,11 @@ type ContractInvocation struct {
 
 // DiagnosticEvent represents a diagnostic event emitted during contract execution
 type DiagnosticEvent struct {
-	ContractID string          `json:"contract_id"`
-	Topics     []string        `json:"topics"`
-	Data       json.RawMessage `json:"data"`
+	ContractID    string        `json:"contract_id"`
+	Topics        []xdr.ScVal   `json:"topics"`         // Raw XDR topics
+	TopicsDecoded []interface{} `json:"topics_decoded"` // Decoded human-readable topics
+	Data          xdr.ScVal     `json:"data"`           // Raw XDR data
+	DataDecoded   interface{}   `json:"data_decoded"`   // Decoded human-readable data
 }
 
 // ContractCall represents a contract-to-contract call
@@ -48,11 +51,14 @@ type ContractCall struct {
 
 // StateChange represents a contract state change
 type StateChange struct {
-	ContractID string          `json:"contract_id"`
-	Key        string          `json:"key"`
-	OldValue   json.RawMessage `json:"old_value,omitempty"`
-	NewValue   json.RawMessage `json:"new_value,omitempty"`
-	Operation  string          `json:"operation"` // "create", "update", "delete"
+	ContractID  string      `json:"contract_id"`
+	KeyRaw      xdr.ScVal   `json:"key_raw"`       // Raw XDR key
+	Key         string      `json:"key"`           // Decoded human-readable key
+	OldValueRaw xdr.ScVal   `json:"old_value_raw"` // Raw XDR old value
+	OldValue    interface{} `json:"old_value"`     // Decoded human-readable old value
+	NewValueRaw xdr.ScVal   `json:"new_value_raw"` // Raw XDR new value
+	NewValue    interface{} `json:"new_value"`     // Decoded human-readable new value
+	Operation   string      `json:"operation"`     // "create", "update", "delete"
 }
 
 // TtlExtension represents a TTL extension for a contract
@@ -204,16 +210,17 @@ func (p *ContractInvocationProcessor) processContractInvocation(
 	// Extract function name and arguments
 	if function := invokeHostFunction.HostFunction; function.Type == xdr.HostFunctionTypeHostFunctionTypeInvokeContract {
 		invokeContract := function.MustInvokeContract()
-		
+
 		// Extract function name using robust method
 		invocation.FunctionName = extractFunctionName(invokeContract)
-		
+
 		// Extract and convert arguments
 		if len(invokeContract.Args) > 0 {
-			rawArgs, decodedArgs, err := extractArguments(invokeContract.Args)
+			argumentsRaw, rawArgs, decodedArgs, err := extractArguments(invokeContract.Args)
 			if err != nil {
 				log.Printf("Error extracting arguments: %v", err)
 			}
+			invocation.ArgumentsRaw = argumentsRaw
 			invocation.Arguments = rawArgs
 			invocation.ArgumentsDecoded = decodedArgs
 		}
@@ -278,29 +285,36 @@ func (p *ContractInvocationProcessor) extractDiagnosticEvents(tx ingest.LedgerTr
 					continue
 				}
 
-				// Convert topics to strings
-				var topics []string
-				for _, topic := range event.Body.V0.Topics {
-					// For simplicity, we'll just convert to JSON
-					topicJSON, err := json.Marshal(topic)
+				// Store raw topics
+				topics := event.Body.V0.Topics
+
+				// Decode topics
+				var topicsDecoded []interface{}
+				for _, topic := range topics {
+					decoded, err := ConvertScValToJSON(topic)
 					if err != nil {
-						log.Printf("Error marshaling topic: %v", err)
-						continue
+						log.Printf("Error decoding topic: %v", err)
+						decoded = nil
 					}
-					topics = append(topics, string(topicJSON))
+					topicsDecoded = append(topicsDecoded, decoded)
 				}
 
-				// Convert data to JSON
-				dataJSON, err := json.Marshal(event.Body.V0.Data)
+				// Store raw data
+				data := event.Body.V0.Data
+
+				// Decode data
+				dataDecoded, err := ConvertScValToJSON(data)
 				if err != nil {
-					log.Printf("Error marshaling event data: %v", err)
-					continue
+					log.Printf("Error decoding event data: %v", err)
+					dataDecoded = nil
 				}
 
 				events = append(events, DiagnosticEvent{
-					ContractID: contractID,
-					Topics:     topics,
-					Data:       dataJSON,
+					ContractID:    contractID,
+					Topics:        topics,
+					TopicsDecoded: topicsDecoded,
+					Data:          data,
+					DataDecoded:   dataDecoded,
 				})
 			}
 		}
@@ -383,21 +397,136 @@ func (p *ContractInvocationProcessor) processInvocation(
 func (p *ContractInvocationProcessor) extractStateChanges(tx ingest.LedgerTransaction, opIndex int) []StateChange {
 	var changes []StateChange
 
-	// Check if we have Soroban meta in the transaction
-	if tx.UnsafeMeta.V == 3 {
-		sorobanMeta := tx.UnsafeMeta.V3.SorobanMeta
-		if sorobanMeta != nil {
-			// Based on the debug output, there's no direct state changes field
-			// State changes would need to be extracted from other transaction data
+	// Extract state changes from ledger changes in the transaction meta
+	txChanges, err := tx.GetChanges()
+	if err != nil {
+		log.Printf("Error getting transaction changes: %v", err)
+		return changes
+	}
 
-			// Process events which may contain state change information
-			if len(sorobanMeta.Events) > 0 {
-				for _, _event := range sorobanMeta.Events {
-					// Process events for state changes
-					// Implementation depends on the structure of ContractEvent
-					_ = _event // Placeholder until implementation is complete
+	for _, change := range txChanges {
+		// We're only interested in contract data changes
+		if change.Type != xdr.LedgerEntryTypeContractData {
+			continue
+		}
+
+		var contractID string
+		var keyRaw xdr.ScVal
+		var key string
+		var oldValueRaw, newValueRaw xdr.ScVal
+		var oldValue, newValue interface{}
+		var operation string
+
+		switch change.LedgerEntryChangeType() {
+		case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
+			if change.Post != nil && change.Post.Data.Type == xdr.LedgerEntryTypeContractData {
+				contractData := change.Post.Data.ContractData
+
+				// Extract contract ID
+				contractIDBytes := contractData.Contract.ContractId
+				contractID, err = strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
+				if err != nil {
+					log.Printf("Error encoding contract ID: %v", err)
+					continue
 				}
+
+				// Extract key
+				keyRaw = contractData.Key
+				if keyDecoded, err := ConvertScValToJSON(keyRaw); err == nil {
+					if keyStr, ok := keyDecoded.(string); ok {
+						key = keyStr
+					} else {
+						// Convert complex keys to JSON string representation
+						if keyBytes, err := json.Marshal(keyDecoded); err == nil {
+							key = string(keyBytes)
+						}
+					}
+				}
+
+				// Extract new value
+				newValueRaw = contractData.Val
+				newValue, _ = ConvertScValToJSON(newValueRaw)
+				operation = "create"
 			}
+
+		case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
+			if change.Pre != nil && change.Post != nil &&
+				change.Pre.Data.Type == xdr.LedgerEntryTypeContractData &&
+				change.Post.Data.Type == xdr.LedgerEntryTypeContractData {
+
+				preData := change.Pre.Data.ContractData
+				postData := change.Post.Data.ContractData
+
+				// Extract contract ID
+				contractIDBytes := postData.Contract.ContractId
+				contractID, err = strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
+				if err != nil {
+					log.Printf("Error encoding contract ID: %v", err)
+					continue
+				}
+
+				// Extract key
+				keyRaw = postData.Key
+				if keyDecoded, err := ConvertScValToJSON(keyRaw); err == nil {
+					if keyStr, ok := keyDecoded.(string); ok {
+						key = keyStr
+					} else {
+						if keyBytes, err := json.Marshal(keyDecoded); err == nil {
+							key = string(keyBytes)
+						}
+					}
+				}
+
+				// Extract old and new values
+				oldValueRaw = preData.Val
+				oldValue, _ = ConvertScValToJSON(oldValueRaw)
+				newValueRaw = postData.Val
+				newValue, _ = ConvertScValToJSON(newValueRaw)
+				operation = "update"
+			}
+
+		case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
+			if change.Pre != nil && change.Pre.Data.Type == xdr.LedgerEntryTypeContractData {
+				contractData := change.Pre.Data.ContractData
+
+				// Extract contract ID
+				contractIDBytes := contractData.Contract.ContractId
+				contractID, err = strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
+				if err != nil {
+					log.Printf("Error encoding contract ID: %v", err)
+					continue
+				}
+
+				// Extract key
+				keyRaw = contractData.Key
+				if keyDecoded, err := ConvertScValToJSON(keyRaw); err == nil {
+					if keyStr, ok := keyDecoded.(string); ok {
+						key = keyStr
+					} else {
+						if keyBytes, err := json.Marshal(keyDecoded); err == nil {
+							key = string(keyBytes)
+						}
+					}
+				}
+
+				// Extract old value
+				oldValueRaw = contractData.Val
+				oldValue, _ = ConvertScValToJSON(oldValueRaw)
+				operation = "delete"
+			}
+		}
+
+		if contractID != "" {
+			changes = append(changes, StateChange{
+				ContractID:  contractID,
+				KeyRaw:      keyRaw,
+				Key:         key,
+				OldValueRaw: oldValueRaw,
+				OldValue:    oldValue,
+				NewValueRaw: newValueRaw,
+				NewValue:    newValue,
+				Operation:   operation,
+			})
 		}
 	}
 
@@ -431,7 +560,7 @@ func extractFunctionName(invokeContract xdr.InvokeContractArgs) string {
 	if len(invokeContract.FunctionName) > 0 {
 		return string(invokeContract.FunctionName)
 	}
-	
+
 	// Fallback: Check first argument if it contains function name
 	if len(invokeContract.Args) > 0 {
 		functionName := GetFunctionNameFromScVal(invokeContract.Args[0])
@@ -439,15 +568,15 @@ func extractFunctionName(invokeContract xdr.InvokeContractArgs) string {
 			return functionName
 		}
 	}
-	
+
 	return "unknown"
 }
 
-// extractArguments extracts and converts all function arguments
-func extractArguments(args []xdr.ScVal) ([]json.RawMessage, map[string]interface{}, error) {
+// extractArguments extracts and converts all function arguments with dual representation
+func extractArguments(args []xdr.ScVal) ([]xdr.ScVal, []json.RawMessage, map[string]interface{}, error) {
 	rawArgs := make([]json.RawMessage, 0, len(args))
 	decodedArgs := make(map[string]interface{})
-	
+
 	for i, arg := range args {
 		// Convert ScVal to JSON-serializable format
 		converted, err := ConvertScValToJSON(arg)
@@ -458,7 +587,7 @@ func extractArguments(args []xdr.ScVal) ([]json.RawMessage, map[string]interface
 				"type":  arg.Type.String(),
 			}
 		}
-		
+
 		// Store raw JSON
 		jsonBytes, err := json.Marshal(converted)
 		if err != nil {
@@ -466,10 +595,10 @@ func extractArguments(args []xdr.ScVal) ([]json.RawMessage, map[string]interface
 			continue
 		}
 		rawArgs = append(rawArgs, jsonBytes)
-		
+
 		// Store in decoded map with index
 		decodedArgs[fmt.Sprintf("arg_%d", i)] = converted
 	}
-	
-	return rawArgs, decodedArgs, nil
+
+	return args, rawArgs, decodedArgs, nil
 }
