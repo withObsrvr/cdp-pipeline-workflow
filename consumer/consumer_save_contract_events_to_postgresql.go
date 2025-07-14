@@ -146,6 +146,12 @@ func (p *SaveContractEventsToPostgreSQL) Process(ctx context.Context, msg proces
 		}
 	}()
 
+	// Convert topic to JSON
+	topicJSON, err := json.Marshal(contractEvent.Topic)
+	if err != nil {
+		return fmt.Errorf("failed to marshal topic: %w", err)
+	}
+
 	// Insert contract event
 	var contractEventID int64
 	err = tx.QueryRowContext(
@@ -160,7 +166,7 @@ func (p *SaveContractEventsToPostgreSQL) Process(ctx context.Context, msg proces
 		contractEvent.TransactionHash,
 		contractEvent.ContractID,
 		contractEvent.Type,
-		json.RawMessage(fmt.Sprintf("%v", contractEvent.Topic)), // Convert topic to JSON
+		topicJSON,
 		contractEvent.Data,
 		contractEvent.InSuccessfulTx,
 		contractEvent.EventIndex,
