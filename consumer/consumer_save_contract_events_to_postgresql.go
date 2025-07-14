@@ -93,7 +93,7 @@ func initializeContractEventsSchema(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_contract_events_ledger_sequence ON contract_events(ledger_sequence);
 		CREATE INDEX IF NOT EXISTS idx_contract_events_transaction_hash ON contract_events(transaction_hash);
 		CREATE INDEX IF NOT EXISTS idx_contract_events_type ON contract_events(type);
-		
+		CREATE INDEX IF NOT EXISTS idx_contract_events_event_type ON contract_events(event_type);
 		-- Add columns if they don't exist (for existing databases)
 		ALTER TABLE contract_events ADD COLUMN IF NOT EXISTS event_type TEXT;
 		ALTER TABLE contract_events ADD COLUMN IF NOT EXISTS topic_decoded JSONB;
