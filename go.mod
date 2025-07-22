@@ -18,7 +18,7 @@ require (
 	github.com/redis/go-redis/v9 v9.7.0
 	github.com/sendgrid/sendgrid-go v3.16.0+incompatible
 	github.com/slack-go/slack v0.15.0
-	github.com/stellar/go v0.0.0-20250716214416-01d16bf8185f
+	github.com/stellar/go v0.0.0-20250718194041-56335b4c7e0c
 	github.com/withObsrvr/stellar-cdp v0.0.0-20241220082310-1a8c717a9c8f
 	github.com/withObsrvr/stellar-datastore v0.0.0-20250207023055-4074500adc35
 	github.com/withObsrvr/stellar-ledgerbackend v0.0.0-20241220092445-b96fa5b9c924
@@ -73,6 +73,7 @@ require (
 	github.com/creachadair/jrpc2 v1.2.0 // indirect
 	github.com/creachadair/mds v0.13.4 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/djherbis/fscache v0.10.1 // indirect
 	github.com/envoyproxy/go-control-plane v0.13.1 // indirect
@@ -166,3 +167,5 @@ require (
 exclude github.com/envoyproxy/go-control-plane/envoy v1.32.3
 
 // Let go mod tidy add other dependencies
+
+replace github.com/stellar/go => github.com/stellar/go v0.0.0-20250716214416-01d16bf8185f
