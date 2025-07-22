@@ -24,12 +24,13 @@ type ContractDataProcessor struct {
 
 // ContractDataMessage wraps the stellar/go ContractDataOutput for CDP pipeline
 type ContractDataMessage struct {
-	ContractData  contract.ContractDataOutput `json:"contract_data"`
-	ContractId    string                      `json:"contract_id"`    // Extracted for easy access
-	Timestamp     time.Time                   `json:"timestamp"`
-	LedgerSeq     uint32                      `json:"ledger_sequence"`
-	ProcessorName string                      `json:"processor_name"`
-	MessageType   string                      `json:"message_type"`
+	ContractData    contract.ContractDataOutput    `json:"contract_data"`
+	ContractId      string                         `json:"contract_id"`      // Extracted for easy access
+	Timestamp       time.Time                      `json:"timestamp"`
+	LedgerSeq       uint32                         `json:"ledger_sequence"`
+	ProcessorName   string                         `json:"processor_name"`
+	MessageType     string                         `json:"message_type"`
+	ArchiveMetadata *ArchiveSourceMetadata         `json:"archive_metadata,omitempty"` // Source file provenance
 }
 
 // NewContractDataProcessor creates a new contract data processor
@@ -57,6 +58,9 @@ func (p *ContractDataProcessor) Process(ctx context.Context, msg Message) error 
 	if !ok {
 		return fmt.Errorf("expected LedgerCloseMeta, got %T", msg.Payload)
 	}
+
+	// Extract source metadata from incoming message
+	archiveMetadata, _ := msg.GetArchiveMetadata()
 
 	// Create transaction reader
 	txReader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(
@@ -107,14 +111,15 @@ func (p *ContractDataProcessor) Process(ctx context.Context, msg Message) error 
 				continue
 			}
 
-			// Create CDP message
+			// Create CDP message with preserved source metadata
 			contractMsg := ContractDataMessage{
-				ContractData:  contractData,
-				ContractId:    contractData.ContractId, // Extract for easy access
-				Timestamp:     time.Now(),
-				LedgerSeq:     uint32(ledgerHeader.LedgerSeq),
-				ProcessorName: p.name,
-				MessageType:   "contract_data",
+				ContractData:    contractData,
+				ContractId:      contractData.ContractId, // Extract for easy access
+				Timestamp:       time.Now(),
+				LedgerSeq:       uint32(ledgerHeader.LedgerSeq),
+				ProcessorName:   p.name,
+				MessageType:     "contract_data",
+				ArchiveMetadata: archiveMetadata,
 			}
 
 			// Send to subscribers

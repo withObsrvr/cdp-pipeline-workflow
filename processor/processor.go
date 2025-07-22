@@ -25,9 +25,44 @@ type ProcessorConfig struct {
 	Config map[string]interface{} `yaml:"config"`
 }
 
-// Message encapsulates the payload to be processed.
+// Message encapsulates the payload to be processed with optional metadata.
 type Message struct {
-	Payload interface{}
+	Payload  interface{}            `json:"payload"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// ArchiveSourceMetadata contains information about the source archive file
+type ArchiveSourceMetadata struct {
+	SourceType       string    `json:"source_type"`        // "S3", "GCS", "FS"
+	BucketName       string    `json:"bucket_name"`        // for cloud storage
+	FilePath         string    `json:"file_path"`          // datastore schema path (e.g., "partition-1/ledger-503000-503063.xdr")
+	FileName         string    `json:"file_name"`          // just filename
+	StartLedger      uint32    `json:"start_ledger"`       // first ledger in file
+	EndLedger        uint32    `json:"end_ledger"`         // last ledger in file
+	ProcessedAt      time.Time `json:"processed_at"`
+	FileSize         int64     `json:"file_size,omitempty"`
+	Partition        uint32    `json:"partition,omitempty"`
+	FullCloudURL     string    `json:"full_cloud_url,omitempty"`      // Complete cloud storage URL
+	HistoryArchivePath string  `json:"history_archive_path,omitempty"` // History archive format path
+}
+
+// GetArchiveMetadata extracts archive source metadata from the message
+func (m *Message) GetArchiveMetadata() (*ArchiveSourceMetadata, bool) {
+	if m.Metadata == nil {
+		return nil, false
+	}
+	
+	archiveData, exists := m.Metadata["archive_source"]
+	if !exists {
+		return nil, false
+	}
+	
+	// Type assertion to ArchiveSourceMetadata
+	if archiveMeta, ok := archiveData.(*ArchiveSourceMetadata); ok {
+		return archiveMeta, true
+	}
+	
+	return nil, false
 }
 
 type AssetDetails struct {

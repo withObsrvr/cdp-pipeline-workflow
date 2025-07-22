@@ -30,6 +30,7 @@ type ContractInvocation struct {
 	ContractCalls    []ContractCall         `json:"contract_calls,omitempty"`
 	StateChanges     []StateChange          `json:"state_changes,omitempty"`
 	TtlExtensions    []TtlExtension         `json:"ttl_extensions,omitempty"`
+	ArchiveMetadata  *ArchiveSourceMetadata `json:"archive_metadata,omitempty"` // Source file provenance
 }
 
 // DiagnosticEvent represents a diagnostic event emitted during contract execution
@@ -103,6 +104,9 @@ func (p *ContractInvocationProcessor) Process(ctx context.Context, msg Message) 
 		return fmt.Errorf("expected xdr.LedgerCloseMeta, got %T", msg.Payload)
 	}
 
+	// Extract source metadata from incoming message
+	archiveMetadata, _ := msg.GetArchiveMetadata()
+
 	sequence := ledgerCloseMeta.LedgerSequence()
 	log.Printf("Processing ledger %d for contract invocations", sequence)
 
@@ -125,7 +129,7 @@ func (p *ContractInvocationProcessor) Process(ctx context.Context, msg Message) 
 		// Check each operation for contract invocations
 		for opIndex, op := range tx.Envelope.Operations() {
 			if op.Body.Type == xdr.OperationTypeInvokeHostFunction {
-				invocation, err := p.processContractInvocation(tx, opIndex, op, ledgerCloseMeta)
+				invocation, err := p.processContractInvocation(tx, opIndex, op, ledgerCloseMeta, archiveMetadata)
 				if err != nil {
 					log.Printf("Error processing contract invocation: %v", err)
 					continue
@@ -154,6 +158,7 @@ func (p *ContractInvocationProcessor) processContractInvocation(
 	opIndex int,
 	op xdr.Operation,
 	meta xdr.LedgerCloseMeta,
+	archiveMetadata *ArchiveSourceMetadata,
 ) (*ContractInvocation, error) {
 	invokeHostFunction := op.Body.MustInvokeHostFunctionOp()
 
@@ -197,7 +202,7 @@ func (p *ContractInvocationProcessor) processContractInvocation(
 	}
 	p.mu.Unlock()
 
-	// Create invocation record
+	// Create invocation record with preserved source metadata
 	invocation := &ContractInvocation{
 		Timestamp:       time.Unix(int64(meta.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime), 0),
 		LedgerSequence:  meta.LedgerSequence(),
@@ -205,6 +210,7 @@ func (p *ContractInvocationProcessor) processContractInvocation(
 		ContractID:      contractID,
 		InvokingAccount: invokingAccount.Address(),
 		Successful:      successful,
+		ArchiveMetadata: archiveMetadata,
 	}
 
 	// Extract function name and arguments

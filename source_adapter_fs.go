@@ -1,5 +1,15 @@
 package main
 
+// DEPRECATED: FSBufferedStorageSourceAdapter is deprecated in Protocol 23 migration.
+// Filesystem storage is not available in stellar/go@protocol-23.
+// 
+// Alternatives:
+// - Use github.com/stellar/go/historyarchive for local archive access
+// - Use github.com/stellar/go/support/storage filesystem backend
+// - Migrate to cloud storage (S3/GCS) for better scalability
+//
+// This adapter will be removed in future versions.
+
 import (
 	"context"
 	"log"

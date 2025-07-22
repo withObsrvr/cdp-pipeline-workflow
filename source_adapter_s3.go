@@ -7,16 +7,18 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/stellar/go/ingest/cdp"
+	"github.com/stellar/go/ingest/ledgerbackend"
+	"github.com/stellar/go/support/datastore"
 	"github.com/stellar/go/xdr"
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
-	cdp "github.com/withObsrvr/stellar-cdp"
-	datastore "github.com/withObsrvr/stellar-datastore"
-	ledgerbackend "github.com/withObsrvr/stellar-ledgerbackend"
+	"github.com/withObsrvr/cdp-pipeline-workflow/utils"
 )
 
 type S3BufferedStorageSourceAdapter struct {
 	config     S3BufferedStorageConfig
 	processors []cdpProcessor.Processor
+	schema     datastore.DataStoreSchema
 }
 
 type S3BufferedStorageConfig struct {
@@ -122,6 +124,11 @@ func NewS3BufferedStorageSourceAdapter(config map[string]interface{}) (SourceAda
 		filesPerPartitionInt = 10 // default value
 	}
 
+	schema := datastore.DataStoreSchema{
+		LedgersPerFile:    uint32(ledgersPerFileInt),
+		FilesPerPartition: uint32(filesPerPartitionInt),
+	}
+
 	return &S3BufferedStorageSourceAdapter{
 		config: S3BufferedStorageConfig{
 			BucketName:        bucketName,
@@ -138,6 +145,7 @@ func NewS3BufferedStorageSourceAdapter(config map[string]interface{}) (SourceAda
 			LedgersPerFile:    uint32(ledgersPerFileInt),
 			FilesPerPartition: uint32(filesPerPartitionInt),
 		},
+		schema: schema,
 	}, nil
 }
 
@@ -262,8 +270,19 @@ func (adapter *S3BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 
 func (adapter *S3BufferedStorageSourceAdapter) processLedger(ctx context.Context, ledger xdr.LedgerCloseMeta) error {
 	sequence := ledger.LedgerSequence()
+	
+	// Create archive metadata for source file provenance
+	archiveMetadata := utils.CreateS3ArchiveMetadata(
+		adapter.config.BucketName,
+		sequence,
+		adapter.schema,
+	)
+	
+	// Create message with metadata
+	message := utils.CreateMessageWithMetadata(ledger, archiveMetadata)
+	
 	for _, processor := range adapter.processors {
-		if err := processor.Process(ctx, cdpProcessor.Message{Payload: ledger}); err != nil {
+		if err := processor.Process(ctx, message); err != nil {
 			return errors.Wrapf(err, "error processing ledger %d", sequence)
 		}
 	}
