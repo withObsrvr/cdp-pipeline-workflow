@@ -11,11 +11,13 @@ import (
 	"github.com/stellar/go/support/datastore"
 	"github.com/stellar/go/xdr"
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
+	"github.com/withObsrvr/cdp-pipeline-workflow/utils"
 )
 
 type BufferedStorageSourceAdapter struct {
 	config     BufferedStorageConfig
 	processors []cdpProcessor.Processor
+	schema     datastore.DataStoreSchema
 }
 
 type BufferedStorageConfig struct {
@@ -129,8 +131,14 @@ func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapt
 	log.Printf("Parsed configuration: start_ledger=%d, end_ledger=%d, bucket=%s, network=%s",
 		startLedger, endLedger, bucketName, network)
 
+	schema := datastore.DataStoreSchema{
+		LedgersPerFile:    uint32(ledgersPerFileInt),
+		FilesPerPartition: uint32(filesPerPartitionInt),
+	}
+
 	return &BufferedStorageSourceAdapter{
 		config: bufferConfig,
+		schema: schema,
 	}, nil
 }
 
@@ -232,19 +240,22 @@ func (adapter *BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 
 func (adapter *BufferedStorageSourceAdapter) processLedger(ctx context.Context, ledger xdr.LedgerCloseMeta) error {
 	sequence := ledger.LedgerSequence()
-	log.Printf("Processing ledger %d", sequence)
-
+	
+	// Create archive metadata for source file provenance
+	archiveMetadata := utils.CreateGCSArchiveMetadata(
+		adapter.config.BucketName,
+		sequence,
+		adapter.schema,
+	)
+	
+	// Create message with metadata
+	message := utils.CreateMessageWithMetadata(ledger, archiveMetadata)
+	
 	for _, processor := range adapter.processors {
-
-		if err := processor.Process(ctx, cdpProcessor.Message{Payload: ledger}); err != nil {
-			log.Printf("Error processing ledger %d in processor %T: %v",
-				sequence, processor, err)
-			return errors.Wrap(err, "error in processor")
+		if err := processor.Process(ctx, message); err != nil {
+			return errors.Wrapf(err, "error processing ledger %d", sequence)
 		}
-		log.Printf("Successfully processed ledger %d in processor %T",
-			sequence, processor)
 	}
-
 	return nil
 }
 
