@@ -109,7 +109,7 @@ func NewTransformContractDataStruct(
 }
 
 func ExtractEntryFromChange(change ingest.Change) (xdr.LedgerEntry, xdr.LedgerEntryChangeType, bool, error) {
-	switch changeType := change.LedgerEntryChangeType(); changeType {
+	switch changeType := change.ChangeType; changeType {
 	case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
 		return *change.Post, changeType, false, nil
 	case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:

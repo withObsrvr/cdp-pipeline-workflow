@@ -63,7 +63,7 @@ func TotalByteSizeOfBucketList(lcm xdr.LedgerCloseMeta) (*uint64, error) {
 		return nil, nil
 	case 1:
 		lcmV1 := lcm.MustV1()
-		totalByteSizeOfBucketList := uint64(lcmV1.TotalByteSizeOfBucketList)
+		totalByteSizeOfBucketList := uint64(lcmV1.TotalByteSizeOfLiveSorobanState)
 		return &totalByteSizeOfBucketList, nil
 	default:
 		panic(fmt.Sprintf("Unsupported LedgerCloseMeta.V: %d", lcm.V))

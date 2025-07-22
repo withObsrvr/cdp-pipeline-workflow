@@ -142,7 +142,7 @@ func (p *ContractCreationProcessor) processContractCreation(
 
 	// Look for the created contract in the changes
 	for _, change := range changes {
-		if change.LedgerEntryChangeType() == xdr.LedgerEntryChangeTypeLedgerEntryCreated {
+		if change.ChangeType == xdr.LedgerEntryChangeTypeLedgerEntryCreated {
 			if entry := change.Post; entry != nil {
 				if entry.Data.Type == xdr.LedgerEntryTypeContractData {
 					contractData := entry.Data.MustContractData()

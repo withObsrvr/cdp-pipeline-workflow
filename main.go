@@ -178,6 +178,8 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewSoroswapProcessor(processorConfig.Config)
 	case "Kale":
 		return processor.NewKaleProcessor(processorConfig.Config)
+	case "contract_data":
+		return processor.NewContractDataProcessor(processorConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}

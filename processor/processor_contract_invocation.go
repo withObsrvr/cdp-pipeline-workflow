@@ -410,7 +410,7 @@ func (p *ContractInvocationProcessor) extractStateChanges(tx ingest.LedgerTransa
 			continue
 		}
 
-		switch change.LedgerEntryChangeType() {
+		switch change.ChangeType {
 		case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
 			if change.Post != nil && change.Post.Data.Type == xdr.LedgerEntryTypeContractData {
 				contractData := change.Post.Data.ContractData

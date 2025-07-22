@@ -340,7 +340,7 @@ func (p *PhoenixAMMProcessor) processWithdraw(event *PhoenixEvent, params map[st
 // Helper function to find pool state in changes
 func findPoolState(changes []ingest.Change) (*xdr.LedgerEntry, error) {
 	for _, change := range changes {
-		if change.LedgerEntryChangeType() == xdr.LedgerEntryChangeTypeLedgerEntryState {
+		if change.ChangeType == xdr.LedgerEntryChangeTypeLedgerEntryState {
 			if entry := change.Pre; entry != nil && entry.Data.Type == xdr.LedgerEntryTypeContractData {
 				return entry, nil
 			}
