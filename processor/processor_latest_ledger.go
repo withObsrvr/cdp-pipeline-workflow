@@ -166,7 +166,7 @@ func getSorobanMetrics(tx ingest.LedgerTransaction) sorobanMetrics {
 
 	sMetrics.resourceFee = int64(sorobanData.ResourceFee)
 	sMetrics.instructions = uint32(sorobanData.Resources.Instructions)
-	sMetrics.readBytes = uint32(sorobanData.Resources.ReadBytes)
+	sMetrics.readBytes = uint32(sorobanData.Resources.DiskReadBytes)
 	sMetrics.writeBytes = uint32(sorobanData.Resources.WriteBytes)
 
 	return sMetrics
