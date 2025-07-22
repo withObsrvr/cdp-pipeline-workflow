@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/stellar/go/ingest/cdp"
+	"github.com/stellar/go/ingest/ledgerbackend"
+	"github.com/stellar/go/support/datastore"
 	"github.com/stellar/go/xdr"
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
-	cdp "github.com/withObsrvr/stellar-cdp"
-	datastore "github.com/withObsrvr/stellar-datastore"
-	ledgerbackend "github.com/withObsrvr/stellar-ledgerbackend"
 )
 
 type S3BufferedStorageSourceAdapter struct {
