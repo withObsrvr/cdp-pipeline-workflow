@@ -8,27 +8,172 @@ This document outlines the implementation strategy for adding source file proven
 
 ### Message Flow
 ```
-Archive File (S3/GCS) → stellar-cdp library → LedgerCloseMeta → processor.Message → ContractDataProcessor → Consumer
+Archive File (S3/GCS) → withObsrvr/stellar-cdp library → LedgerCloseMeta → processor.Message → ContractDataProcessor → Consumer
 ```
 
-### Current Limitations
+### Current Dependencies and Limitations
+
+#### 1. **withObsrvr Package Dependencies**
+
+The current source adapters rely heavily on custom withObsrvr packages:
+
+**A. github.com/withObsrvr/stellar-cdp**:
+- `cdp.ApplyLedgerMetadata()` - Core batch ledger processing function
+- `cdp.DefaultBufferedStorageBackendConfig()` - Storage configuration
+- `cdp.PublisherConfig` - Publisher settings
+
+**B. github.com/withObsrvr/stellar-datastore**:
+- `datastore.DataStoreConfig` - Storage backend configuration
+- `datastore.DataStoreSchema` - File organization schema
+- `datastore.NewDataStore()` - Storage factory methods
+- Support for: S3, GCS, GCS_OAUTH, **FS (Filesystem)**
+
+**C. github.com/withObsrvr/stellar-ledgerbackend**:
+- `ledgerbackend.Range` - Ledger range interfaces
+- `ledgerbackend.BoundedRange()` / `UnboundedRange()` - Range creation
+
+#### 2. **Source Adapters Requiring Migration**
+
+**High Impact (Custom Package Dependent)**:
+- `S3BufferedStorageSourceAdapter`
+- `BufferedStorageSourceAdapter` (GCS)
+- `GCSBufferedStorageSourceAdapter` 
+- **`FSBufferedStorageSourceAdapter`** ⚠️ **Will be deprecated - not available in stellar/go**
+
+**Medium Impact (Interface Updates)**:
+- `CaptiveCoreInboundAdapter` - Uses stellar/go but may need protocol-23 updates
+
+**Low Impact (Type/Import Updates)**:
+- `RPCSource`/`SorobanSourceAdapter` - Minimal dependencies
+
+#### 3. **Current Limitations**
 
 1. **No metadata preservation**: The `Message` structure only contains payload data
 2. **Lost file context**: Archive file information is available during ingestion but not propagated
-3. **External library abstraction**: The `stellar-cdp` library handles file reading internally
-4. **Simple message structure**:
+3. **Custom library dependency**: Relies on withObsrvr packages instead of official stellar/go
+4. **Protocol compatibility**: May not have latest Protocol 23 optimizations
+5. **Simple message structure**:
    ```go
    type Message struct {
        Payload interface{}  // Only contains xdr.LedgerCloseMeta
    }
    ```
 
-### Source Adapters That Need Enhancement
+## Protocol 23 Migration Requirements
 
+### **Critical: Migrate from withObsrvr to stellar/go@protocol-23**
+
+Before implementing source file provenance, the source adapters must be migrated from custom withObsrvr packages to official stellar/go@protocol-23 packages.
+
+### Native stellar/go@protocol-23 Equivalents
+
+#### 1. **Ledger Processing Migration**
+```go
+// FROM: github.com/withObsrvr/stellar-cdp
+import "github.com/withObsrvr/stellar-cdp/cdp"
+
+// TO: github.com/stellar/go@protocol-23
+import "github.com/stellar/go/cdp"
+```
+
+**Key Changes**:
+- `cdp.ApplyLedgerMetadata()` - **Available natively in stellar/go/cdp**
+- Same function signature and behavior
+- Enhanced with Protocol 23 optimizations (parallel execution, state archival)
+
+#### 2. **Storage Backend Migration**
+```go
+// FROM: github.com/withObsrvr/stellar-datastore  
+import "github.com/withObsrvr/stellar-datastore/datastore"
+
+// TO: github.com/stellar/go@protocol-23
+import "github.com/stellar/go/support/datastore"
+```
+
+**Available Backends**:
+- ✅ **GCS** - Fully implemented
+- ✅ **S3** - Available via `FromS3Client()`
+- ❌ **FS (Filesystem)** - **Not available in stellar/go** ⚠️
+
+#### 3. **Ledger Range Migration**
+```go
+// FROM: github.com/withObsrvr/stellar-ledgerbackend
+import "github.com/withObsrvr/stellar-ledgerbackend/ledgerbackend"
+
+// TO: github.com/stellar/go@protocol-23
+import "github.com/stellar/go/ingest/ledgerbackend"
+```
+
+**Available Range Types**:
+- `ledgerbackend.BoundedRange(start, end)`
+- `ledgerbackend.UnboundedRange(start)`
+- `ledgerbackend.SingleLedgerRange(sequence)`
+
+### Migration Impact Assessment
+
+#### **Adapters to Migrate**
+
+1. **S3BufferedStorageSourceAdapter** → **Full migration needed**
+   - Update imports to `stellar/go/cdp`, `stellar/go/support/datastore`
+   - Change `datastore.NewDataStore()` calls to native equivalents
+   - Update range handling
+
+2. **GCSBufferedStorageSourceAdapter** → **Full migration needed**  
+   - GCS is fully supported in stellar/go
+   - Straightforward migration path
+
+3. **BufferedStorageSourceAdapter** (Generic GCS) → **Full migration needed**
+   - Update to use stellar/go GCS implementation
+
+4. **FSBufferedStorageSourceAdapter** → **⚠️ DEPRECATE**
+   - **Not available in stellar/go@protocol-23**
+   - Must be removed or replaced with alternative approach
+   - Consider using historyarchive package for local files
+
+5. **CaptiveCoreInboundAdapter** → **Minor updates**
+   - Already uses stellar/go/ingest/ledgerbackend
+   - May need protocol-23 compatibility updates
+
+6. **RPC/Soroban Adapters** → **Minimal changes**
+   - Primarily use standard stellar/go types
+   - May need import path updates
+
+#### **Alternative for Filesystem Storage**
+
+Since `FSBufferedStorageSourceAdapter` won't be available, consider:
+
+**Option A**: Use `github.com/stellar/go/historyarchive` package
+```go
+import "github.com/stellar/go/historyarchive"
+
+// Access local archive files directly
+archive := historyarchive.NewArchive(historyarchive.ArchiveOptions{
+    ConnectOptions: storage.ConnectOptions{
+        StorageType: "filesystem",
+        URL: "file:///path/to/local/archive",
+    },
+})
+```
+
+**Option B**: Use `github.com/stellar/go/support/storage` filesystem backend
+```go
+import "github.com/stellar/go/support/storage"
+
+// Filesystem storage backend
+store := storage.NewFSStorage("/path/to/local/files")
+```
+
+**Option C**: Remove filesystem support entirely
+- Focus on cloud storage (S3/GCS) only
+- Recommend customers use S3/GCS instead of local filesystem
+
+### Source Adapters That Need Enhancement (Post-Migration)
+
+After migration to stellar/go@protocol-23:
 - `S3BufferedStorageSourceAdapter` 
 - `GCSBufferedStorageSourceAdapter`
-- `FSBufferedStorageSourceAdapter`
 - `BufferedStorageSourceAdapter` (generic)
+- ~~`FSBufferedStorageSourceAdapter`~~ (deprecated)
 
 ## Proposed Solution
 
@@ -392,13 +537,71 @@ ORDER BY source_start_ledger;
 
 ## Implementation Timeline
 
-- **Phase 1**: Core infrastructure (1 week)
-- **Phase 2**: Source adapter updates (1 week) 
-- **Phase 3**: Processor updates (1 week)
-- **Phase 4**: Consumer integration (1 week)
-- **Phase 5**: Testing and validation (1 week)
+### **Phase 0: Protocol 23 Migration (PREREQUISITE)**
+**Duration**: 2-3 weeks
+**Critical**: Must be completed before source file provenance implementation
 
-**Total: ~5 weeks for complete implementation**
+#### Week 1: Package Migration Analysis and Planning
+- Map all withObsrvr package usage to stellar/go equivalents
+- Identify breaking changes in APIs
+- Plan filesystem storage alternative approach
+- Update go.mod to use stellar/go@protocol-23
+
+#### Week 2-3: Source Adapter Migration Implementation
+- **S3BufferedStorageSourceAdapter**: Migrate to `stellar/go/cdp` + `stellar/go/support/datastore`
+- **GCSBufferedStorageSourceAdapter**: Migrate to native GCS support
+- **BufferedStorageSourceAdapter**: Update to stellar/go packages
+- **FSBufferedStorageSourceAdapter**: **DEPRECATE** and document alternatives
+- **CaptiveCoreInboundAdapter**: Update for protocol-23 compatibility
+- Update import statements across all adapters
+- Test basic functionality with protocol-23 packages
+
+### **Phase 1: Core Infrastructure**
+**Duration**: 1 week
+- Enhance Message structure with metadata support
+- Create metadata utility functions
+- Update processor interface for metadata handling
+
+### **Phase 2: Source Adapter Enhancements (Post-Migration)**
+**Duration**: 1 week
+- Add metadata injection to migrated S3/GCS adapters
+- Implement file path calculation logic
+- Update adapter configuration for metadata support
+
+### **Phase 3: Processor Updates**
+**Duration**: 1 week
+- Update ContractDataProcessor to preserve source metadata
+- Update other contract processors (events, invocations)
+- Ensure metadata flows through processing pipeline
+
+### **Phase 4: Consumer Integration**
+**Duration**: 1 week
+- Update database consumers to store source metadata
+- Add database schema changes for source tracking
+- Update configuration system
+
+### **Phase 5: Testing and Validation**
+**Duration**: 1 week
+- Test complete pipeline with protocol-23 packages
+- Verify source metadata accuracy and completeness
+- Performance testing with new packages
+- Integration testing across storage backends
+
+**Total: ~7-8 weeks (3 weeks migration + 5 weeks implementation)**
+
+### **Risk Mitigation**
+
+#### **High Risk**: Protocol 23 Migration Complexity
+- **Mitigation**: Thorough API analysis and incremental migration
+- **Fallback**: Keep current withObsrvr packages as backup during transition
+
+#### **High Risk**: Filesystem Adapter Deprecation
+- **Mitigation**: Document migration path to cloud storage
+- **Alternative**: Implement historyarchive-based local file processing
+
+#### **Medium Risk**: Performance Regression
+- **Mitigation**: Benchmark before/after migration
+- **Monitoring**: Track processing throughput and latency
 
 ## Considerations
 
@@ -416,4 +619,62 @@ ORDER BY source_start_ledger;
 - Monitor processor performance with enhanced messages
 - Track source file processing completeness
 
-This implementation provides complete source file provenance while maintaining backward compatibility and minimal performance impact.
+## Summary and Recommendations
+
+### **Critical Path: Protocol 23 Migration First**
+
+The analysis reveals that implementing source file provenance **requires first migrating from withObsrvr packages to stellar/go@protocol-23**. This migration is essential because:
+
+1. **Dependency Consolidation**: Eliminates reliance on custom withObsrvr packages
+2. **Protocol 23 Optimizations**: Access to latest performance improvements and features
+3. **Future Compatibility**: Ensures ongoing support and updates from Stellar
+4. **Native Functionality**: stellar/go@protocol-23 contains equivalent functionality for all required features
+
+### **Key Migration Requirements**
+
+#### **Must Migrate**:
+- ✅ **S3 Storage**: `stellar/go/support/datastore` has native S3 support
+- ✅ **GCS Storage**: Fully supported in stellar/go
+- ✅ **Ledger Processing**: `stellar/go/cdp` provides `ApplyLedgerMetadata()`
+- ✅ **Range Handling**: `stellar/go/ingest/ledgerbackend` has all range types
+
+#### **Must Deprecate**:
+- ❌ **Filesystem Storage**: Not available in stellar/go@protocol-23
+- **Alternative**: Use `historyarchive` package or cloud storage migration
+
+### **Implementation Recommendations**
+
+#### **Phase 0 (Critical)**: Complete protocol-23 migration before source provenance
+- **Duration**: 2-3 weeks
+- **Risk**: High complexity but necessary for long-term maintainability
+
+#### **Phase 1-5**: Source file provenance implementation  
+- **Duration**: 5 weeks
+- **Benefits**: Complete data lineage tracking from archive files to database
+
+### **Customer Impact**
+
+After full implementation, customers will have:
+
+```sql
+-- Complete source file traceability
+SELECT contract_id, source_file_path, source_bucket_name 
+FROM contract_data 
+WHERE contract_id = 'CXYZ...';
+
+-- Historical analysis across multiple archive files  
+SELECT source_file_name, COUNT(*) as changes
+FROM contract_data 
+WHERE contract_id = 'CXYZ...'
+ORDER BY source_start_ledger;
+```
+
+### **Protocol 23 Benefits**
+
+The migration will also provide:
+- **9x Performance Improvement**: Enhanced buffered storage processing
+- **Parallel Execution**: CAP-0063 multi-core transaction processing
+- **State Archival**: CAP-0062 with automatic restoration
+- **Latest Optimizations**: Protocol 23 specific improvements
+
+This comprehensive approach ensures both source file provenance capabilities and long-term protocol compatibility while maintaining backward compatibility and minimal performance impact.
