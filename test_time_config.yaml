@@ -1,0 +1,26 @@
+pipelines:
+  contract_data_time_test:
+    name: "Contract Data Time-based Test"
+    source:
+      type: "S3BufferedStorageSourceAdapter"
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-testnet-data"
+        region: "us-east-1"
+        network: "testnet"
+        # Time-based configuration: process last 30 days and continue
+        start_time_ago: "30d"
+        continuous_mode: true
+        buffer_size: 1024
+        num_workers: 5
+        retry_limit: 3
+        retry_wait: 5
+        ledgers_per_file: 64
+        files_per_partition: 10
+    processors:
+      - type: "contract_data"
+        config:
+          network_passphrase: "Test SDF Network ; September 2015"
+          page_size: 50
+    consumers:
+      - type: "StdoutConsumer"
+        config: {}

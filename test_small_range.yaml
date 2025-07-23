@@ -1,0 +1,20 @@
+pipelines:
+  small_test:
+    name: "Small Range Test"
+    source:
+      type: "BufferedStorageSourceAdapter"
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-testnet-data/landing/ledgers/testnet"
+        network: "testnet"
+        start_ledger: 414000
+        end_ledger: 414010      # Only 10 ledgers
+        num_workers: 5
+        ledgers_per_file: 1
+        files_per_partition: 64000
+    processors:
+      - type: "contract_data"
+        config:
+          network_passphrase: "Test SDF Network ; September 2015"
+    consumers:
+      - type: "StdoutConsumer"
+        config: {}
