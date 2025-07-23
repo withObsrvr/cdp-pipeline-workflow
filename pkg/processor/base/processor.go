@@ -80,7 +80,7 @@ type Event struct {
 
 // ExtractEntryFromIngestChange gets the most recent state of an entry from an ingestion change
 func ExtractEntryFromIngestChange(change ingest.Change) (xdr.LedgerEntry, xdr.LedgerEntryChangeType, bool, error) {
-	switch changeType := change.LedgerEntryChangeType(); changeType {
+	switch changeType := change.ChangeType; changeType {
 	case xdr.LedgerEntryChangeTypeLedgerEntryCreated, xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
 		return *change.Post, changeType, false, nil
 	case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
@@ -173,7 +173,7 @@ type TestTransaction struct {
 
 // ExtractEntryFromChange gets the most recent state of an entry from an ingestio change, as well as if the entry was deleted
 func ExtractEntryFromChange(change ingest.Change) (xdr.LedgerEntry, xdr.LedgerEntryChangeType, bool, error) {
-	switch changeType := change.LedgerEntryChangeType(); changeType {
+	switch changeType := change.ChangeType; changeType {
 	case xdr.LedgerEntryChangeTypeLedgerEntryCreated, xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
 		return *change.Post, changeType, false, nil
 	case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:

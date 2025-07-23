@@ -22,6 +22,7 @@
           czmq
           libsodium.dev  # Use dev output for pkg-config files
           arrow-cpp
+          duckdb        # Add duckdb dependency
           pkg-config
           gcc
           gnumake
@@ -69,18 +70,17 @@
           # Enable CGO
           env.CGO_ENABLED = "1";
 
-          # Build flags
+          # Build flags  
           ldflags = [
             "-s"
             "-w"
-            "-extldflags=-static"
           ];
 
           # Set build environment
           preBuild = ''
             export CGO_ENABLED=1
-            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium.dev}/include -I${pkgs.arrow-cpp}/include"
-            export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib -L${pkgs.arrow-cpp}/lib"
+            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium.dev}/include -I${pkgs.arrow-cpp}/include -I${pkgs.duckdb}/include"
+            export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib -L${pkgs.arrow-cpp}/lib -L${pkgs.duckdb}/lib"
             export PKG_CONFIG_PATH="${pkgs.zeromq}/lib/pkgconfig:${pkgs.czmq}/lib/pkgconfig:${pkgs.libsodium.dev}/lib/pkgconfig:${pkgs.arrow-cpp}/lib/pkgconfig"
           '';
 
@@ -256,8 +256,8 @@
             
             # Set up CGO environment
             export CGO_ENABLED=1
-            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium.dev}/include -I${pkgs.arrow-cpp}/include"
-            export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib -L${pkgs.arrow-cpp}/lib"
+            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium.dev}/include -I${pkgs.arrow-cpp}/include -I${pkgs.duckdb}/include"
+            export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib -L${pkgs.arrow-cpp}/lib -L${pkgs.duckdb}/lib"
             export PKG_CONFIG_PATH="${pkgs.zeromq}/lib/pkgconfig:${pkgs.czmq}/lib/pkgconfig:${pkgs.libsodium.dev}/lib/pkgconfig:${pkgs.arrow-cpp}/lib/pkgconfig"
             
             # Set custom prompt to indicate Nix development environment
