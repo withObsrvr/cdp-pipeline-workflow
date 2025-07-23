@@ -97,15 +97,15 @@
           
           IMAGE_NAME="obsrvr-flow-pipeline"
           TAG="''${1:-latest}"
-          REGISTRY="''${2:-docker.io}"
+          USERNAME="''${2:-withobsrvr}"
           
           echo "Building production container with Docker..."
-          ${pkgs.docker}/bin/docker build -f Dockerfile.nix -t "$REGISTRY/$IMAGE_NAME:$TAG" .
+          ${pkgs.docker}/bin/docker build -f Dockerfile.nix -t "docker.io/$USERNAME/$IMAGE_NAME:$TAG" .
           
           echo "Pushing to DockerHub..."
-          ${pkgs.docker}/bin/docker push "$REGISTRY/$IMAGE_NAME:$TAG"
+          ${pkgs.docker}/bin/docker push "docker.io/$USERNAME/$IMAGE_NAME:$TAG"
           
-          echo "Successfully pushed $REGISTRY/$IMAGE_NAME:$TAG"
+          echo "Successfully pushed docker.io/$USERNAME/$IMAGE_NAME:$TAG"
         '';
 
         pushToDev = pkgs.writeShellScriptBin "push-to-dockerhub-dev" ''
@@ -113,15 +113,15 @@
           
           IMAGE_NAME="cdp-pipeline-dev"
           TAG="''${1:-latest}"
-          REGISTRY="''${2:-docker.io}"
+          USERNAME="''${2:-withobsrvr}"
           
           echo "Building development container with Docker..."
-          ${pkgs.docker}/bin/docker build -f Dockerfile.nix -t "$REGISTRY/$IMAGE_NAME:$TAG" .
+          ${pkgs.docker}/bin/docker build -f Dockerfile.nix -t "docker.io/$USERNAME/$IMAGE_NAME:$TAG" .
           
           echo "Pushing to DockerHub..."
-          ${pkgs.docker}/bin/docker push "$REGISTRY/$IMAGE_NAME:$TAG"
+          ${pkgs.docker}/bin/docker push "docker.io/$USERNAME/$IMAGE_NAME:$TAG"
           
-          echo "Successfully pushed $REGISTRY/$IMAGE_NAME:$TAG"
+          echo "Successfully pushed docker.io/$USERNAME/$IMAGE_NAME:$TAG"
         '';
 
       in
