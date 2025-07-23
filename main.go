@@ -88,7 +88,7 @@ func createSourceAdapter(sourceConfig SourceConfig) (SourceAdapter, error) {
 		if err == nil {
 			return adapter, nil
 		}
-		log.Printf("Enhanced adapter failed with: %v, falling back to legacy", err)
+		log.Printf("Enhanced BufferedStorageSourceAdapter failed with: %v, falling back to legacy", err)
 		return NewBufferedStorageSourceAdapter(sourceConfig.Config)
 	case "SorobanSourceAdapter":
 		return NewSorobanSourceAdapter(sourceConfig.Config)
@@ -100,6 +100,8 @@ func createSourceAdapter(sourceConfig SourceConfig) (SourceAdapter, error) {
 		// Try enhanced version first, fall back to legacy
 		if adapter, err := NewS3BufferedStorageSourceAdapterEnhanced(sourceConfig.Config); err == nil {
 			return adapter, nil
+		} else {
+			log.Printf("Enhanced S3BufferedStorageSourceAdapter failed with: %v, falling back to legacy", err)
 		}
 		return NewS3BufferedStorageSourceAdapter(sourceConfig.Config)
 	case "RPCSourceAdapter":

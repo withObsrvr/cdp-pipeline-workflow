@@ -165,8 +165,8 @@ func (h *HybridLedgerTimeConverter) binarySearchRecent(ctx context.Context, targ
 		h.networkClient.network, currentLedger.Sequence, ledgersIn30Days)
 	
 	minSeq := currentLedger.Sequence - ledgersIn30Days
-	if minSeq < 3 {
-		minSeq = 3  // Start from ledger 3 as ledgers 1-2 are often not available
+	if minSeq < MinAvailableLedger {
+		minSeq = MinAvailableLedger
 	}
 	maxSeq := currentLedger.Sequence
 	log.Printf("DEBUG: Binary search range: [%d, %d]", minSeq, maxSeq)
@@ -270,7 +270,7 @@ func (h *HybridLedgerTimeConverter) refineEstimate(ctx context.Context, targetTi
 	if minSeq > searchRadius {
 		minSeq = uint32(newEstimate) - searchRadius
 	} else {
-		minSeq = 3  // Start from ledger 3 as ledgers 1-2 are often not available
+		minSeq = MinAvailableLedger
 	}
 	maxSeq := uint32(newEstimate) + searchRadius
 

@@ -280,7 +280,7 @@ func (c *StellarNetworkClient) binarySearchLedger(ctx context.Context, targetTim
 	if minSeq > searchRadius {
 		minSeq = initialEstimate - searchRadius
 	} else {
-		minSeq = 3  // Start from ledger 3 as ledgers 1-2 are often not available
+		minSeq = MinAvailableLedger
 	}
 	maxSeq := initialEstimate + searchRadius
 
@@ -328,14 +328,14 @@ func (c *StellarNetworkClient) estimateFromGenesis(targetTime time.Time) uint32 
 	}
 	
 	if targetTime.Before(constants.GenesisTime) {
-		return 3  // Start from ledger 3 as ledgers 1-2 are often not available
+		return MinAvailableLedger
 	}
 
 	timeSinceGenesis := targetTime.Sub(constants.GenesisTime)
 	estimatedLedgers := timeSinceGenesis.Milliseconds() / constants.AverageLedgerTimeMs
 	
-	if estimatedLedgers < 3 {
-		return 3  // Start from ledger 3 as ledgers 1-2 are often not available
+	if estimatedLedgers < int64(MinAvailableLedger) {
+		return MinAvailableLedger
 	}
 
 	return uint32(estimatedLedgers)
@@ -368,8 +368,8 @@ func (c *StellarNetworkClient) estimateFromCurrentLedger(targetTime time.Time) u
 	ledgersDiff := timeDiff.Milliseconds() / constants.AverageLedgerTimeMs
 	
 	estimatedSequence := int64(currentLedger.Sequence) - ledgersDiff
-	if estimatedSequence < 3 {
-		return 3  // Start from ledger 3 as ledgers 1-2 are often not available
+	if estimatedSequence < int64(MinAvailableLedger) {
+		return MinAvailableLedger
 	}
 	
 	log.Printf("DEBUG: Estimate from current ledger - current: %d (%v), target: %v, diff: %d ledgers, result: %d", 
