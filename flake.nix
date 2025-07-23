@@ -4,17 +4,12 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    nix2container = {
-      url = "github:nlewo/nix2container";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, nix2container }:
+  outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        nix2containerPkgs = nix2container.packages.${system};
 
         # System dependencies required for CGO
         systemDeps = with pkgs; [
@@ -33,8 +28,7 @@
         # Development tools
         devTools = with pkgs; [
           # Container tools
-          nerdctl
-          containerd
+          docker
           skopeo
           
           # Development utilities
@@ -96,91 +90,6 @@
           };
         };
 
-        # Create a minimal production container
-        container-prod = nix2containerPkgs.nix2container.buildImage {
-          name = "obsrvr-flow-pipeline";
-          tag = "latest";
-          
-          copyToRoot = pkgs.buildEnv {
-            name = "container-root";
-            paths = with pkgs; [
-              cdp-pipeline
-              coreutils
-              bash
-              cacert
-              tzdata
-              # Runtime libraries
-              zeromq
-              czmq
-              libsodium
-            ];
-            pathsToLink = [ "/bin" "/lib" "/share" ];
-          };
-
-          config = {
-            Entrypoint = [ "${cdp-pipeline}/bin/cdp-pipeline-workflow" ];
-            WorkingDir = "/app";
-            User = "1000:1000";
-            Env = [
-              "PATH=/bin"
-              "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-            ];
-            ExposedPorts = {
-              "8080/tcp" = {};
-            };
-          };
-        };
-
-        # Create a development container with debugging tools
-        container-dev = nix2containerPkgs.nix2container.buildImage {
-          name = "cdp-pipeline-dev";
-          tag = "latest";
-          
-          copyToRoot = pkgs.buildEnv {
-            name = "container-dev-root";
-            paths = with pkgs; [
-              cdp-pipeline
-              coreutils
-              bash
-              cacert
-              tzdata
-              # Runtime libraries
-              zeromq
-              czmq
-              libsodium
-              # Development tools
-              curl
-              jq
-              yq-go
-              vim
-              htop
-              nettools
-              iputils
-              sudo
-            ];
-            pathsToLink = [ "/bin" "/lib" "/share" "/etc" ];
-          };
-
-          config = {
-            Entrypoint = [ "/bin/bash" ];
-            WorkingDir = "/app";
-            User = "1000:1000";
-            Env = [
-              "PATH=/bin"
-              "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-              "DEV_MODE=true"
-              "LOG_LEVEL=debug"
-            ];
-            ExposedPorts = {
-              "8080/tcp" = {};
-              "5555/tcp" = {}; # ZeroMQ
-            };
-            Volumes = {
-              "/app/config" = {};
-              "/app/data" = {};
-            };
-          };
-        };
 
         # Docker push scripts (standalone - build containers on demand)
         pushToProd = pkgs.writeShellScriptBin "push-to-dockerhub-prod" ''
@@ -190,17 +99,11 @@
           TAG="''${1:-latest}"
           REGISTRY="''${2:-docker.io}"
           
-          echo "Building production container..."
-          CONTAINER_PATH=$(nix build --no-link --print-out-paths .#container-prod)
-          
-          echo "Loading container image..."
-          ${pkgs.nerdctl}/bin/nerdctl load < "$CONTAINER_PATH"
-          
-          echo "Tagging image..."
-          ${pkgs.nerdctl}/bin/nerdctl tag "$IMAGE_NAME:latest" "$REGISTRY/$IMAGE_NAME:$TAG"
+          echo "Building production container with Docker..."
+          ${pkgs.docker}/bin/docker build -f Dockerfile.nix -t "$REGISTRY/$IMAGE_NAME:$TAG" .
           
           echo "Pushing to DockerHub..."
-          ${pkgs.nerdctl}/bin/nerdctl push "$REGISTRY/$IMAGE_NAME:$TAG"
+          ${pkgs.docker}/bin/docker push "$REGISTRY/$IMAGE_NAME:$TAG"
           
           echo "Successfully pushed $REGISTRY/$IMAGE_NAME:$TAG"
         '';
@@ -212,17 +115,11 @@
           TAG="''${1:-latest}"
           REGISTRY="''${2:-docker.io}"
           
-          echo "Building development container..."
-          CONTAINER_PATH=$(nix build --no-link --print-out-paths .#container-dev)
-          
-          echo "Loading container image..."
-          ${pkgs.nerdctl}/bin/nerdctl load < "$CONTAINER_PATH"
-          
-          echo "Tagging image..."
-          ${pkgs.nerdctl}/bin/nerdctl tag "$IMAGE_NAME:latest" "$REGISTRY/$IMAGE_NAME:$TAG"
+          echo "Building development container with Docker..."
+          ${pkgs.docker}/bin/docker build -f Dockerfile.nix -t "$REGISTRY/$IMAGE_NAME:$TAG" .
           
           echo "Pushing to DockerHub..."
-          ${pkgs.nerdctl}/bin/nerdctl push "$REGISTRY/$IMAGE_NAME:$TAG"
+          ${pkgs.docker}/bin/docker push "$REGISTRY/$IMAGE_NAME:$TAG"
           
           echo "Successfully pushed $REGISTRY/$IMAGE_NAME:$TAG"
         '';
@@ -244,8 +141,7 @@
             echo "Available commands:"
             echo "  go build -o cdp-pipeline-workflow        - Build Go application locally"
             echo "  nix build                                - Build the Go application with Nix"
-            echo "  nix build .#container-prod               - Build production container"
-            echo "  nix build .#container-dev                - Build development container"
+            echo "  docker build -f Dockerfile.nix .         - Build Docker container"
             echo "  nix build .#push-to-dockerhub-prod       - Build DockerHub push script (prod)"
             echo "  nix build .#push-to-dockerhub-dev        - Build DockerHub push script (dev)"
             echo ""
@@ -269,8 +165,6 @@
         packages = {
           default = cdp-pipeline;
           cdp-pipeline = cdp-pipeline;
-          container-prod = container-prod;
-          container-dev = container-dev;
           push-to-dockerhub-prod = pushToProd;
           push-to-dockerhub-dev = pushToDev;
         };
