@@ -1,0 +1,22 @@
+pipelines:
+ TestBeforeGenesis:
+   source:
+     type: BufferedStorageSourceAdapter
+     config:
+       bucket_name: "obsrvr-stellar-ledger-data-testnet-data/landing/ledgers/testnet"
+       network: "testnet"
+       num_workers: 10
+       retry_limit: 3
+       retry_wait: 5
+       start_time_ago: "60d"  # 60 days ago - likely before last reset
+       end_time_ago: "30d"    # End at 30 days ago
+       ledgers_per_file: 1
+       files_per_partition: 64000
+   processors:
+     - type: LatestLedger
+       config:
+         network_passphrase: "Test SDF Network ; September 2015"
+   consumers:
+     - type: SaveToZeroMQ
+       config:
+         address: "tcp://127.0.0.1:5555"

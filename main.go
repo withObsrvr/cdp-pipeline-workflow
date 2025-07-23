@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 
 	"github.com/withObsrvr/cdp-pipeline-workflow/consumer"
 	"github.com/withObsrvr/cdp-pipeline-workflow/processor"
@@ -56,8 +59,19 @@ func main() {
 	// Run each pipeline
 	for name, pipelineConfig := range config.Pipelines {
 		log.Printf("Starting pipeline: %s", name)
-		if err := setupPipeline(ctx, pipelineConfig); err != nil {
-			log.Printf("Pipeline error: error in pipeline %s: %v", name, err)
+		err := setupPipeline(ctx, pipelineConfig)
+		log.Printf("DEBUG: setupPipeline returned error: %v", err)
+		if err != nil {
+			// Check if this is a rolling window completion (EOF from callback)
+			errorMsg := err.Error()
+			log.Printf("DEBUG: Error message: '%s'", errorMsg)
+			log.Printf("DEBUG: errors.Is(err, io.EOF): %v", errors.Is(err, io.EOF))
+			log.Printf("DEBUG: strings.Contains check: %v", strings.Contains(errorMsg, "received an error from callback invocation: EOF"))
+			if errors.Is(err, io.EOF) || strings.Contains(errorMsg, "received an error from callback invocation: EOF") {
+				log.Printf("Pipeline %s completed successfully (rolling window phase finished)", name)
+			} else {
+				log.Printf("Pipeline error: error in pipeline %s: %v", name, err)
+			}
 		}
 	}
 
@@ -69,6 +83,12 @@ func createSourceAdapter(sourceConfig SourceConfig) (SourceAdapter, error) {
 	case "CaptiveCoreInboundAdapter":
 		return NewCaptiveCoreInboundAdapter(sourceConfig.Config)
 	case "BufferedStorageSourceAdapter":
+		// Try enhanced version first, fall back to legacy
+		adapter, err := NewBufferedStorageSourceAdapterEnhanced(sourceConfig.Config)
+		if err == nil {
+			return adapter, nil
+		}
+		log.Printf("Enhanced adapter failed with: %v, falling back to legacy", err)
 		return NewBufferedStorageSourceAdapter(sourceConfig.Config)
 	case "SorobanSourceAdapter":
 		return NewSorobanSourceAdapter(sourceConfig.Config)
@@ -77,6 +97,10 @@ func createSourceAdapter(sourceConfig SourceConfig) (SourceAdapter, error) {
 	case "FSBufferedStorageSourceAdapter":
 		return NewFSBufferedStorageSourceAdapter(sourceConfig.Config)
 	case "S3BufferedStorageSourceAdapter":
+		// Try enhanced version first, fall back to legacy
+		if adapter, err := NewS3BufferedStorageSourceAdapterEnhanced(sourceConfig.Config); err == nil {
+			return adapter, nil
+		}
 		return NewS3BufferedStorageSourceAdapter(sourceConfig.Config)
 	case "RPCSourceAdapter":
 		return NewRPCSourceAdapter(sourceConfig.Config)
