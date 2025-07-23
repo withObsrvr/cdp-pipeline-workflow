@@ -20,13 +20,13 @@
         systemDeps = with pkgs; [
           zeromq
           czmq
-          libsodium
+          libsodium.dev  # Use dev output for pkg-config files
           arrow-cpp
           pkg-config
           gcc
           gnumake
           cmake
-          openssl
+          openssl.dev    # Use dev output for pkg-config files
         ];
 
         # Development tools
@@ -61,7 +61,7 @@
 
           # IMPORTANT: Update this hash after first build attempt
           # Run: nix build 2>&1 | grep "got:" | awk '{print $2}'
-          vendorHash = "sha256-txBhNeCZYonzYJr3V7VyqEr638kzH38wXTwt1XbP7WM=";
+          vendorHash = "sha256-IKOfpBARjXmrELW6ZvUzQ2OSvmGttpnzx6W7y/tr08g=";
 
           nativeBuildInputs = systemDeps;
           buildInputs = systemDeps;
@@ -79,9 +79,9 @@
           # Set build environment
           preBuild = ''
             export CGO_ENABLED=1
-            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium}/include -I${pkgs.arrow-cpp}/include"
+            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium.dev}/include -I${pkgs.arrow-cpp}/include"
             export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib -L${pkgs.arrow-cpp}/lib"
-            export PKG_CONFIG_PATH="${pkgs.zeromq}/lib/pkgconfig:${pkgs.czmq}/lib/pkgconfig:${pkgs.libsodium}/lib/pkgconfig:${pkgs.arrow-cpp}/lib/pkgconfig"
+            export PKG_CONFIG_PATH="${pkgs.zeromq}/lib/pkgconfig:${pkgs.czmq}/lib/pkgconfig:${pkgs.libsodium.dev}/lib/pkgconfig:${pkgs.arrow-cpp}/lib/pkgconfig"
           '';
 
           # Skip tests as they don't exist yet
@@ -256,9 +256,9 @@
             
             # Set up CGO environment
             export CGO_ENABLED=1
-            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium}/include -I${pkgs.arrow-cpp}/include"
+            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium.dev}/include -I${pkgs.arrow-cpp}/include"
             export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib -L${pkgs.arrow-cpp}/lib"
-            export PKG_CONFIG_PATH="${pkgs.zeromq}/lib/pkgconfig:${pkgs.czmq}/lib/pkgconfig:${pkgs.libsodium}/lib/pkgconfig:${pkgs.arrow-cpp}/lib/pkgconfig"
+            export PKG_CONFIG_PATH="${pkgs.zeromq}/lib/pkgconfig:${pkgs.czmq}/lib/pkgconfig:${pkgs.libsodium.dev}/lib/pkgconfig:${pkgs.arrow-cpp}/lib/pkgconfig"
             
             # Set custom prompt to indicate Nix development environment
             export PS1="\[\033[1;34m\][nix-cdp]\[\033[0m\] \[\033[1;32m\]\u@\h\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$ "
