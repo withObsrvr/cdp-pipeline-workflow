@@ -19,6 +19,7 @@ require (
 	github.com/sendgrid/sendgrid-go v3.16.0+incompatible
 	github.com/slack-go/slack v0.15.0
 	github.com/stellar/go v0.0.0-20250718194041-56335b4c7e0c
+	github.com/tidwall/gjson v1.14.2
 	github.com/withObsrvr/stellar-cdp v0.0.0-20241220082310-1a8c717a9c8f
 	github.com/withObsrvr/stellar-datastore v0.0.0-20250207023055-4074500adc35
 	github.com/withObsrvr/stellar-ledgerbackend v0.0.0-20241220092445-b96fa5b9c924
@@ -126,6 +127,8 @@ require (
 	github.com/stellar/stellar-rpc v0.9.6-0.20250130160539-be7702aa01ba // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/stretchr/testify v1.10.0 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
