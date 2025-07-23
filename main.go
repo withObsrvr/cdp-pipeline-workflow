@@ -273,6 +273,8 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveContractInvocationsToPostgreSQL(consumerConfig.Config)
 	case "SaveExtractedContractInvocationsToPostgreSQL":
 		return consumer.NewSaveExtractedContractInvocationsToPostgreSQL(consumerConfig.Config)
+	case "SaveContractDataToPostgreSQL":
+		return consumer.NewSaveContractDataToPostgreSQL(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}
