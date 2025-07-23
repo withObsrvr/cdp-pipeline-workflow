@@ -14,6 +14,6 @@ docker run --rm \
   -v "$(pwd)/config:/app/config" \
   -v "$(pwd)/output:/app/output" \
   -v "$(pwd)/data:/app/data" \
-  -e "CONFIG_FILE=/app/$CONFIG_FILE" \
+  -e "CONFIG_FILE=/app/config/$CONFIG_FILE" \
   "$IMAGE_NAME" \
-  /app/bin/cdp-pipeline-workflow -config "/app/$CONFIG_FILE"
+  /app/bin/cdp-pipeline-workflow -config "/app/config/$CONFIG_FILE"
