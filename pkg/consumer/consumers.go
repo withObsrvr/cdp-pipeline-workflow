@@ -484,3 +484,19 @@ func NewSaveContractInvocationsToPostgreSQL(config map[string]interface{}) (type
 		config: config,
 	}, nil
 }
+
+// SaveContractDataToPostgreSQL is a consumer that saves contract data to PostgreSQL
+type SaveContractDataToPostgreSQL struct {
+	BaseConsumer
+	config map[string]interface{}
+}
+
+// NewSaveContractDataToPostgreSQL creates a new SaveContractDataToPostgreSQL
+func NewSaveContractDataToPostgreSQL(config map[string]interface{}) (types.Processor, error) {
+	return &SaveContractDataToPostgreSQL{
+		BaseConsumer: BaseConsumer{
+			name: "SaveContractDataToPostgreSQL",
+		},
+		config: config,
+	}, nil
+}
