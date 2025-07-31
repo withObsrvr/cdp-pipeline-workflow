@@ -204,7 +204,7 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewSoroswapProcessor(processorConfig.Config)
 	case "Kale":
 		return processor.NewKaleProcessor(processorConfig.Config)
-	case "contract_data":
+	case "ContractData":
 		return processor.NewContractDataProcessor(processorConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
@@ -273,6 +273,8 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveContractInvocationsToPostgreSQL(consumerConfig.Config)
 	case "SaveExtractedContractInvocationsToPostgreSQL":
 		return consumer.NewSaveExtractedContractInvocationsToPostgreSQL(consumerConfig.Config)
+	case "SaveContractDataToPostgreSQL":
+		return consumer.NewSaveContractDataToPostgreSQL(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}

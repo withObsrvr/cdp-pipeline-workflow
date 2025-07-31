@@ -1,0 +1,302 @@
+{
+  "contract_processors_overview": {
+    "description": "CDP Pipeline Contract Data Processors analyze and extract smart contract data from the Stellar blockchain, specifically Soroban contract operations",
+    "processors": [
+      {
+        "name": "ContractInvocationProcessor",
+        "file": "processor/processor_contract_invocation.go",
+        "purpose": "Processes contract invocations (function calls) on Soroban smart contracts",
+        "input": "xdr.LedgerCloseMeta",
+        "output": "ContractInvocation JSON"
+      },
+      {
+        "name": "ContractEventProcessor", 
+        "file": "processor/processor_contract_events.go",
+        "purpose": "Extracts and processes events emitted by smart contracts",
+        "input": "xdr.LedgerCloseMeta",
+        "output": "ContractEvent JSON"
+      },
+      {
+        "name": "ContractDataProcessor",
+        "file": "processor/processor_contract_data.go", 
+        "purpose": "Tracks contract data storage changes and state modifications",
+        "input": "xdr.LedgerCloseMeta",
+        "output": "ContractDataMessage JSON"
+      },
+      {
+        "name": "SoroswapProcessor",
+        "file": "processor/processor_soroswap.go",
+        "purpose": "Specialized processor for Soroswap DEX events (new pairs, sync events)",
+        "input": "ContractEvent JSON",
+        "output": "NewPairEvent/SyncEvent JSON"
+      }
+    ]
+  },
+  
+  "data_structures": {
+    "ContractInvocation": {
+      "description": "Represents a contract function invocation with full context",
+      "fields": {
+        "timestamp": "time.Time - When the invocation occurred",
+        "ledger_sequence": "uint32 - Ledger number where invocation happened",
+        "transaction_hash": "string - Transaction hash containing the invocation",
+        "contract_id": "string - Contract address being invoked (56 chars)",
+        "invoking_account": "string - Account that initiated the invocation",
+        "function_name": "string - Name of the function being called",
+        "arguments_raw": "[]xdr.ScVal - Raw XDR arguments (for debugging)",
+        "arguments": "[]json.RawMessage - Arguments in JSON format",
+        "arguments_decoded": "map[string]interface{} - Human-readable decoded arguments",
+        "successful": "bool - Whether the invocation succeeded",
+        "diagnostic_events": "[]DiagnosticEvent - Debug events emitted during execution",
+        "contract_calls": "[]ContractCall - Contract-to-contract calls",
+        "state_changes": "[]StateChange - Contract state modifications",
+        "ttl_extensions": "[]TtlExtension - TTL (time-to-live) extensions",
+        "archive_metadata": "*ArchiveSourceMetadata - Source file provenance info"
+      },
+      "nested_structures": {
+        "DiagnosticEvent": {
+          "contract_id": "string - Contract that emitted the event",
+          "topics": "[]xdr.ScVal - Raw event topics",
+          "topics_decoded": "[]interface{} - Decoded human-readable topics",
+          "data": "xdr.ScVal - Raw event data",
+          "data_decoded": "interface{} - Decoded human-readable data"
+        },
+        "ContractCall": {
+          "from_contract": "string - Source contract address",
+          "to_contract": "string - Target contract address",
+          "function": "string - Function name being called",
+          "successful": "bool - Whether the call succeeded"
+        },
+        "StateChange": {
+          "contract_id": "string - Contract whose state changed",
+          "key_raw": "xdr.ScVal - Raw storage key",
+          "key": "string - Decoded storage key",
+          "old_value_raw": "xdr.ScVal - Previous value (raw)",
+          "old_value": "interface{} - Previous value (decoded)",
+          "new_value_raw": "xdr.ScVal - New value (raw)",
+          "new_value": "interface{} - New value (decoded)",
+          "operation": "string - Type of change: create/update/delete"
+        },
+        "TtlExtension": {
+          "contract_id": "string - Contract whose TTL was extended",
+          "old_ttl": "uint32 - Previous TTL value",
+          "new_ttl": "uint32 - New TTL value"
+        }
+      }
+    },
+    
+    "ContractEvent": {
+      "description": "Represents an event emitted by a smart contract",
+      "fields": {
+        "timestamp": "time.Time - When the event was emitted",
+        "ledger_sequence": "uint32 - Ledger number",
+        "transaction_hash": "string - Transaction hash",
+        "contract_id": "string - Contract that emitted the event",
+        "type": "string - Event type (usually 'contract')",
+        "event_type": "string - Specific event name (e.g., 'transfer', 'swap')",
+        "topic": "[]xdr.ScVal - Raw event topics",
+        "topic_decoded": "[]interface{} - Decoded topics",
+        "data": "json.RawMessage - Raw event data",
+        "data_decoded": "interface{} - Decoded event data",
+        "in_successful_tx": "bool - Whether the transaction succeeded",
+        "event_index": "int - Index of event within transaction",
+        "operation_index": "int - Index of operation within transaction",
+        "diagnostic_events": "[]DiagnosticData - Additional diagnostic info",
+        "network_passphrase": "string - Network identifier"
+      }
+    },
+    
+    "ContractDataMessage": {
+      "description": "Represents contract data storage changes",
+      "fields": {
+        "contract_data": "ContractDataOutput - The actual data change",
+        "contract_id": "string - Contract ID for easy access",
+        "timestamp": "time.Time - When the change occurred",
+        "ledger_seq": "uint32 - Ledger sequence number",
+        "processor_name": "string - Name of the processor",
+        "message_type": "string - Always 'contract_data'",
+        "archive_metadata": "*ArchiveSourceMetadata - Source provenance"
+      },
+      "nested_structures": {
+        "ContractDataOutput": {
+          "contract_id": "string - Contract address",
+          "contract_key_type": "string - Type of storage key",
+          "contract_durability": "string - Storage durability type",
+          "asset_code": "string - Asset code if applicable",
+          "asset_issuer": "string - Asset issuer if applicable",
+          "asset_type": "string - Type of asset",
+          "balance_holder": "string - Account holding balance",
+          "balance": "string - Balance amount",
+          "last_modified_ledger": "uint32 - Last modification ledger",
+          "ledger_entry_change": "uint32 - Type of change",
+          "deleted": "bool - Whether entry was deleted",
+          "closed_at": "time.Time - Ledger close time",
+          "ledger_sequence": "uint32 - Current ledger sequence",
+          "ledger_key_hash": "string - Hash of the ledger key"
+        }
+      }
+    },
+    
+    "SoroswapEvents": {
+      "NewPairEvent": {
+        "description": "Emitted when a new trading pair is created on Soroswap",
+        "fields": {
+          "type": "string - Always 'new_pair'",
+          "timestamp": "time.Time",
+          "ledger_sequence": "uint32",
+          "contract_id": "string - Factory contract ID",
+          "pair_address": "string - New pair contract address",
+          "token_0": "string - First token contract ID",
+          "token_1": "string - Second token contract ID"
+        }
+      },
+      "SyncEvent": {
+        "description": "Emitted when liquidity pool reserves are updated",
+        "fields": {
+          "type": "string - Always 'sync'",
+          "timestamp": "time.Time",
+          "ledger_sequence": "uint32",
+          "contract_id": "string - Pair contract address",
+          "new_reserve_0": "string - Updated reserve for token 0",
+          "new_reserve_1": "string - Updated reserve for token 1"
+        }
+      }
+    }
+  },
+  
+  "postgresql_schema": {
+    "contract_invocations": {
+      "description": "Main table for contract function invocations",
+      "columns": {
+        "id": "SERIAL PRIMARY KEY",
+        "timestamp": "TIMESTAMP WITH TIME ZONE",
+        "ledger_sequence": "INTEGER",
+        "transaction_hash": "TEXT",
+        "contract_id": "TEXT",
+        "invoking_account": "TEXT",
+        "function_name": "TEXT",
+        "arguments_raw": "JSONB - Raw XDR arguments",
+        "arguments": "JSONB - JSON formatted arguments",
+        "arguments_decoded": "JSONB - Human-readable arguments",
+        "successful": "BOOLEAN",
+        "created_at": "TIMESTAMP WITH TIME ZONE DEFAULT NOW()"
+      },
+      "indexes": [
+        "contract_id",
+        "timestamp",
+        "ledger_sequence",
+        "transaction_hash",
+        "function_name",
+        "arguments_raw (GIN)",
+        "arguments (GIN)",
+        "arguments_decoded (GIN)"
+      ]
+    },
+    
+    "contract_diagnostic_events": {
+      "description": "Diagnostic events from contract invocations",
+      "columns": {
+        "id": "SERIAL PRIMARY KEY",
+        "invocation_id": "INTEGER REFERENCES contract_invocations(id)",
+        "contract_id": "TEXT",
+        "topics": "JSONB - Raw topics",
+        "topics_decoded": "JSONB - Decoded topics",
+        "data": "JSONB - Raw data",
+        "data_decoded": "JSONB - Decoded data",
+        "created_at": "TIMESTAMP WITH TIME ZONE DEFAULT NOW()"
+      }
+    },
+    
+    "contract_calls": {
+      "description": "Contract-to-contract calls",
+      "columns": {
+        "id": "SERIAL PRIMARY KEY",
+        "invocation_id": "INTEGER REFERENCES contract_invocations(id)",
+        "from_contract": "TEXT",
+        "to_contract": "TEXT",
+        "function": "TEXT",
+        "successful": "BOOLEAN",
+        "created_at": "TIMESTAMP WITH TIME ZONE DEFAULT NOW()"
+      }
+    },
+    
+    "contract_state_changes": {
+      "description": "Contract storage state changes",
+      "columns": {
+        "id": "SERIAL PRIMARY KEY",
+        "invocation_id": "INTEGER REFERENCES contract_invocations(id)",
+        "contract_id": "TEXT",
+        "key": "TEXT",
+        "old_value": "JSONB",
+        "new_value": "JSONB",
+        "operation": "TEXT CHECK (operation IN ('create', 'update', 'delete'))",
+        "created_at": "TIMESTAMP WITH TIME ZONE DEFAULT NOW()"
+      }
+    },
+    
+    "contract_events": {
+      "description": "Contract events table",
+      "columns": {
+        "id": "SERIAL PRIMARY KEY",
+        "timestamp": "TIMESTAMP WITH TIME ZONE",
+        "ledger_sequence": "INTEGER",
+        "transaction_hash": "TEXT",
+        "contract_id": "TEXT",
+        "type": "TEXT",
+        "event_type": "TEXT",
+        "topic": "JSONB",
+        "topic_decoded": "JSONB",
+        "data": "JSONB",
+        "data_decoded": "JSONB",
+        "in_successful_tx": "BOOLEAN",
+        "event_index": "INTEGER",
+        "operation_index": "INTEGER",
+        "network_passphrase": "TEXT",
+        "created_at": "TIMESTAMP WITH TIME ZONE DEFAULT NOW()"
+      }
+    }
+  },
+  
+  "data_flow": {
+    "description": "How contract data flows through the system",
+    "steps": [
+      {
+        "step": 1,
+        "description": "Source adapter reads ledger data from Stellar Core/Archive",
+        "output": "xdr.LedgerCloseMeta"
+      },
+      {
+        "step": 2,
+        "description": "Contract processors extract specific contract operations",
+        "processors": [
+          "ContractInvocationProcessor - extracts InvokeHostFunction operations",
+          "ContractEventProcessor - extracts contract events from diagnostic events",
+          "ContractDataProcessor - extracts contract data storage changes"
+        ],
+        "output": "JSON messages with contract data"
+      },
+      {
+        "step": 3,
+        "description": "Optional specialized processors further process the data",
+        "example": "SoroswapProcessor processes ContractEvent messages for DEX-specific events",
+        "output": "Specialized JSON messages"
+      },
+      {
+        "step": 4,
+        "description": "PostgreSQL consumers save the data to database",
+        "consumers": [
+          "SaveContractInvocationsToPostgreSQL",
+          "SaveContractEventsToPostgreSQL"
+        ],
+        "output": "Data persisted in PostgreSQL tables"
+      }
+    ]
+  },
+  
+  "example_queries": {
+    "find_contract_invocations": "SELECT * FROM contract_invocations WHERE contract_id = 'CCREEB...' AND function_name = 'swap';",
+    "get_contract_events": "SELECT * FROM contract_events WHERE event_type = 'transfer' AND contract_id = 'CCREEB...';",
+    "track_state_changes": "SELECT * FROM contract_state_changes WHERE contract_id = 'CCREEB...' ORDER BY created_at DESC;",
+    "analyze_dex_activity": "SELECT * FROM contract_events WHERE topic_decoded @> '[\"sync\"]' AND timestamp > NOW() - INTERVAL '1 hour';"
+  }
+}
