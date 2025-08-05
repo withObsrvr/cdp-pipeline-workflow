@@ -1,0 +1,130 @@
+# Production configuration for archiving contract data to GCS as Parquet files
+# This configuration is optimized for high-volume production workloads
+
+pipelines:
+  ContractDataArchival:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-mainnet-data/landing/ledgers/mainnet"
+        network: "mainnet"
+        
+        # Performance tuning for production
+        num_workers: 50                    # Increase for higher throughput
+        retry_limit: 5
+        retry_wait: 10
+        
+        # Continuous processing
+        continuous_mode: true              # Keep processing new ledgers
+        start_time_ago: "1h"              # Start from 1 hour ago
+        # Alternatively, use specific ledger range:
+        # start_ledger: 50000000
+        # end_ledger: 50100000
+        
+        ledgers_per_file: 1
+        files_per_partition: 64000
+        
+        # Connection pooling
+        max_idle_conns: 100
+        max_open_conns: 200
+    
+    processors:
+      - type: "ContractData"
+        name: "contract-data-processor-mainnet"
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+          
+          # Optional: Filter specific contract types
+          # contract_id_filter: ["CCREEB...", "CDLZFC..."]  # List of contract IDs to include
+          # exclude_deleted: true                            # Skip deleted entries
+    
+    consumers:
+      # Primary Parquet archival to GCS
+      - type: SaveToParquet
+        config:
+          storage_type: "GCS"
+          bucket_name: "stellar-archive-prod"         # Your production bucket
+          path_prefix: "mainnet/contract_data/v2"     # Versioned path structure
+          
+          # Optimized for production workloads
+          compression: "zstd"                # Better compression ratio for archival
+          buffer_size: 50000                 # Large buffer for efficiency
+          max_file_size_mb: 512              # Larger files for better query performance
+          rotation_interval_minutes: 60       # Hourly rotation
+          
+          # Partitioning for efficient queries
+          partition_by: "ledger_day"         # Daily partitions
+          ledgers_per_file: 50000            # For ledger_range partitioning
+          
+          # Production settings
+          schema_evolution: true             # Handle schema changes gracefully
+          include_metadata: true             # Track data lineage
+          debug: false                       # Disable debug logging
+          
+          # GCS-specific optimizations
+          # These are passed to the GCS client
+          gcs_options:
+            chunk_size: 16777216           # 16MB chunks for uploads
+            retry_backoff_multiplier: 2.0
+            retry_backoff_max: 120
+      
+      # Optional: Real-time monitoring
+      - type: SaveToRedis
+        config:
+          address: "redis-cluster:6379"
+          key_prefix: "contract_data:stats"
+          ttl: 3600
+          # Track processing metrics
+          track_metrics: true
+      
+      # Optional: Alerts for important contracts
+      - type: NotificationDispatcher
+        config:
+          webhook_url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+          filter_contracts: ["IMPORTANT_CONTRACT_ID"]
+          alert_on: ["creation", "deletion", "large_balance_change"]
+
+# Production deployment notes:
+
+# 1. Resource Requirements:
+#    - Memory: 16-32GB recommended for large buffers
+#    - CPU: 8-16 cores for parallel processing
+#    - Network: High bandwidth for GCS uploads
+
+# 2. Monitoring:
+#    - Set up Stackdriver logging for GCS operations
+#    - Monitor pipeline metrics via Redis
+#    - Configure alerts for processing delays
+
+# 3. Cost Optimization:
+#    - Use lifecycle rules to move old data to Nearline/Coldline
+#    - Consider regional buckets for lower costs
+#    - Enable GCS object versioning for data protection
+
+# 4. Query Optimization:
+#    - Daily partitions enable efficient time-range queries
+#    - Zstd compression balances size and query performance
+#    - Larger files reduce metadata overhead
+
+# Example GCS lifecycle rule (add to bucket):
+# {
+#   "lifecycle": {
+#     "rule": [{
+#       "action": {"type": "SetStorageClass", "storageClass": "NEARLINE"},
+#       "condition": {"age": 30}
+#     }, {
+#       "action": {"type": "SetStorageClass", "storageClass": "COLDLINE"},
+#       "condition": {"age": 90}
+#     }]
+#   }
+# }
+
+# Running in production:
+# 1. Set credentials:
+#    export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+#
+# 2. Run with systemd or kubernetes:
+#    ./cdp-pipeline-workflow -config contract_data_gcs_production.yaml
+#
+# 3. Monitor logs:
+#    tail -f pipeline.log | grep -E "(ERROR|Written|Processing rate)"

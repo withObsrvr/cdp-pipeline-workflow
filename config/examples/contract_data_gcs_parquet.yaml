@@ -1,0 +1,92 @@
+# Example configuration for saving contract data to Google Cloud Storage (GCS) as Parquet files
+
+pipelines:
+  ContractDataToGCS:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        # Source bucket containing Stellar ledger data
+        bucket_name: "obsrvr-stellar-ledger-data-mainnet-data/landing/ledgers/mainnet"
+        network: "mainnet"
+        num_workers: 20
+        retry_limit: 3
+        retry_wait: 5
+        start_ledger: 50000000    # Adjust to your desired range
+        end_ledger: 50100000      # Process 100k ledgers
+        ledgers_per_file: 1
+        files_per_partition: 64000
+    
+    processors:
+      - type: "ContractData"
+        name: "contract-data-processor"
+        config:
+          # Mainnet passphrase
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+    
+    consumers:
+      - type: SaveToParquet
+        config:
+          # GCS Storage Configuration
+          storage_type: "GCS"
+          bucket_name: "your-gcs-bucket-name"    # CHANGE THIS to your GCS bucket
+          path_prefix: "stellar-data/contract_data"  # Path within the bucket
+          
+          # Compression and Performance
+          compression: "snappy"              # Fast compression, good for queries
+          buffer_size: 10000                 # Buffer 10k records before writing
+          max_file_size_mb: 256              # Target file size (before compression)
+          rotation_interval_minutes: 30       # Rotate files every 30 minutes
+          
+          # Partitioning Strategy
+          partition_by: "ledger_day"         # Creates year=YYYY/month=MM/day=DD structure
+          ledgers_per_file: 10000            # For ledger_range partitioning
+          
+          # Schema Options
+          schema_evolution: true             # Allow schema changes over time
+          include_metadata: true             # Include pipeline metadata in files
+          
+          # Debugging
+          debug: false                       # Set to true for verbose logging
+
+# GCS Authentication Options:
+# 
+# 1. Application Default Credentials (Recommended for GKE/Compute Engine):
+#    - Automatically uses the service account of the compute instance
+#    - No additional configuration needed
+#
+# 2. Service Account Key File:
+#    - Set environment variable: GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+#    - Example: export GOOGLE_APPLICATION_CREDENTIALS="~/keys/stellar-pipeline-sa.json"
+#
+# 3. gcloud CLI Authentication (Development):
+#    - Run: gcloud auth application-default login
+#    - Uses your personal Google account credentials
+#
+# 4. Workload Identity (GKE):
+#    - Configure Kubernetes service account with GCS permissions
+#    - Bind to Google service account with appropriate IAM roles
+
+# Required GCS Permissions:
+# - storage.objects.create (to write files)
+# - storage.objects.get (to check existing files)
+# - storage.buckets.get (to verify bucket access)
+
+# Example setup commands:
+
+# Create bucket (if not exists):
+# gsutil mb -p YOUR_PROJECT_ID -c STANDARD -l US gs://your-gcs-bucket-name/
+
+# Create service account:
+# gcloud iam service-accounts create stellar-pipeline-sa \
+#   --display-name="Stellar Pipeline Service Account"
+
+# Grant permissions:
+# gsutil iam ch serviceAccount:stellar-pipeline-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com:objectCreator \
+#   gs://your-gcs-bucket-name
+
+# Create and download key:
+# gcloud iam service-accounts keys create ~/keys/stellar-pipeline-sa.json \
+#   --iam-account=stellar-pipeline-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com
+
+# Set environment variable before running pipeline:
+# export GOOGLE_APPLICATION_CREDENTIALS=~/keys/stellar-pipeline-sa.json

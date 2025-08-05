@@ -347,14 +347,14 @@ func (s *SaveToParquet) Process(ctx context.Context, msg processor.Message) erro
 	}
 	
 	if shouldFlush {
-		return s.flush()
+		return s.flush(s.ctx)
 	}
 	
 	return nil
 }
 
 // flush writes buffered data to Parquet file
-func (s *SaveToParquet) flush() error {
+func (s *SaveToParquet) flush(ctx context.Context) error {
 	if len(s.buffer) == 0 {
 		return nil
 	}
@@ -401,7 +401,7 @@ func (s *SaveToParquet) flush() error {
 	filePath := s.generateFilePath()
 	
 	// Upload to storage
-	if err := s.storageClient.Write(s.ctx, filePath, parquetData); err != nil {
+	if err := s.storageClient.Write(ctx, filePath, parquetData); err != nil {
 		return fmt.Errorf("failed to write to storage: %w", err)
 	}
 	
@@ -494,7 +494,7 @@ func (s *SaveToParquet) periodicFlush() {
 				if s.config.Debug {
 					log.Printf("Periodic flush triggered after %v", timeSinceFlush)
 				}
-				if err := s.flush(); err != nil {
+				if err := s.flush(s.ctx); err != nil {
 					log.Printf("Error in periodic flush: %v", err)
 				}
 			}
@@ -508,17 +508,19 @@ func (s *SaveToParquet) periodicFlush() {
 
 // Close flushes remaining data and closes the consumer
 func (s *SaveToParquet) Close() error {
-	s.cancel()
-	
 	s.bufferMu.Lock()
 	defer s.bufferMu.Unlock()
 	
-	// Flush remaining data
+	// Flush remaining data with background context to ensure it completes
 	if len(s.buffer) > 0 {
-		if err := s.flush(); err != nil {
+		log.Printf("SaveToParquet: Flushing %d remaining records on close", len(s.buffer))
+		if err := s.flush(context.Background()); err != nil {
 			return fmt.Errorf("error flushing on close: %w", err)
 		}
 	}
+	
+	// Cancel context after flush to stop periodic flush goroutine
+	s.cancel()
 	
 	// Close storage client
 	if err := s.storageClient.Close(); err != nil {
