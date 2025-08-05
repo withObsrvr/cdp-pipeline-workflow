@@ -48,6 +48,20 @@ func (sm *SchemaManager) generateColumnDefinition(field FieldConfig) string {
 	return strings.Join(parts, " ")
 }
 
+// escapeSQLString properly escapes a string for safe SQL usage
+func (sm *SchemaManager) escapeSQLString(s string) string {
+	// Replace single quotes with doubled single quotes (standard SQL escaping)
+	escaped := strings.ReplaceAll(s, "'", "''")
+	
+	// Replace backslashes with doubled backslashes for PostgreSQL
+	escaped = strings.ReplaceAll(escaped, "\\", "\\\\")
+	
+	// Remove null bytes which can cause issues
+	escaped = strings.ReplaceAll(escaped, "\x00", "")
+	
+	return escaped
+}
+
 // formatDefaultValue properly formats a default value for SQL
 func (sm *SchemaManager) formatDefaultValue(value, fieldType string) string {
 	// Normalize type
@@ -55,15 +69,15 @@ func (sm *SchemaManager) formatDefaultValue(value, fieldType string) string {
 	
 	switch normalizedType {
 	case "TEXT", "VARCHAR", "CHAR", "JSON", "JSONB":
-		// String types need quotes
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(value, "'", "''"))
+		// String types need quotes with proper SQL escaping
+		return fmt.Sprintf("'%s'", sm.escapeSQLString(value))
 	case "TIMESTAMP", "TIMESTAMPTZ", "DATE":
 		// Time types - check for special values
 		if strings.ToUpper(value) == "NOW()" || strings.ToUpper(value) == "CURRENT_TIMESTAMP" {
 			return strings.ToUpper(value)
 		}
-		// Otherwise quote as string
-		return fmt.Sprintf("'%s'", value)
+		// Otherwise quote as string with proper escaping
+		return fmt.Sprintf("'%s'", sm.escapeSQLString(value))
 	case "BOOLEAN", "BOOL":
 		// Boolean values
 		if strings.ToLower(value) == "true" || value == "1" {

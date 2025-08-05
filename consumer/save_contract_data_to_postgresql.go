@@ -182,11 +182,15 @@ func (c *SaveContractDataToPostgreSQL) Process(ctx context.Context, msg processo
 	ledgerSeq := gjson.GetBytes(msgBytes, "ledger_sequence").Int()
 	contractID := gjson.GetBytes(msgBytes, "contract_id").String()
 	
-	log.Printf("SaveContractDataPostgreSQL: Processing message type='%s', ledger=%d, contract_id='%s'", messageType, ledgerSeq, contractID)
+	// Sanitize user input to prevent log injection
+	sanitizedMessageType := strings.ReplaceAll(strings.ReplaceAll(messageType, "\n", " "), "\r", " ")
+	sanitizedContractID := strings.ReplaceAll(strings.ReplaceAll(contractID, "\n", " "), "\r", " ")
+	
+	log.Printf("SaveContractDataPostgreSQL: Processing message type='%s', ledger=%d, contract_id='%s'", sanitizedMessageType, ledgerSeq, sanitizedContractID)
 	
 	// Check if this is a supported contract data type
 	if !c.isDataTypeSupported(messageType) {
-		log.Printf("SaveContractDataPostgreSQL: Skipping unsupported message type: %s", messageType)
+		log.Printf("SaveContractDataPostgreSQL: Skipping unsupported message type: %s", sanitizedMessageType)
 		return nil
 	}
 	
@@ -203,7 +207,7 @@ func (c *SaveContractDataToPostgreSQL) Process(ctx context.Context, msg processo
 		return fmt.Errorf("failed to store data: %w", err)
 	}
 	
-	log.Printf("SaveContractDataPostgreSQL: Successfully stored contract data for ledger %d, contract %s", ledgerSeq, contractID)
+	log.Printf("SaveContractDataPostgreSQL: Successfully stored contract data for ledger %d, contract %s", ledgerSeq, sanitizedContractID)
 	
 	// Forward to downstream processors
 	for _, proc := range c.processors {
@@ -425,7 +429,5 @@ func setConfigDefaults(cfg *SaveContractDataToPostgreSQLConfig) {
 		cfg.BatchSize = 100
 	}
 	// Default to creating table if not exists
-	if !cfg.CreateTableIfNotExists {
-		cfg.CreateTableIfNotExists = true
-	}
+	cfg.CreateTableIfNotExists = true
 }

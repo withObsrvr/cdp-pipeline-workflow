@@ -10,6 +10,12 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+const (
+	// MillisecondsThreshold is the minimum value to consider a timestamp as milliseconds
+	// Values above this threshold are likely Unix timestamps in milliseconds
+	MillisecondsThreshold = 1000000000000
+)
+
 // FieldExtractor handles extracting and converting fields from JSON data
 type FieldExtractor struct {
 	// Add any state needed for field extraction
@@ -218,7 +224,7 @@ func (fe *FieldExtractor) parseTimestamp(result gjson.Result) (interface{}, erro
 	}
 	
 	// Try parsing as Unix timestamp (milliseconds)
-	if unixTimeMs, err := strconv.ParseInt(timeStr, 10, 64); err == nil && unixTimeMs > 1000000000000 {
+	if unixTimeMs, err := strconv.ParseInt(timeStr, 10, 64); err == nil && unixTimeMs > MillisecondsThreshold {
 		return time.Unix(unixTimeMs/1000, (unixTimeMs%1000)*1000000), nil
 	}
 	
