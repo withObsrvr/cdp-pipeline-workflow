@@ -275,6 +275,10 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveExtractedContractInvocationsToPostgreSQL(consumerConfig.Config)
 	case "SaveContractDataToPostgreSQL":
 		return consumer.NewSaveContractDataToPostgreSQL(consumerConfig.Config)
+	case "SaveToParquet":
+		return consumer.NewSaveToParquet(consumerConfig.Config)
+	case "DebugLogger":
+		return consumer.NewDebugLogger(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}
@@ -359,5 +363,17 @@ func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
 	}
 
 	// Run the source with context
-	return source.Run(ctx)
+	err = source.Run(ctx)
+	
+	// Flush any remaining data in consumers
+	log.Printf("Pipeline source completed, flushing consumers...")
+	for _, cons := range consumers {
+		if closer, ok := cons.(interface{ Close() error }); ok {
+			if closeErr := closer.Close(); closeErr != nil {
+				log.Printf("Error closing consumer %T: %v", cons, closeErr)
+			}
+		}
+	}
+	
+	return err
 }

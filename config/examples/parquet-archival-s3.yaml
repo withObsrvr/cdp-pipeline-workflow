@@ -1,0 +1,41 @@
+# Example configuration for Parquet archival consumer with Amazon S3
+# Requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables
+
+pipeline:
+  name: ContractDataParquetArchivalS3
+  source:
+    type: RPCSourceAdapter
+    config:
+      rpc_url: "https://soroban-testnet.stellar.org"
+      start_ledger: 1000000
+      poll_interval_seconds: 5
+  processors:
+    - type: ContractEventProcessor
+      config:
+        contract_addresses:
+          - "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
+        event_types:
+          - "transfer"
+          - "mint"
+          - "burn"
+  consumers:
+    # Archival to Amazon S3
+    - type: SaveToParquet
+      config:
+        storage_type: "S3"
+        bucket_name: "stellar-blockchain-archive"
+        path_prefix: "events/soroban"
+        region: "us-west-2"               # AWS region
+        compression: "snappy"              # Balanced compression
+        buffer_size: 50000                # Large buffer for batch writing
+        max_file_size_mb: 512             # Large files to reduce S3 requests
+        rotation_interval_minutes: 120     # 2-hour rotation
+        partition_by: "hour"               # Hourly partitions
+        include_metadata: false            # Exclude metadata to save space
+        
+    # Real-time query support
+    - type: SaveToClickHouse
+      config:
+        dsn: "tcp://localhost:9000?database=stellar"
+        table: "contract_events"
+        batch_size: 1000

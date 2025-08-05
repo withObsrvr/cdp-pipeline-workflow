@@ -1,0 +1,37 @@
+# Example configuration for Parquet archival consumer with local filesystem storage
+# This configuration demonstrates archiving Stellar contract data to local Parquet files
+
+pipeline:
+  name: ContractDataParquetArchival
+  source:
+    type: CaptiveCoreInboundAdapter
+    config:
+      network: testnet
+      history_archive_urls:
+        - https://history.stellar.org/prd/core-testnet/core_testnet_001
+      core_binary_path: /usr/local/bin/stellar-core
+  processors:
+    - type: ContractDataProcessor
+      config:
+        buffer_size: 1000
+  consumers:
+    # Real-time consumer for immediate access
+    - type: SaveToPostgreSQL
+      config:
+        connection_string: ${DATABASE_URL}
+        table_name: contract_data
+        batch_size: 100
+    
+    # Archival consumer for long-term storage
+    - type: SaveToParquet
+      config:
+        storage_type: "FS"
+        local_path: "~/Documents/data/stellar-archive"
+        path_prefix: "contract_data"
+        compression: "snappy"              # Fast compression
+        buffer_size: 10000                 # Buffer 10k records before writing
+        max_file_size_mb: 128             # Target file size
+        rotation_interval_minutes: 60      # Rotate hourly
+        partition_by: "ledger_day"         # Partition by ledger timestamp
+        include_metadata: true             # Include pipeline metadata
+        debug: false                       # Disable debug logging

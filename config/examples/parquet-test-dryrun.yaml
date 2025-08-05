@@ -1,0 +1,39 @@
+# Test configuration for Parquet archival consumer
+# Uses dry_run mode to test configuration without writing files
+
+pipeline:
+  name: ParquetTestPipeline
+  source:
+    # Use a simple source for testing
+    type: BufferedStorageSourceAdapter
+    config:
+      storage_type: "FS"
+      path: "/tmp/test-ledgers"
+      start_ledger: 1000
+      end_ledger: 2000
+      buffer_size: 10
+  processors:
+    - type: ContractDataProcessor
+      config:
+        buffer_size: 100
+  consumers:
+    # Test configuration with dry run
+    - type: SaveToParquet
+      config:
+        storage_type: "FS"
+        local_path: "/tmp/parquet-test"
+        path_prefix: "test"
+        compression: "snappy"
+        buffer_size: 10                   # Small buffer for testing
+        max_file_size_mb: 1              # Small files for testing
+        rotation_interval_minutes: 1      # Quick rotation
+        partition_by: "ledger_range"
+        ledgers_per_file: 100
+        include_metadata: true
+        debug: true                       # Enable debug logging
+        dry_run: true                     # Don't actually write files
+        
+    # Also save to stdout for verification
+    - type: StdoutSink
+      config:
+        format: "json"
