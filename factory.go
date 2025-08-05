@@ -1,118 +1,16 @@
 package main
 
 import (
-	"context"
-	"errors"
-	"flag"
 	"fmt"
-	"io"
 	"log"
-	"os"
-	"os/signal"
-	"strings"
-
+	
 	"github.com/withObsrvr/cdp-pipeline-workflow/consumer"
-	"github.com/withObsrvr/cdp-pipeline-workflow/internal/cli/cmd"
-	"github.com/withObsrvr/cdp-pipeline-workflow/internal/cli/runner"
 	"github.com/withObsrvr/cdp-pipeline-workflow/processor"
-	"gopkg.in/yaml.v2"
 )
 
-type Config struct {
-	Pipelines map[string]PipelineConfig `yaml:"pipelines"`
-}
+// Factory functions exported for use by the new CLI runner
 
-type PipelineConfig struct {
-	Name       string                      `yaml:"name"`
-	Source     SourceConfig                `yaml:"source"`
-	Processors []processor.ProcessorConfig `yaml:"processors"`
-	Consumers  []consumer.ConsumerConfig   `yaml:"consumers"`
-}
-
-type SourceConfig struct {
-	Type   string                 `yaml:"type"`
-	Config map[string]interface{} `yaml:"config"`
-}
-
-type SourceAdapter interface {
-	Run(context.Context) error
-	Subscribe(processor.Processor)
-}
-
-func main() {
-	// Initialize factory functions for the runner
-	initializeFactories()
-	
-	// Check if running in legacy mode (flowctl -config ...)
-	if len(os.Args) > 1 && os.Args[1] == "-config" {
-		// Run legacy flag-based CLI
-		runLegacyCLI()
-		return
-	}
-	
-	// Run new Cobra-based CLI
-	if err := cmd.Execute(); err != nil {
-		os.Exit(1)
-	}
-}
-
-func initializeFactories() {
-	// Set up factory functions for the runner
-	runner.CreateSourceAdapter = func(config runner.SourceConfig) (runner.SourceAdapter, error) {
-		// Convert runner.SourceConfig to main.SourceConfig
-		sourceConfig := SourceConfig{
-			Type:   config.Type,
-			Config: config.Config,
-		}
-		return CreateSourceAdapterFunc(sourceConfig)
-	}
-	
-	runner.CreateProcessor = CreateProcessorFunc
-	runner.CreateConsumer = CreateConsumerFunc
-}
-
-func runLegacyCLI() {
-	// Define command line flags
-	configFile := flag.String("config", "pipeline_config.yaml", "Path to pipeline configuration file")
-	flag.Parse()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
-	defer stop()
-
-	// Read configuration from specified file
-	configBytes, err := os.ReadFile(*configFile)
-	if err != nil {
-		log.Fatalf("Error reading config file %s: %v", *configFile, err)
-	}
-
-	var config Config
-	if err := yaml.Unmarshal(configBytes, &config); err != nil {
-		log.Fatalf("Error parsing config: %v", err)
-	}
-
-	// Run each pipeline
-	for name, pipelineConfig := range config.Pipelines {
-		log.Printf("Starting pipeline: %s", name)
-		err := setupPipeline(ctx, pipelineConfig)
-		log.Printf("DEBUG: setupPipeline returned error: %v", err)
-		if err != nil {
-			// Check if this is a rolling window completion (EOF from callback)
-			errorMsg := err.Error()
-			log.Printf("DEBUG: Error message: '%s'", errorMsg)
-			log.Printf("DEBUG: errors.Is(err, io.EOF): %v", errors.Is(err, io.EOF))
-			log.Printf("DEBUG: strings.Contains check: %v", strings.Contains(errorMsg, "received an error from callback invocation: EOF"))
-			if errors.Is(err, io.EOF) || strings.Contains(errorMsg, "received an error from callback invocation: EOF") {
-				log.Printf("Pipeline %s completed successfully (rolling window phase finished)", name)
-			} else {
-				log.Printf("Pipeline error: error in pipeline %s: %v", name, err)
-			}
-		}
-	}
-
-	log.Printf("All pipelines finished.")
-}
-
-func createSourceAdapter(sourceConfig SourceConfig) (SourceAdapter, error) {
+func CreateSourceAdapterFunc(sourceConfig SourceConfig) (SourceAdapter, error) {
 	switch sourceConfig.Type {
 	case "CaptiveCoreInboundAdapter":
 		return NewCaptiveCoreInboundAdapter(sourceConfig.Config)
@@ -146,19 +44,7 @@ func createSourceAdapter(sourceConfig SourceConfig) (SourceAdapter, error) {
 	}
 }
 
-func createProcessors(processorConfigs []processor.ProcessorConfig) ([]processor.Processor, error) {
-	processors := make([]processor.Processor, len(processorConfigs))
-	for i, config := range processorConfigs {
-		processor, err := createProcessor(config)
-		if err != nil {
-			return nil, err
-		}
-		processors[i] = processor
-	}
-	return processors, nil
-}
-
-func createProcessor(processorConfig processor.ProcessorConfig) (processor.Processor, error) {
+func CreateProcessorFunc(processorConfig processor.ProcessorConfig) (processor.Processor, error) {
 	switch processorConfig.Type {
 	case "CreateAccount":
 		return processor.NewCreateAccount(processorConfig.Config)
@@ -245,7 +131,7 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 	}
 }
 
-func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor, error) {
+func CreateConsumerFunc(consumerConfig consumer.ConsumerConfig) (processor.Processor, error) {
 	switch consumerConfig.Type {
 	case "SaveToExcel":
 		return consumer.NewSaveToExcel(consumerConfig.Config)
@@ -316,98 +202,4 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}
-}
-
-func createConsumers(consumerConfigs []consumer.ConsumerConfig) ([]processor.Processor, error) {
-	consumers := make([]processor.Processor, len(consumerConfigs))
-	for i, config := range consumerConfigs {
-		consumer, err := createConsumer(config)
-		if err != nil {
-			return nil, err
-		}
-		consumers[i] = consumer
-	}
-	return consumers, nil
-}
-
-// buildProcessorChain chains processors sequentially and subscribes all consumers to the last processor
-func buildProcessorChain(processors []processor.Processor, consumers []processor.Processor) {
-	var lastProcessor processor.Processor
-
-	// Chain all processors sequentially
-	for _, p := range processors {
-		if lastProcessor != nil {
-			lastProcessor.Subscribe(p)
-			log.Printf("Chained processor %T -> %T", lastProcessor, p)
-		}
-		lastProcessor = p
-	}
-
-	// If any consumers are provided, subscribe them to the last processor
-	if lastProcessor != nil {
-		for _, c := range consumers {
-			lastProcessor.Subscribe(c)
-			log.Printf("Chained processor %T -> consumer %T", lastProcessor, c)
-		}
-	} else if len(consumers) > 0 {
-		// If no processors but multiple consumers, chain the consumers
-		for i := 1; i < len(consumers); i++ {
-			consumers[0].Subscribe(consumers[i])
-			log.Printf("Chained consumer %T -> consumer %T", consumers[0], consumers[i])
-		}
-	}
-}
-
-func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
-	// Create source
-	source, err := createSourceAdapter(pipelineConfig.Source)
-	if err != nil {
-		return fmt.Errorf("error creating source: %w", err)
-	}
-
-	// Create processors
-	processors := make([]processor.Processor, len(pipelineConfig.Processors))
-	for i, procConfig := range pipelineConfig.Processors {
-		proc, err := createProcessor(procConfig)
-		if err != nil {
-			return fmt.Errorf("error creating processor %s: %w", procConfig.Type, err)
-		}
-		processors[i] = proc
-	}
-
-	// Create consumers
-	consumers := make([]processor.Processor, len(pipelineConfig.Consumers))
-	for i, consConfig := range pipelineConfig.Consumers {
-		cons, err := createConsumer(consConfig)
-		if err != nil {
-			return fmt.Errorf("error creating consumer %s: %w", consConfig.Type, err)
-		}
-		consumers[i] = cons
-	}
-
-	// Build the chain
-	buildProcessorChain(processors, consumers)
-
-	// Connect source to the first processor
-	if len(processors) > 0 {
-		source.Subscribe(processors[0])
-	} else if len(consumers) > 0 {
-		// If no processors, subscribe source directly to consumers
-		source.Subscribe(consumers[0])
-	}
-
-	// Run the source with context
-	err = source.Run(ctx)
-	
-	// Flush any remaining data in consumers
-	log.Printf("Pipeline source completed, flushing consumers...")
-	for _, cons := range consumers {
-		if closer, ok := cons.(interface{ Close() error }); ok {
-			if closeErr := closer.Close(); closeErr != nil {
-				log.Printf("Error closing consumer %T: %v", cons, closeErr)
-			}
-		}
-	}
-	
-	return err
 }
