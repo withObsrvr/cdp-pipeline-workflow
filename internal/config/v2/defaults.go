@@ -114,17 +114,36 @@ func (e *DefaultsEngine) applySmartDefaults(componentType string, config map[str
 		
 	case "SaveToPostgreSQL", "SaveToMongoDB":
 		// Set connection pool size based on workers if specified
-		if workers, ok := config["num_workers"].(int); ok {
-			if _, hasPool := config["connection_pool_size"]; !hasPool {
-				// Pool size = workers / 2, min 5, max 20
-				poolSize := workers / 2
-				if poolSize < 5 {
-					poolSize = 5
+		if workersRaw, hasWorkers := config["num_workers"]; hasWorkers {
+			workers := 0
+			switch v := workersRaw.(type) {
+			case int:
+				workers = v
+			case int64:
+				workers = int(v)
+			case float64:
+				workers = int(v)
+			case string:
+				// Try to parse string as int
+				if parsed, err := fmt.Sscanf(v, "%d", &workers); err == nil && parsed == 1 {
+					// Successfully parsed
+				} else {
+					workers = 0
 				}
-				if poolSize > 20 {
-					poolSize = 20
+			}
+			
+			if workers > 0 {
+				if _, hasPool := config["connection_pool_size"]; !hasPool {
+					// Pool size = workers / 2, min 5, max 20
+					poolSize := workers / 2
+					if poolSize < 5 {
+						poolSize = 5
+					}
+					if poolSize > 20 {
+						poolSize = 20
+					}
+					config["connection_pool_size"] = poolSize
 				}
-				config["connection_pool_size"] = poolSize
 			}
 		}
 	}

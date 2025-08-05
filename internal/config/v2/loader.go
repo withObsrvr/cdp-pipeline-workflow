@@ -2,7 +2,7 @@ package v2
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 	
 	"gopkg.in/yaml.v3"
@@ -70,7 +70,7 @@ type LoadResult struct {
 // Load loads a configuration from a file path
 func (l *ConfigLoader) Load(path string) (*LoadResult, error) {
 	// Read the file
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading config file: %w", err)
 	}
@@ -138,7 +138,7 @@ func (l *ConfigLoader) LoadFromData(data map[string]interface{}) (*LoadResult, e
 // ValidateFile validates a configuration file without loading it
 func (l *ConfigLoader) ValidateFile(path string) (*ValidationResult, error) {
 	// Read the file
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading config file: %w", err)
 	}

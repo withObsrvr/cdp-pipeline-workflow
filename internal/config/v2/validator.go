@@ -14,24 +14,35 @@ type ValidationError struct {
 	ValidValues []string
 }
 
+// formatSuggestion returns the formatted suggestion string if present
+func (e ValidationError) formatSuggestion() string {
+	if e.Suggestion != "" {
+		return fmt.Sprintf("Did you mean '%s'?\n\n", e.Suggestion)
+	}
+	return ""
+}
+
+// formatValidValues returns the formatted valid values string if present
+func (e ValidationError) formatValidValues() string {
+	if len(e.ValidValues) > 0 {
+		var b strings.Builder
+		b.WriteString("Valid options:\n")
+		for _, v := range e.ValidValues {
+			b.WriteString(fmt.Sprintf("  - %s\n", v))
+		}
+		b.WriteString("\n")
+		return b.String()
+	}
+	return ""
+}
+
 // Error implements the error interface
 func (e ValidationError) Error() string {
 	var msg strings.Builder
 	msg.WriteString(fmt.Sprintf("\nError in configuration:\n\n"))
 	msg.WriteString(fmt.Sprintf("  %s: %v  # <-- %s\n\n", e.Field, e.Value, e.Problem))
-	
-	if e.Suggestion != "" {
-		msg.WriteString(fmt.Sprintf("Did you mean '%s'?\n\n", e.Suggestion))
-	}
-	
-	if len(e.ValidValues) > 0 {
-		msg.WriteString("Valid options:\n")
-		for _, v := range e.ValidValues {
-			msg.WriteString(fmt.Sprintf("  - %s\n", v))
-		}
-		msg.WriteString("\n")
-	}
-	
+	msg.WriteString(e.formatSuggestion())
+	msg.WriteString(e.formatValidValues())
 	return msg.String()
 }
 
