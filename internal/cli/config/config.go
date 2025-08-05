@@ -30,9 +30,9 @@ func Load() (*FlowctlConfig, error) {
 }
 
 // Helper functions
-func SetDefault(key, value string) {
+func SetDefault(key, value string) error {
 	viper.Set(key, value)
-	viper.WriteConfig()
+	return viper.WriteConfig()
 }
 
 func GetString(key string) string {

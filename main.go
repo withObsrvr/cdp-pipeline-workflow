@@ -14,8 +14,14 @@ import (
 	"github.com/withObsrvr/cdp-pipeline-workflow/consumer"
 	"github.com/withObsrvr/cdp-pipeline-workflow/internal/cli/cmd"
 	"github.com/withObsrvr/cdp-pipeline-workflow/internal/cli/runner"
+	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/pipeline"
 	"github.com/withObsrvr/cdp-pipeline-workflow/processor"
 	"gopkg.in/yaml.v2"
+)
+
+const (
+	// legacyConfigFlag is the flag used for backward compatibility with the old CLI
+	legacyConfigFlag = "-config"
 )
 
 type Config struct {
@@ -44,7 +50,7 @@ func main() {
 	initializeFactories()
 	
 	// Check if running in legacy mode (flowctl -config ...)
-	if len(os.Args) > 1 && os.Args[1] == "-config" {
+	if len(os.Args) > 1 && os.Args[1] == legacyConfigFlag {
 		// Run legacy flag-based CLI
 		runLegacyCLI()
 		return
@@ -58,17 +64,21 @@ func main() {
 
 func initializeFactories() {
 	// Set up factory functions for the runner
-	runner.CreateSourceAdapter = func(config runner.SourceConfig) (runner.SourceAdapter, error) {
-		// Convert runner.SourceConfig to main.SourceConfig
-		sourceConfig := SourceConfig{
-			Type:   config.Type,
-			Config: config.Config,
-		}
-		return CreateSourceAdapterFunc(sourceConfig)
+	factories := runner.Factories{
+		CreateSourceAdapter: func(config runner.SourceConfig) (runner.SourceAdapter, error) {
+			// Convert runner.SourceConfig to main.SourceConfig
+			sourceConfig := SourceConfig{
+				Type:   config.Type,
+				Config: config.Config,
+			}
+			return CreateSourceAdapterFunc(sourceConfig)
+		},
+		CreateProcessor: CreateProcessorFunc,
+		CreateConsumer:  CreateConsumerFunc,
 	}
 	
-	runner.CreateProcessor = CreateProcessorFunc
-	runner.CreateConsumer = CreateConsumerFunc
+	// Set the factories in the cmd package
+	cmd.SetFactories(factories)
 }
 
 func runLegacyCLI() {
@@ -76,7 +86,7 @@ func runLegacyCLI() {
 	configFile := flag.String("config", "pipeline_config.yaml", "Path to pipeline configuration file")
 	flag.Parse()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
 	// Read configuration from specified file
@@ -330,33 +340,6 @@ func createConsumers(consumerConfigs []consumer.ConsumerConfig) ([]processor.Pro
 	return consumers, nil
 }
 
-// buildProcessorChain chains processors sequentially and subscribes all consumers to the last processor
-func buildProcessorChain(processors []processor.Processor, consumers []processor.Processor) {
-	var lastProcessor processor.Processor
-
-	// Chain all processors sequentially
-	for _, p := range processors {
-		if lastProcessor != nil {
-			lastProcessor.Subscribe(p)
-			log.Printf("Chained processor %T -> %T", lastProcessor, p)
-		}
-		lastProcessor = p
-	}
-
-	// If any consumers are provided, subscribe them to the last processor
-	if lastProcessor != nil {
-		for _, c := range consumers {
-			lastProcessor.Subscribe(c)
-			log.Printf("Chained processor %T -> consumer %T", lastProcessor, c)
-		}
-	} else if len(consumers) > 0 {
-		// If no processors but multiple consumers, chain the consumers
-		for i := 1; i < len(consumers); i++ {
-			consumers[0].Subscribe(consumers[i])
-			log.Printf("Chained consumer %T -> consumer %T", consumers[0], consumers[i])
-		}
-	}
-}
 
 func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
 	// Create source
@@ -386,7 +369,7 @@ func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
 	}
 
 	// Build the chain
-	buildProcessorChain(processors, consumers)
+	pipeline.BuildProcessorChain(processors, consumers)
 
 	// Connect source to the first processor
 	if len(processors) > 0 {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	
 	"github.com/withObsrvr/cdp-pipeline-workflow/consumer"
+	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/pipeline"
 	"github.com/withObsrvr/cdp-pipeline-workflow/processor"
 	"gopkg.in/yaml.v2"
 )
@@ -19,8 +20,16 @@ type Options struct {
 	Verbose    bool
 }
 
+// Factory functions for creating pipeline components
+type Factories struct {
+	CreateSourceAdapter func(SourceConfig) (SourceAdapter, error)
+	CreateProcessor     func(processor.ProcessorConfig) (processor.Processor, error)
+	CreateConsumer      func(consumer.ConsumerConfig) (processor.Processor, error)
+}
+
 type Runner struct {
-	opts     Options
+	opts      Options
+	factories Factories
 }
 
 // Config structures - mirroring from main.go
@@ -45,9 +54,10 @@ type SourceAdapter interface {
 	Subscribe(processor.Processor)
 }
 
-func New(opts Options) *Runner {
+func New(opts Options, factories Factories) *Runner {
 	return &Runner{
-		opts: opts,
+		opts:      opts,
+		factories: factories,
 	}
 }
 
@@ -92,7 +102,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 func (r *Runner) setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
 	// Create source
-	source, err := CreateSourceAdapter(pipelineConfig.Source)
+	source, err := r.factories.CreateSourceAdapter(pipelineConfig.Source)
 	if err != nil {
 		return fmt.Errorf("error creating source: %w", err)
 	}
@@ -100,7 +110,7 @@ func (r *Runner) setupPipeline(ctx context.Context, pipelineConfig PipelineConfi
 	// Create processors
 	processors := make([]processor.Processor, len(pipelineConfig.Processors))
 	for i, procConfig := range pipelineConfig.Processors {
-		proc, err := CreateProcessor(procConfig)
+		proc, err := r.factories.CreateProcessor(procConfig)
 		if err != nil {
 			return fmt.Errorf("error creating processor %s: %w", procConfig.Type, err)
 		}
@@ -110,7 +120,7 @@ func (r *Runner) setupPipeline(ctx context.Context, pipelineConfig PipelineConfi
 	// Create consumers
 	consumers := make([]processor.Processor, len(pipelineConfig.Consumers))
 	for i, consConfig := range pipelineConfig.Consumers {
-		cons, err := CreateConsumer(consConfig)
+		cons, err := r.factories.CreateConsumer(consConfig)
 		if err != nil {
 			return fmt.Errorf("error creating consumer %s: %w", consConfig.Type, err)
 		}
@@ -118,7 +128,7 @@ func (r *Runner) setupPipeline(ctx context.Context, pipelineConfig PipelineConfi
 	}
 
 	// Build the chain
-	r.buildProcessorChain(processors, consumers)
+	pipeline.BuildProcessorChain(processors, consumers)
 
 	// Connect source to the first processor
 	if len(processors) > 0 {
@@ -144,38 +154,4 @@ func (r *Runner) setupPipeline(ctx context.Context, pipelineConfig PipelineConfi
 	return err
 }
 
-// buildProcessorChain chains processors sequentially and subscribes all consumers to the last processor
-func (r *Runner) buildProcessorChain(processors []processor.Processor, consumers []processor.Processor) {
-	var lastProcessor processor.Processor
 
-	// Chain all processors sequentially
-	for _, p := range processors {
-		if lastProcessor != nil {
-			lastProcessor.Subscribe(p)
-			log.Printf("Chained processor %T -> %T", lastProcessor, p)
-		}
-		lastProcessor = p
-	}
-
-	// If any consumers are provided, subscribe them to the last processor
-	if lastProcessor != nil {
-		for _, c := range consumers {
-			lastProcessor.Subscribe(c)
-			log.Printf("Chained processor %T -> consumer %T", lastProcessor, c)
-		}
-	} else if len(consumers) > 0 {
-		// If no processors but multiple consumers, chain the consumers
-		for i := 1; i < len(consumers); i++ {
-			consumers[0].Subscribe(consumers[i])
-			log.Printf("Chained consumer %T -> consumer %T", consumers[0], consumers[i])
-		}
-	}
-}
-
-// Factory functions that will be implemented by importing from main.go
-// These will delegate to the existing implementations in main.go
-var (
-	CreateSourceAdapter func(SourceConfig) (SourceAdapter, error)
-	CreateProcessor     func(processor.ProcessorConfig) (processor.Processor, error)
-	CreateConsumer      func(consumer.ConsumerConfig) (processor.Processor, error)
-)
