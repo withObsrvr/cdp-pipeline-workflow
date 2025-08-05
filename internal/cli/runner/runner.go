@@ -62,6 +62,20 @@ func New(opts Options, factories Factories) *Runner {
 }
 
 func (r *Runner) Run(ctx context.Context) error {
+	// Detect config format
+	format, err := DetectConfigFormat(r.opts.ConfigFile)
+	if err != nil {
+		// If we can't detect format, try legacy loading
+		log.Printf("Warning: Could not detect config format, trying legacy loader: %v", err)
+		return r.runLegacy(ctx)
+	}
+	
+	// Use v2 loader for both legacy and v2 formats
+	log.Printf("Using v2 config loader (detected format: %v)", format)
+	return r.RunWithV2Config(ctx)
+}
+
+func (r *Runner) runLegacy(ctx context.Context) error {
 	// Read configuration from specified file
 	configBytes, err := os.ReadFile(r.opts.ConfigFile)
 	if err != nil {
