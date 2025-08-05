@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,9 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/withObsrvr/cdp-pipeline-workflow/processor"
 )
+
+// Compile regex once at package level for efficiency
+var multiSlashRegex = regexp.MustCompile(`/+`)
 
 // SaveToParquetConfig defines configuration for Parquet archival consumer
 type SaveToParquetConfig struct {
@@ -468,10 +472,9 @@ func (s *SaveToParquet) generateFilePath() string {
 	// Join with "/" and clean up
 	fullPath := strings.Join(pathComponents, "/")
 	
-	// Clean up double slashes and remove leading slash
-	for strings.Contains(fullPath, "//") {
-		fullPath = strings.ReplaceAll(fullPath, "//", "/")
-	}
+	// Clean up multiple slashes using regex (more efficient than loop)
+	// This handles any number of consecutive slashes in one pass
+	fullPath = multiSlashRegex.ReplaceAllString(fullPath, "/")
 	fullPath = strings.TrimPrefix(fullPath, "/")
 	
 	return fullPath

@@ -2,9 +2,11 @@ package consumer
 
 import (
 	"fmt"
+	"log"
 	"reflect"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -444,8 +446,35 @@ func appendValueToBuilder(builder array.Builder, dataType arrow.DataType, value 
 		// Handle timestamp conversion
 		switch v := value.(type) {
 		case string:
-			// Parse timestamp string
-			builder.(*array.TimestampBuilder).AppendNull() // TODO: Implement proper parsing
+			// Parse timestamp string - try multiple formats
+			var parsedTime time.Time
+			var err error
+			
+			// Try common timestamp formats
+			formats := []string{
+				time.RFC3339,
+				time.RFC3339Nano,
+				"2006-01-02T15:04:05Z",
+				"2006-01-02 15:04:05",
+				"2006-01-02T15:04:05.999999Z",
+			}
+			
+			for _, format := range formats {
+				parsedTime, err = time.Parse(format, v)
+				if err == nil {
+					break
+				}
+			}
+			
+			if err != nil {
+				// If all formats fail, append null and log warning
+				builder.(*array.TimestampBuilder).AppendNull()
+				log.Printf("Warning: Failed to parse timestamp string '%s': %v", v, err)
+			} else {
+				// Convert to microseconds since epoch
+				microseconds := parsedTime.UnixNano() / 1000
+				builder.(*array.TimestampBuilder).Append(arrow.Timestamp(microseconds))
+			}
 		case float64:
 			// Unix timestamp
 			builder.(*array.TimestampBuilder).Append(arrow.Timestamp(int64(v * 1e6))) // Convert to microseconds
