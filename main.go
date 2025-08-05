@@ -89,7 +89,16 @@ func runLegacyCLI() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	// Read configuration from specified file
+	// Try v2 config loader first
+	if config, err := loadConfigWithV2(*configFile); err == nil {
+		// Successfully loaded with v2 loader
+		runPipelinesFromV2Config(ctx, config)
+		return
+	} else {
+		log.Printf("V2 config loader failed, falling back to legacy: %v", err)
+	}
+
+	// Fall back to legacy loading
 	configBytes, err := os.ReadFile(*configFile)
 	if err != nil {
 		log.Fatalf("Error reading config file %s: %v", *configFile, err)

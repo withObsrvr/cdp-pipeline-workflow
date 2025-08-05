@@ -1,0 +1,234 @@
+version: 2
+aliases:
+  # Source aliases
+  sources:
+    # File/Storage sources
+    file: FSBufferedStorageSourceAdapter
+    fs: FSBufferedStorageSourceAdapter
+    local: FSBufferedStorageSourceAdapter
+    s3: S3BufferedStorageSourceAdapter
+    aws: S3BufferedStorageSourceAdapter
+    gcs: BufferedStorageSourceAdapter
+    gcp: BufferedStorageSourceAdapter
+    google: BufferedStorageSourceAdapter
+    bucket: BufferedStorageSourceAdapter
+    storage: BufferedStorageSourceAdapter
+    
+    # Stellar sources
+    stellar: CaptiveCoreInboundAdapter
+    stellar_core: CaptiveCoreInboundAdapter
+    captive_core: CaptiveCoreInboundAdapter
+    core: CaptiveCoreInboundAdapter
+    
+    # RPC/API sources
+    rpc: RPCSourceAdapter
+    stellar_rpc: RPCSourceAdapter
+    soroban: SorobanSourceAdapter
+    soroban_rpc: SorobanSourceAdapter
+    
+  # Processor aliases  
+  processors:
+    # Account processors
+    account_create: CreateAccount
+    create_account: CreateAccount
+    account_data: AccountData
+    account_info: ProcessAccountDataFull
+    account_data_full: ProcessAccountDataFull
+    account_tx: AccountTransaction
+    account_transaction: AccountTransaction
+    account_filter: AccountDataFilter
+    account_data_filter: AccountDataFilter
+    account_year: AccountYearAnalytics
+    account_analytics: AccountYearAnalytics
+    account_effect: AccountEffect
+    account_effects: AccountEffect
+    
+    # Payment processors
+    payments: FilterPayments
+    payment_filter: FilterPayments
+    filter_payments: FilterPayments
+    payment_transform: TransformToAppPayment
+    transform_payment: TransformToAppPayment
+    app_payment: TransformToAppPayment
+    
+    # Trade/Market processors
+    trades: TransformToAppTrade
+    trade_transform: TransformToAppTrade
+    app_trade: TransformToAppTrade
+    market_metrics: MarketMetricsProcessor
+    market_stats: MarketMetricsProcessor
+    market_cap: TransformToMarketCapProcessor
+    market_analytics: TransformToMarketAnalytics
+    
+    # Asset processors
+    trustline: TransformToAppTrustline
+    trustline_transform: TransformToAppTrustline
+    app_trustline: TransformToAppTrustline
+    asset_stats: TransformToAssetStats
+    token_price: TransformToTokenPrice
+    ticker_asset: TransformToTickerAsset
+    ticker_orderbook: TransformToTickerOrderbook
+    asset_enrichment: AssetEnrichment
+    enrich_asset: AssetEnrichment
+    
+    # Contract processors
+    contract_data: ContractData
+    contracts: ContractData
+    contract_ledger: ContractLedgerReader
+    contract_invocation: ContractInvocation
+    invocations: ContractInvocation
+    contract_creation: ContractCreation
+    contract_event: ContractEvent
+    contract_events: ContractEvent
+    contract_filter: ContractFilter
+    filter_contracts: ContractFilter
+    filtered_invocation: FilteredContractInvocation
+    contract_extractor: ContractInvocationExtractor
+    
+    # Ledger processors
+    ledger: LedgerReader
+    ledger_reader: LedgerReader
+    latest_ledger: LatestLedger
+    ledger_changes: LedgerChanges
+    ledger_rpc: LatestLedgerRPC
+    latest_ledger_rpc: LatestLedgerRPC
+    
+    # Event processors
+    events: FilterEventsProcessor
+    event_filter: FilterEventsProcessor
+    filter_events: FilterEventsProcessor
+    events_rpc: GetEventsRPC
+    get_events: GetEventsRPC
+    
+    # Metrics/Analytics processors
+    metrics: TransformToAppMetrics
+    app_metrics: TransformToAppMetrics
+    
+    # App account processor
+    app_account: TransformToAppAccount
+    transform_account: TransformToAppAccount
+    
+    # Utility processors
+    blank: BlankProcessor
+    passthrough: BlankProcessor
+    stdout: StdoutSink
+    debug: StdoutSink
+    
+    # DEX processors
+    soroswap: Soroswap
+    soroswap_router: SoroswapRouter
+    kale: Kale
+    
+  # Consumer aliases
+  consumers:
+    # Protocol aliases
+    gs: SaveToParquet
+    s3: SaveToParquet
+    # File/Archive consumers
+    parquet: SaveToParquet
+    parquet_archive: SaveToParquet
+    excel: SaveToExcel
+    xlsx: SaveToExcel
+    
+    # Database consumers
+    postgres: SaveToPostgreSQL
+    postgresql: SaveToPostgreSQL
+    pg: SaveToPostgreSQL
+    mongo: SaveToMongoDB
+    mongodb: SaveToMongoDB
+    duckdb: SaveToDuckDB
+    duck: SaveToDuckDB
+    clickhouse: SaveToClickHouse
+    click: SaveToClickHouse
+    timescale: SaveToTimescaleDB
+    timescaledb: SaveToTimescaleDB
+    
+    # Cache/Memory consumers
+    redis: SaveToRedis
+    cache: SaveToRedis
+    redis_orderbook: SaveToRedisOrderbook
+    orderbook_cache: SaveToRedisOrderbook
+    
+    # Messaging consumers
+    zeromq: SaveToZeroMQ
+    zmq: SaveToZeroMQ
+    websocket: SaveToWebSocket
+    ws: SaveToWebSocket
+    
+    # Cloud storage consumers
+    gcs: SaveToGCS
+    google_storage: SaveToGCS
+    
+    # Specialized database consumers
+    contract_duckdb: SaveContractToDuckDB
+    asset_postgres: SaveAssetToPostgreSQL
+    asset_enrichment_db: SaveAssetEnrichment
+    payment_postgres: SavePaymentToPostgreSQL
+    payment_redis: SavePaymentsToRedis
+    latest_ledger_redis: SaveLatestLedgerToRedis
+    latest_ledger_excel: SaveLatestLedgerToExcel
+    account_postgres: SaveAccountDataToPostgreSQL
+    account_duckdb: SaveAccountDataToDuckDB
+    contract_events_postgres: SaveContractEventsToPostgreSQL
+    contract_invocations_postgres: SaveContractInvocationsToPostgreSQL
+    extracted_invocations_postgres: SaveExtractedContractInvocationsToPostgreSQL
+    contract_data_postgres: SaveContractDataToPostgreSQL
+    soroswap_postgres: SaveSoroswapToPostgreSQL
+    soroswap_pairs_duckdb: SaveSoroswapPairsToDuckDB
+    soroswap_router_duckdb: SaveSoroswapRouterToDuckDB
+    market_analytics: SaveToMarketAnalytics
+    
+    # Notification/Alert consumers
+    notification: NotificationDispatcher
+    notify: NotificationDispatcher
+    alerts: NotificationDispatcher
+    
+    # AI/ML consumers
+    claude: AnthropicClaude
+    anthropic: AnthropicClaude
+    
+    # Debug consumers
+    stdout: StdoutConsumer
+    console: StdoutConsumer
+    debug: DebugLogger
+    logger: DebugLogger
+    
+  # Field aliases (common across components)
+  fields:
+    # Storage fields
+    bucket: bucket_name
+    path: path_prefix
+    prefix: path_prefix
+    
+    # Performance fields
+    workers: num_workers
+    threads: num_workers
+    buffer: buffer_size
+    batch: batch_size
+    
+    # Amount fields
+    min: min_amount
+    max: max_amount
+    
+    # Compression fields
+    compress: compression
+    compression_type: compression
+    
+    # Partitioning fields
+    partition: partition_by
+    partitioning: partition_by
+    
+    # Connection fields
+    connection: connection_string
+    conn: connection_string
+    db: connection_string
+    database: connection_string
+    
+    # Network fields
+    net: network
+    
+    # Time fields
+    ttl: time_to_live
+    expire: time_to_live
+    rotation: rotation_interval_minutes
+    interval: rotation_interval_minutes

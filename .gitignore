@@ -56,3 +56,4 @@ result-*
 # Nix flake lock file (optional - can be committed for reproducibility)
 # flake.lock
 flowctl
+flowct
