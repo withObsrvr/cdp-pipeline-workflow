@@ -165,6 +165,10 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (types.Processor, er
 		return consumer.NewSaveContractInvocationsToPostgreSQL(consumerConfig.Config)
 	case "SaveContractDataToPostgreSQL":
 		return consumer.NewSaveContractDataToPostgreSQL(consumerConfig.Config)
+	case "SaveToParquet":
+		return consumer.NewSaveToParquet(consumerConfig.Config)
+	case "DebugLogger":
+		return consumer.NewDebugLogger(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}

@@ -1,0 +1,40 @@
+# Example configuration for Parquet archival consumer with Google Cloud Storage
+# Requires GOOGLE_APPLICATION_CREDENTIALS environment variable or gcloud auth
+
+pipeline:
+  name: ContractDataParquetArchivalGCS
+  source:
+    type: BufferedStorageSourceAdapter
+    config:
+      storage_type: "GCS"
+      bucket_name: "stellar-historical-data"
+      path_prefix: "ledgers/testnet"
+      start_ledger: 40000000
+      buffer_size: 50
+  processors:
+    - type: ContractDataProcessor
+      config:
+        buffer_size: 5000
+        watch_list: "/config/contract_watchlist.json"
+  consumers:
+    # Primary archival to Google Cloud Storage
+    - type: SaveToParquet
+      config:
+        storage_type: "GCS"
+        bucket_name: "stellar-data-lake"
+        path_prefix: "blockchain/stellar/contract_data"
+        compression: "zstd"                # Better compression for storage
+        buffer_size: 25000                 # Larger buffer for cloud storage
+        max_file_size_mb: 256             # Larger files for cloud
+        rotation_interval_minutes: 30      # Less frequent rotation
+        partition_by: "ledger_range"       # Partition by ledger ranges
+        ledgers_per_file: 10000           # 10k ledgers per file
+        schema_evolution: true             # Allow schema changes
+        include_metadata: true
+        
+    # Optional secondary consumer for monitoring
+    - type: SaveToRedis
+      config:
+        address: "localhost:6379"
+        key_prefix: "contract_data:"
+        ttl_seconds: 3600

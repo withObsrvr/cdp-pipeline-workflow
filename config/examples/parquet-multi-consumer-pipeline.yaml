@@ -1,0 +1,69 @@
+# Example multi-consumer pipeline with Parquet archival
+# Demonstrates using multiple consumers for different purposes:
+# - PostgreSQL for real-time queries
+# - Redis for caching
+# - Parquet for long-term archival
+
+pipeline:
+  name: ComprehensiveDataPipeline
+  source:
+    type: CaptiveCoreInboundAdapter
+    config:
+      network: mainnet
+      history_archive_urls:
+        - https://history.stellar.org/prd/core-live/core_live_001
+        - https://history.stellar.org/prd/core-live/core_live_002
+      core_binary_path: /usr/local/bin/stellar-core
+      start_ledger: 50000000
+  processors:
+    # Process multiple data types
+    - type: ContractDataProcessor
+      config:
+        buffer_size: 2000
+    - type: ContractEventProcessor
+      config:
+        buffer_size: 2000
+    - type: PaymentProcessor
+      config:
+        min_amount: "1000.00"
+  consumers:
+    # Primary database for real-time queries
+    - type: SaveToPostgreSQL
+      config:
+        connection_string: ${DATABASE_URL}
+        table_name: stellar_data
+        batch_size: 500
+        create_table: true
+        
+    # Cache for frequently accessed data
+    - type: SaveToRedis
+      config:
+        address: ${REDIS_URL}
+        key_prefix: "stellar:"
+        ttl_seconds: 86400  # 24 hours
+        
+    # Long-term archival to cloud storage
+    - type: SaveToParquet
+      config:
+        storage_type: "GCS"
+        bucket_name: ${ARCHIVE_BUCKET}
+        path_prefix: "stellar/mainnet"
+        compression: "zstd"
+        buffer_size: 100000               # 100k records
+        max_file_size_mb: 1024           # 1GB files
+        rotation_interval_minutes: 240    # 4 hours
+        partition_by: "ledger_day"
+        schema_evolution: true
+        include_metadata: true
+        
+    # Analytics database for complex queries
+    - type: SaveToDuckDB
+      config:
+        database_path: "/data/stellar_analytics.db"
+        table_name: "stellar_archive"
+        
+    # WebSocket for real-time streaming
+    - type: SaveToWebSocket
+      config:
+        port: 8080
+        path: "/stellar-stream"
