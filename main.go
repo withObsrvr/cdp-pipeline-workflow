@@ -19,6 +19,13 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+// Version information set by build flags
+var (
+	Version   = "dev"
+	GitCommit = "unknown"
+	BuildDate = "unknown"
+)
+
 const (
 	// legacyConfigFlag is the flag used for backward compatibility with the old CLI
 	legacyConfigFlag = "-config"
@@ -55,6 +62,9 @@ func main() {
 		runLegacyCLI()
 		return
 	}
+	
+	// Set version information
+	cmd.SetVersionInfo(Version, GitCommit, BuildDate)
 	
 	// Run new Cobra-based CLI
 	if err := cmd.Execute(); err != nil {

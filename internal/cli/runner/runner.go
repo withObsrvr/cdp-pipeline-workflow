@@ -10,6 +10,7 @@ import (
 	"strings"
 	
 	"github.com/withObsrvr/cdp-pipeline-workflow/consumer"
+	v2config "github.com/withObsrvr/cdp-pipeline-workflow/internal/config/v2"
 	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/pipeline"
 	"github.com/withObsrvr/cdp-pipeline-workflow/processor"
 	"gopkg.in/yaml.v2"
@@ -73,6 +74,25 @@ func (r *Runner) Run(ctx context.Context) error {
 	// Use v2 loader for both legacy and v2 formats
 	log.Printf("Using v2 config loader (detected format: %v)", format)
 	return r.RunWithV2Config(ctx)
+}
+
+// Validate loads and validates the configuration without running the pipeline
+func (r *Runner) Validate() error {
+	// Detect config format
+	format, err := DetectConfigFormat(r.opts.ConfigFile)
+	if err != nil {
+		// If we can't detect format, try legacy validation
+		if r.opts.Verbose {
+			log.Printf("Warning: Could not detect config format, trying legacy validation: %v", err)
+		}
+		return r.validateLegacy()
+	}
+	
+	// Use v2 loader for validation
+	if r.opts.Verbose {
+		log.Printf("Using v2 config validation (detected format: %v)", format)
+	}
+	return r.validateV2Config()
 }
 
 func (r *Runner) runLegacy(ctx context.Context) error {
@@ -166,6 +186,122 @@ func (r *Runner) setupPipeline(ctx context.Context, pipelineConfig PipelineConfi
 	}
 	
 	return err
+}
+
+// validateLegacy validates a legacy configuration format
+func (r *Runner) validateLegacy() error {
+	// Read configuration from specified file
+	configBytes, err := os.ReadFile(r.opts.ConfigFile)
+	if err != nil {
+		return fmt.Errorf("error reading config file %s: %w", r.opts.ConfigFile, err)
+	}
+
+	var config Config
+	if err := yaml.Unmarshal(configBytes, &config); err != nil {
+		return fmt.Errorf("error parsing config: %w", err)
+	}
+
+	// Validate we have at least one pipeline
+	if len(config.Pipelines) == 0 {
+		return errors.New("configuration must define at least one pipeline")
+	}
+
+	// Validate each pipeline configuration
+	for name, pipelineConfig := range config.Pipelines {
+		// Validate pipeline name
+		if pipelineConfig.Name == "" {
+			pipelineConfig.Name = name
+		}
+
+		// Validate source
+		if pipelineConfig.Source.Type == "" {
+			return fmt.Errorf("pipeline %s: source type is required", name)
+		}
+
+		// Try to create source to validate config
+		if _, err := r.factories.CreateSourceAdapter(pipelineConfig.Source); err != nil {
+			return fmt.Errorf("pipeline %s: invalid source configuration: %w", name, err)
+		}
+
+		// Validate processors
+		for i, procConfig := range pipelineConfig.Processors {
+			if procConfig.Type == "" {
+				return fmt.Errorf("pipeline %s: processor %d: type is required", name, i)
+			}
+			// Try to create processor to validate config
+			if _, err := r.factories.CreateProcessor(procConfig); err != nil {
+				return fmt.Errorf("pipeline %s: processor %d: invalid configuration: %w", name, i, err)
+			}
+		}
+
+		// Validate consumers
+		if len(pipelineConfig.Consumers) == 0 {
+			return fmt.Errorf("pipeline %s: at least one consumer is required", name)
+		}
+		for i, consConfig := range pipelineConfig.Consumers {
+			if consConfig.Type == "" {
+				return fmt.Errorf("pipeline %s: consumer %d: type is required", name, i)
+			}
+			// Try to create consumer to validate config
+			if _, err := r.factories.CreateConsumer(consConfig); err != nil {
+				return fmt.Errorf("pipeline %s: consumer %d: invalid configuration: %w", name, i, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// validateV2Config validates a v2 configuration format
+func (r *Runner) validateV2Config() error {
+	// Use the v2 config loader which includes validation
+	loader, err := v2config.NewConfigLoader(v2config.DefaultLoaderOptions())
+	if err != nil {
+		return fmt.Errorf("creating config loader: %w", err)
+	}
+	
+	// Load and validate configuration
+	result, err := loader.Load(r.opts.ConfigFile)
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	
+	// Check for warnings
+	if len(result.Warnings) > 0 && r.opts.Verbose {
+		for _, warning := range result.Warnings {
+			log.Printf("Warning: %s", warning)
+		}
+	}
+	
+	// Additional validation beyond what the loader provides
+	if len(result.Config.Pipelines) == 0 {
+		return errors.New("configuration must define at least one pipeline")
+	}
+	
+	// Convert and validate each pipeline can be created
+	for name, v2Pipeline := range result.Config.Pipelines {
+		// Convert to runner pipeline config
+		pipelineConfig := r.convertV2Pipeline(v2Pipeline)
+		
+		// Try to create components to validate config
+		if _, err := r.factories.CreateSourceAdapter(pipelineConfig.Source); err != nil {
+			return fmt.Errorf("pipeline %s: invalid source configuration: %w", name, err)
+		}
+
+		for j, procConfig := range pipelineConfig.Processors {
+			if _, err := r.factories.CreateProcessor(procConfig); err != nil {
+				return fmt.Errorf("pipeline %s: processor %d: invalid configuration: %w", name, j, err)
+			}
+		}
+
+		for j, consConfig := range pipelineConfig.Consumers {
+			if _, err := r.factories.CreateConsumer(consConfig); err != nil {
+				return fmt.Errorf("pipeline %s: consumer %d: invalid configuration: %w", name, j, err)
+			}
+		}
+	}
+
+	return nil
 }
 
 

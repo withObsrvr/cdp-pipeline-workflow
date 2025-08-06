@@ -1,0 +1,29 @@
+# Minimal release image for FlowCTL
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates tzdata
+
+# Copy the pre-built binary
+ARG BINARY_PATH=dist/flowctl-linux-amd64
+COPY ${BINARY_PATH} /usr/local/bin/flowctl
+
+# Make it executable
+RUN chmod +x /usr/local/bin/flowctl
+
+# Create non-root user
+RUN addgroup -g 1000 flowctl && \
+    adduser -D -u 1000 -G flowctl flowctl
+
+# Switch to non-root user
+USER flowctl
+
+# Set working directory
+WORKDIR /workspace
+
+# Expose common ports (optional, for pipeline services)
+EXPOSE 8080 9090
+
+# Default command
+ENTRYPOINT ["flowctl"]
+CMD ["--help"]
