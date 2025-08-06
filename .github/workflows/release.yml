@@ -1,0 +1,287 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release'
+        required: true
+
+env:
+  GO_VERSION: '1.21'
+  BINARY_NAME: 'flowctl'
+
+jobs:
+  build:
+    name: Build Release Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Linux
+          - goos: linux
+            goarch: amd64
+            platform: linux-amd64
+            cgo_enabled: 1
+            cc: gcc
+          - goos: linux
+            goarch: arm64
+            platform: linux-arm64
+            cgo_enabled: 1
+            cc: aarch64-linux-gnu-gcc
+            setup: |
+              sudo apt-get update
+              sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          
+          # macOS
+          - goos: darwin
+            goarch: amd64
+            platform: darwin-amd64
+            cgo_enabled: 1
+            cc: o64-clang
+            setup: |
+              brew install FiloSottile/musl-cross/musl-cross
+              brew install mingw-w64
+          - goos: darwin
+            goarch: arm64
+            platform: darwin-arm64
+            cgo_enabled: 1
+            cc: oa64-clang
+          
+          # Windows
+          - goos: windows
+            goarch: amd64
+            platform: windows-amd64
+            extension: .exe
+            cgo_enabled: 1
+            cc: x86_64-w64-mingw32-gcc
+            setup: |
+              sudo apt-get update
+              sudo apt-get install -y mingw-w64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup build environment
+        if: matrix.setup != ''
+        run: ${{ matrix.setup }}
+
+      - name: Install dependencies
+        run: |
+          # Install ZeroMQ and other C dependencies
+          if [ "${{ matrix.goos }}" = "linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y libzmq3-dev libczmq-dev libsodium-dev
+          fi
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION=${{ github.event.inputs.tag }}
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: ${{ matrix.cgo_enabled }}
+          CC: ${{ matrix.cc }}
+        run: |
+          # Set build flags
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          COMMIT=$(git rev-parse --short HEAD)
+          BUILD_DATE=$(date -u +%Y-%m-%d_%H:%M:%S)
+          
+          LDFLAGS="-X main.Version=$VERSION -X main.GitCommit=$COMMIT -X main.BuildDate=$BUILD_DATE"
+          
+          # For Windows, static link
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            LDFLAGS="$LDFLAGS -extldflags '-static'"
+          fi
+          
+          # Build
+          OUTPUT_NAME="${BINARY_NAME}-${{ matrix.platform }}${{ matrix.extension }}"
+          go build -ldflags "$LDFLAGS" -o "dist/$OUTPUT_NAME" ./main.go
+          
+          # Make executable
+          chmod +x "dist/$OUTPUT_NAME"
+          
+          # Display file info
+          ls -la dist/
+          file "dist/$OUTPUT_NAME"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.BINARY_NAME }}-${{ matrix.platform }}
+          path: dist/${{ env.BINARY_NAME }}-${{ matrix.platform }}${{ matrix.extension }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: dist
+
+      - name: Create checksums
+        run: |
+          cd dist
+          # Move all binaries to current directory
+          mv */* . 2>/dev/null || true
+          
+          # Create checksums
+          sha256sum flowctl-* > checksums.txt
+          
+          # Display checksums
+          cat checksums.txt
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION=${{ github.event.inputs.tag }}
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          release_name: FlowCTL ${{ steps.version.outputs.VERSION }}
+          body: |
+            # FlowCTL ${{ steps.version.outputs.VERSION }}
+
+            ## Installation
+
+            ### Quick Install (Linux/macOS)
+            ```bash
+            curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | sh
+            ```
+
+            ### Manual Download
+            Download the appropriate binary for your platform below.
+
+            ## Checksums
+            SHA256 checksums are available in `checksums.txt`
+
+            ## Changelog
+            - See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
+
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Assets
+        run: |
+          # Upload all binaries and checksums
+          for file in dist/flowctl-*; do
+            echo "Uploading $file..."
+            gh release upload "${{ steps.version.outputs.VERSION }}" "$file" --clobber
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    name: Build and Push Docker Image
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Linux AMD64 artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: flowctl-linux-amd64
+          path: dist
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION=${{ github.event.inputs.tag }}
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.release
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/flowctl:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository_owner }}/flowctl:latest
+          build-args: |
+            BINARY_PATH=dist/flowctl-linux-amd64
+
+  update-install-script:
+    name: Update Install Script Version
+    needs: release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Update latest version in docs
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "$VERSION" > docs/latest-version.txt
+          
+          # Update README with latest version
+          sed -i "s/FlowCTL v.*/FlowCTL ${VERSION}/g" README.md || true
+
+      - name: Commit changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -A
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update version to ${GITHUB_REF#refs/tags/}"
+          git push || true
