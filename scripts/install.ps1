@@ -174,8 +174,14 @@ function Create-Shortcut {
     $startMenuPath = [Environment]::GetFolderPath("StartMenu")
     $shortcutPath = Join-Path $startMenuPath "Programs\FlowCTL.lnk"
     
+    $WshShell = $null
     try {
         $WshShell = New-Object -ComObject WScript.Shell
+    } catch {
+        Write-Warn "Failed to create COM object 'WScript.Shell'. Shortcut creation will be skipped. This may be due to missing COM registration or insufficient permissions. Error: $_"
+        return
+    }
+    try {
         $shortcut = $WshShell.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = "cmd.exe"
         $shortcut.Arguments = "/k `"$binPath`" --help"

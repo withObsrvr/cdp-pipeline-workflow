@@ -785,9 +785,17 @@ func (cd *ContractData) Process(ctx context.Context, msg Message) error {
 	cd.mu.RUnlock()
 
 	// Mock filtering logic
-	for i := 0; i < 2; i++ { // Mock: forward 2 entries for testing
+	numEntries := len(cd.contractIDs)
+	if numEntries == 0 {
+		numEntries = 1
+	}
+	for i := 0; i < numEntries; i++ { // Forward entries based on contractIDs
+		contractID := "default-contract-id"
+		if len(cd.contractIDs) > 0 {
+			contractID = cd.contractIDs[i%len(cd.contractIDs)]
+		}
 		contractData := map[string]interface{}{
-			"contract_id":           cd.contractIDs[0],
+			"contract_id":           contractID,
 			"contract_key":          fmt.Sprintf("key%d", i),
 			"contract_value":        fmt.Sprintf("value%d", i),
 			"contract_key_type":     "ContractData",

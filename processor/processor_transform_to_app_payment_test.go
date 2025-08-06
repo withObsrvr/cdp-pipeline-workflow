@@ -13,6 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	// stroopsPerXLM is the conversion factor from stroops to XLM
+	stroopsPerXLM = 10000000.0
+)
+
 // TestNewTransformToAppPayment tests processor creation and configuration
 func TestNewTransformToAppPayment(t *testing.T) {
 	tests := []struct {
@@ -793,7 +798,7 @@ func (t *TransformToAppPayment) Process(ctx context.Context, msg Message) error 
 
 func (t *TransformToAppPayment) transformPayment(p PaymentMessage) map[string]interface{} {
 	// Convert amount from stroops
-	amountStr := fmt.Sprintf("%.*f", t.decimalPrecision, float64(p.Amount)/10000000.0)
+	amountStr := fmt.Sprintf("%.*f", t.decimalPrecision, float64(p.Amount)/stroopsPerXLM)
 
 	output := make(map[string]interface{})
 
@@ -841,8 +846,8 @@ func (t *TransformToAppPayment) transformPayment(p PaymentMessage) map[string]in
 	}
 
 	if t.includeFeeDetails {
-		output["fee_charged"] = fmt.Sprintf("%.*f", t.decimalPrecision, float64(p.FeeCharged)/10000000.0)
-		output["max_fee"] = fmt.Sprintf("%.*f", t.decimalPrecision, float64(p.MaxFee)/10000000.0)
+		output["fee_charged"] = fmt.Sprintf("%.*f", t.decimalPrecision, float64(p.FeeCharged)/stroopsPerXLM)
+		output["max_fee"] = fmt.Sprintf("%.*f", t.decimalPrecision, float64(p.MaxFee)/stroopsPerXLM)
 	}
 
 	return output
@@ -856,7 +861,7 @@ func (t *TransformToAppPayment) transformPathPayment(p PathPaymentMessage) map[s
 	output["operation_type"] = "path_payment"
 	output["send_asset_code"] = p.SendAsset.Code
 	output["send_asset_issuer"] = p.SendAsset.Issuer
-	output["send_amount"] = fmt.Sprintf("%.*f", t.decimalPrecision, float64(p.SendAmount)/10000000.0)
+	output["send_amount"] = fmt.Sprintf("%.*f", t.decimalPrecision, float64(p.SendAmount)/stroopsPerXLM)
 	
 	// Convert path
 	path := make([]map[string]string, len(p.Path))

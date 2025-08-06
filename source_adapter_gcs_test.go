@@ -17,6 +17,13 @@ import (
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
 )
 
+const (
+	// FilesPerPartition represents the number of files in each partition
+	FilesPerPartition = 64000
+	// LedgersPerFileGroup represents the number of ledgers in each file group
+	LedgersPerFileGroup = 1000
+)
+
 // MockDataStore simulates the datastore for testing
 type MockDataStore struct {
 	mu         sync.Mutex
@@ -506,7 +513,7 @@ func TestBufferedStorageSourceAdapter_Integration(t *testing.T) {
 		"buffer_size":       float64(5),
 		"num_workers":       float64(3),
 		"ledgers_per_file":  float64(1),
-		"files_per_partition": float64(64000),
+		"files_per_partition": float64(FilesPerPartition),
 	}
 
 	mockStore := NewMockDataStore()
@@ -515,7 +522,7 @@ func TestBufferedStorageSourceAdapter_Integration(t *testing.T) {
 	for i := uint32(1000); i <= 1010; i++ {
 		ledger := createTestLedger(i)
 		data, _ := ledger.MarshalBinary()
-		path := fmt.Sprintf("ledgers/%06d/%06d/ledger-%d.xdr", i/64000, i/1000, i)
+		path := fmt.Sprintf("ledgers/%06d/%06d/ledger-%d.xdr", i/FilesPerPartition, i/LedgersPerFileGroup, i)
 		mockStore.AddFile(path, data)
 	}
 

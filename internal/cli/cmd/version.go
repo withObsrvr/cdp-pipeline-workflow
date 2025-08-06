@@ -5,7 +5,7 @@ import (
 	"runtime"
 	
 	"github.com/spf13/cobra"
-	"github.com/fatih/color"
+	"github.com/fatih/color" // Terminal color output for better UX
 )
 
 // Version information injected via main package

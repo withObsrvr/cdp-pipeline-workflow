@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -862,5 +863,6 @@ func (a *RPCSourceAdapter) Run(ctx context.Context) error {
 }
 
 func isValidURL(urlStr string) bool {
-	return len(urlStr) > 7 && (urlStr[:7] == "http://" || urlStr[:8] == "https://")
+	parsed, err := url.Parse(urlStr)
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
 }

@@ -83,10 +83,15 @@ pipelines:
       - type: stdout
 EOF
 
-if flowctl run --dry-run "$TEST_CONFIG" >/dev/null 2>&1; then
+# Capture stderr to a variable for debugging if the command fails
+if flowctl run --dry-run "$TEST_CONFIG" >/dev/null 2>flowctl_dryrun_stderr.log; then
     test_pass "Config validation works"
+    rm -f flowctl_dryrun_stderr.log
 else
     test_fail "Config validation failed"
+    echo "  Error output:"
+    cat flowctl_dryrun_stderr.log
+    rm -f flowctl_dryrun_stderr.log
 fi
 
 rm -f "$TEST_CONFIG"

@@ -531,7 +531,8 @@ func simulateAdapterRun(ctx context.Context, adapter *CaptiveCoreInboundAdapter,
 			if err := proc.Process(ctx, processor.Message{
 				Payload: ledger,
 			}); err != nil {
-				// Log but continue with other processors
+				// Log the error returned by this processor, but continue processing with other processors
+				// to ensure all processors have a chance to handle the message, even if one fails.
 				log.Printf("processor error: %v", err)
 			}
 		}
