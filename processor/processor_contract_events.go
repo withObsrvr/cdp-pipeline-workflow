@@ -83,6 +83,11 @@ func (p *ContractEventProcessor) Process(ctx context.Context, msg Message) error
 	}
 	defer txReader.Close()
 
+	// Track metadata versions seen
+	v3Count := 0
+	v4Count := 0
+	otherVersionCount := 0
+	
 	// Process each transaction
 	for {
 		tx, err := txReader.Read()
@@ -94,20 +99,84 @@ func (p *ContractEventProcessor) Process(ctx context.Context, msg Message) error
 		}
 
 		// Check if transaction has Soroban meta with events
-		if tx.UnsafeMeta.V != 3 {
-			continue // Not a V3 transaction, skip
+		// V3: Events are in sorobanMeta.Events
+		// V4: Events are moved to tx.UnsafeMeta.V4.Events (Protocol 23)
+		var sorobanEvents []xdr.ContractEvent
+		
+		switch tx.UnsafeMeta.V {
+		case 3:
+			v3Count++
+			// V3 metadata - events are in SorobanTransactionMeta
+			sorobanMeta := tx.UnsafeMeta.V3.SorobanMeta
+			if sorobanMeta != nil && sorobanMeta.Events != nil {
+				sorobanEvents = sorobanMeta.Events
+			}
+		case 4:
+			v4Count++
+			// V4 metadata (Protocol 23) - events moved to TransactionMetaV4.events
+			// Note: In V4, SorobanTransactionMetaV2 no longer contains events
+			
+			// Debug: Check if V4 is accessible
+			if tx.UnsafeMeta.V4 == nil {
+				log.Printf("WARNING: V4 metadata is nil for transaction %s", tx.Result.TransactionHash.HexString())
+				continue
+			}
+			
+			// Check for events in V4.Events
+			if tx.UnsafeMeta.V4.Events != nil && len(tx.UnsafeMeta.V4.Events) > 0 {
+				// Extract ContractEvent from each TransactionEvent
+				for _, txEvent := range tx.UnsafeMeta.V4.Events {
+					// TransactionEvent wraps ContractEvent with a stage indicator
+					if txEvent.Event.Type == xdr.ContractEventTypeContract {
+						sorobanEvents = append(sorobanEvents, txEvent.Event)
+					}
+				}
+				log.Printf("Found %d V4 transaction events, extracted %d contract events in tx %s", 
+					len(tx.UnsafeMeta.V4.Events), len(sorobanEvents), tx.Result.TransactionHash.HexString())
+			} else {
+				// Log when V4 has no events (common case)
+				if tx.Envelope.IsFeeBump() || !tx.Result.Successful() {
+					// Skip logging for fee bumps and failed transactions
+				} else if tx.Envelope.Operations() != nil && len(tx.Envelope.Operations()) > 0 {
+					// Check if this is a Soroban operation
+					for _, op := range tx.Envelope.Operations() {
+						if op.Body.Type == xdr.OperationTypeInvokeHostFunction {
+							log.Printf("V4 Soroban transaction %s has no events in V4.Events field", tx.Result.TransactionHash.HexString())
+							break
+						}
+					}
+				}
+			}
+			// Also check diagnostic events which may contain contract events
+			if tx.UnsafeMeta.V4.DiagnosticEvents != nil {
+				contractDiagnosticCount := 0
+				for _, diagEvent := range tx.UnsafeMeta.V4.DiagnosticEvents {
+					if diagEvent.Event.Type == xdr.ContractEventTypeContract {
+						contractDiagnosticCount++
+						// For now, we'll focus on the main events, not diagnostic ones
+						// Diagnostic events are typically for debugging failed transactions
+					}
+				}
+				if contractDiagnosticCount > 0 {
+					log.Printf("Found %d contract events in V4 diagnostic events (not processed)", contractDiagnosticCount)
+				}
+			}
+		default:
+			otherVersionCount++
+			// Pre-V3 or unknown future versions - skip
+			continue
 		}
-
-		sorobanMeta := tx.UnsafeMeta.V3.SorobanMeta
-		if sorobanMeta == nil || sorobanMeta.Events == nil || len(sorobanMeta.Events) == 0 {
+		
+		// For now, only process V3 events until we implement V4 TransactionEvent handling
+		if len(sorobanEvents) == 0 {
 			continue // No Soroban events, skip
 		}
 
 		// Log that we found events
-		log.Printf("Found %d Soroban events in transaction %s", len(sorobanMeta.Events), tx.Result.TransactionHash.HexString())
+		log.Printf("Found %d Soroban events in transaction %s", len(sorobanEvents), tx.Result.TransactionHash.HexString())
 		
 		// Process each event from SorobanMeta
-		for eventIdx, event := range sorobanMeta.Events {
+		for eventIdx, event := range sorobanEvents {
 			// Only process contract events (not system events)
 			if event.Type != xdr.ContractEventTypeContract {
 				log.Printf("Skipping non-contract event (type: %v)", event.Type)
@@ -133,6 +202,12 @@ func (p *ContractEventProcessor) Process(ctx context.Context, msg Message) error
 		}
 	}
 
+	// Log metadata version statistics
+	if v3Count > 0 || v4Count > 0 || otherVersionCount > 0 {
+		log.Printf("Ledger %d metadata versions - V3: %d, V4: %d, Other: %d", 
+			sequence, v3Count, v4Count, otherVersionCount)
+	}
+	
 	p.mu.Lock()
 	p.stats.ProcessedLedgers++
 	p.stats.LastLedger = sequence
