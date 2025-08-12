@@ -10,10 +10,12 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/withObsrvr/cdp-pipeline-workflow/consumer"
 	"github.com/withObsrvr/cdp-pipeline-workflow/internal/cli/cmd"
 	"github.com/withObsrvr/cdp-pipeline-workflow/internal/cli/runner"
+	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/control"
 	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/pipeline"
 	"github.com/withObsrvr/cdp-pipeline-workflow/processor"
 	"gopkg.in/yaml.v2"
@@ -361,6 +363,47 @@ func createConsumers(consumerConfigs []consumer.ConsumerConfig) ([]processor.Pro
 
 
 func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
+	// Create pipeline ID
+	pipelineID := fmt.Sprintf("cdp-%s-%d", pipelineConfig.Name, time.Now().Unix())
+	
+	// Initialize pipeline stats
+	pipelineStats := control.NewPipelineStats(pipelineID)
+	
+	// Setup control plane client if endpoint is provided
+	var controlClient *control.Client
+	if endpoint := os.Getenv("FLOWCTL_ENDPOINT"); endpoint != "" {
+		var err error
+		controlClient, err = control.NewClient(endpoint, pipelineID, pipelineConfig.Name)
+		if err != nil {
+			log.Printf("Failed to create control plane client: %v", err)
+			// Continue without control plane
+		} else {
+			// Set metrics and health providers
+			controlClient.SetMetricsProvider(pipelineStats)
+			controlClient.SetHealthChecker(pipelineStats)
+			
+			// Register with control plane
+			metadata := map[string]string{
+				"config_name": pipelineConfig.Name,
+				"version":     Version,
+			}
+			
+			// Add source type to metadata
+			if pipelineConfig.Source.Type != "" {
+				metadata["source_type"] = pipelineConfig.Source.Type
+			}
+			
+			if err := controlClient.Register(ctx, metadata); err != nil {
+				log.Printf("Failed to register with control plane: %v", err)
+			} else {
+				log.Printf("Registered pipeline %s with control plane", pipelineID)
+				// Start heartbeat loop
+				go controlClient.StartHeartbeat(ctx, 10*time.Second)
+				defer controlClient.Close()
+			}
+		}
+	}
+	
 	// Create source
 	source, err := createSourceAdapter(pipelineConfig.Source)
 	if err != nil {

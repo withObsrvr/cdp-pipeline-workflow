@@ -50,6 +50,7 @@ func runPipelinesFromV2Config(ctx context.Context, result *v2config.LoadResult) 
 		
 		// Convert v2 pipeline to legacy format
 		pipelineConfig := convertV2Pipeline(pipeline)
+		pipelineConfig.Name = name // Set the pipeline name
 		
 		err := setupPipeline(ctx, pipelineConfig)
 		log.Printf("DEBUG: setupPipeline returned error: %v", err)

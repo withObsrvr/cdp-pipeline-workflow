@@ -12,6 +12,7 @@ import (
 	"github.com/stellar/go/ingest"
 	"github.com/stellar/go/strkey"
 	"github.com/stellar/go/xdr"
+	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/control"
 )
 
 // ContractEvent represents an event emitted by a contract
@@ -122,10 +123,14 @@ func (p *ContractEventProcessor) Process(ctx context.Context, msg Message) error
 				continue
 			}
 			
+			// Skip logging every transaction to reduce noise
+			
 			// Check for events in V4.Events
 			if tx.UnsafeMeta.V4.Events != nil && len(tx.UnsafeMeta.V4.Events) > 0 {
+				log.Printf("V4.Events is not nil, has %d events", len(tx.UnsafeMeta.V4.Events))
 				// Extract ContractEvent from each TransactionEvent
-				for _, txEvent := range tx.UnsafeMeta.V4.Events {
+				for i, txEvent := range tx.UnsafeMeta.V4.Events {
+					log.Printf("Event %d: Type=%v, Stage=%v", i, txEvent.Event.Type, txEvent.Stage)
 					// TransactionEvent wraps ContractEvent with a stage indicator
 					if txEvent.Event.Type == xdr.ContractEventTypeContract {
 						sorobanEvents = append(sorobanEvents, txEvent.Event)
@@ -133,32 +138,23 @@ func (p *ContractEventProcessor) Process(ctx context.Context, msg Message) error
 				}
 				log.Printf("Found %d V4 transaction events, extracted %d contract events in tx %s", 
 					len(tx.UnsafeMeta.V4.Events), len(sorobanEvents), tx.Result.TransactionHash.HexString())
-			} else {
-				// Log when V4 has no events (common case)
-				if tx.Envelope.IsFeeBump() || !tx.Result.Successful() {
-					// Skip logging for fee bumps and failed transactions
-				} else if tx.Envelope.Operations() != nil && len(tx.Envelope.Operations()) > 0 {
-					// Check if this is a Soroban operation
-					for _, op := range tx.Envelope.Operations() {
-						if op.Body.Type == xdr.OperationTypeInvokeHostFunction {
-							log.Printf("V4 Soroban transaction %s has no events in V4.Events field", tx.Result.TransactionHash.HexString())
-							break
-						}
-					}
-				}
 			}
 			// Also check diagnostic events which may contain contract events
-			if tx.UnsafeMeta.V4.DiagnosticEvents != nil {
+			if tx.UnsafeMeta.V4.DiagnosticEvents != nil && len(tx.UnsafeMeta.V4.DiagnosticEvents) > 0 {
+				log.Printf("V4.DiagnosticEvents has %d events for tx %s", len(tx.UnsafeMeta.V4.DiagnosticEvents), tx.Result.TransactionHash.HexString())
 				contractDiagnosticCount := 0
 				for _, diagEvent := range tx.UnsafeMeta.V4.DiagnosticEvents {
 					if diagEvent.Event.Type == xdr.ContractEventTypeContract {
 						contractDiagnosticCount++
-						// For now, we'll focus on the main events, not diagnostic ones
-						// Diagnostic events are typically for debugging failed transactions
+						// In V4, contract events might be in diagnostic events!
+						if diagEvent.InSuccessfulContractCall {
+							sorobanEvents = append(sorobanEvents, diagEvent.Event)
+							log.Printf("Found contract event in V4 diagnostic events (InSuccessfulContractCall=%v)", diagEvent.InSuccessfulContractCall)
+						}
 					}
 				}
 				if contractDiagnosticCount > 0 {
-					log.Printf("Found %d contract events in V4 diagnostic events (not processed)", contractDiagnosticCount)
+					log.Printf("Found %d contract events in V4 diagnostic events, extracted %d from successful calls", contractDiagnosticCount, len(sorobanEvents))
 				}
 			}
 		default:
@@ -370,4 +366,24 @@ func (p *ContractEventProcessor) GetStats() struct {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.stats
+}
+
+// GetStats implements the control.StatsProvider interface
+func (p *ContractEventProcessor) GetStatsForControl() control.ComponentStats {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	
+	return control.ComponentStats{
+		ComponentType: "processor",
+		ComponentName: "ContractEventProcessor",
+		Stats: map[string]interface{}{
+			"processed_ledgers":   p.stats.ProcessedLedgers,
+			"events_found":        p.stats.EventsFound,
+			"successful_events":   p.stats.SuccessfulEvents,
+			"failed_events":       p.stats.FailedEvents,
+			"last_ledger":         p.stats.LastLedger,
+			"last_processed_time": p.stats.LastProcessedTime.Unix(),
+		},
+		LastUpdated: time.Now(),
+	}
 }
