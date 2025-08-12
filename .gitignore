@@ -57,3 +57,6 @@ result-*
 # flake.lock
 flowctl
 flowct
+docs/cdp-vs-benthos-comparison.md
+docs/future-inspired-enhancements.md
+docs/future-best-practices-for-cdp.md

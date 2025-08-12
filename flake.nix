@@ -95,7 +95,7 @@
         pushToProd = pkgs.writeShellScriptBin "push-to-dockerhub-prod" ''
           set -e
           
-          IMAGE_NAME="obsrvr-flow-pipeline"
+          IMAGE_NAME="flowctl"
           TAG="''${1:-latest}"
           USERNAME="''${2:-withobsrvr}"
           

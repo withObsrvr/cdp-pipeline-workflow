@@ -93,26 +93,41 @@ func (p *ContractEventProcessor) Process(ctx context.Context, msg Message) error
 			return fmt.Errorf("error reading transaction: %w", err)
 		}
 
-		// Get diagnostic events from transaction
-		diagnosticEvents, err := tx.GetDiagnosticEvents()
-		if err != nil {
-			log.Printf("Error getting diagnostic events: %v", err)
-			continue
+		// Check if transaction has Soroban meta with events
+		if tx.UnsafeMeta.V != 3 {
+			continue // Not a V3 transaction, skip
 		}
 
-		// Process events
-		for opIdx, events := range filterContractEvents(diagnosticEvents) {
-			for eventIdx, event := range events {
-				contractEvent, err := p.processContractEvent(tx, opIdx, eventIdx, event, ledgerCloseMeta)
-				if err != nil {
-					log.Printf("Error processing contract event: %v", err)
-					continue
-				}
+		sorobanMeta := tx.UnsafeMeta.V3.SorobanMeta
+		if sorobanMeta == nil || sorobanMeta.Events == nil || len(sorobanMeta.Events) == 0 {
+			continue // No Soroban events, skip
+		}
 
-				if contractEvent != nil {
-					if err := p.forwardToProcessors(ctx, contractEvent); err != nil {
-						log.Printf("Error forwarding event: %v", err)
-					}
+		// Log that we found events
+		log.Printf("Found %d Soroban events in transaction %s", len(sorobanMeta.Events), tx.Result.TransactionHash.HexString())
+		
+		// Process each event from SorobanMeta
+		for eventIdx, event := range sorobanMeta.Events {
+			// Only process contract events (not system events)
+			if event.Type != xdr.ContractEventTypeContract {
+				log.Printf("Skipping non-contract event (type: %v)", event.Type)
+				continue
+			}
+
+			// For now, we don't have operation index from the event itself,
+			// so we'll use 0 as default (this could be improved in the future)
+			opIdx := 0
+			
+			contractEvent, err := p.processContractEvent(tx, opIdx, eventIdx, event, ledgerCloseMeta)
+			if err != nil {
+				log.Printf("Error processing contract event: %v", err)
+				continue
+			}
+
+			if contractEvent != nil {
+				log.Printf("Successfully processed contract event from contract %s", contractEvent.ContractID)
+				if err := p.forwardToProcessors(ctx, contractEvent); err != nil {
+					log.Printf("Error forwarding event: %v", err)
 				}
 			}
 		}

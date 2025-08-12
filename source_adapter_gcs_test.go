@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/stellar/go/ingest/cdp"
-	"github.com/stellar/go/support/datastore"
 	"github.com/stellar/go/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,7 +19,7 @@ const (
 	// FilesPerPartition represents the number of files in each partition
 	FilesPerPartition = 64000
 	// LedgersPerFileGroup represents the number of ledgers in each file group
-	LedgersPerFileGroup = 1000
+	LedgersPerFileGroup = 1
 )
 
 // MockDataStore simulates the datastore for testing
@@ -33,10 +31,10 @@ type MockDataStore struct {
 }
 
 type MockBehavior struct {
-	ErrorOnGet      error
-	ErrorOnGetNth   map[int]error
-	DelayOnGet      time.Duration
-	MissingLedgers  map[uint32]bool
+	ErrorOnGet     error
+	ErrorOnGetNth  map[int]error
+	DelayOnGet     time.Duration
+	MissingLedgers map[uint32]bool
 }
 
 func NewMockDataStore() *MockDataStore {
@@ -155,12 +153,12 @@ func TestBufferedStorageSourceAdapter_BasicFunctionality(t *testing.T) {
 		{
 			name: "processes ledger range successfully",
 			config: map[string]interface{}{
-				"bucket_name":    "test-bucket",
-				"network":        "testnet",
-				"start_ledger":   float64(1000),
-				"end_ledger":     float64(1002),
-				"buffer_size":    float64(10),
-				"num_workers":    float64(2),
+				"bucket_name":  "test-bucket",
+				"network":      "testnet",
+				"start_ledger": float64(1000),
+				"end_ledger":   float64(1002),
+				"buffer_size":  float64(10),
+				"num_workers":  float64(2),
 			},
 			setupMock: func(m *MockDataStore) {
 				// Add test ledger files
@@ -185,12 +183,12 @@ func TestBufferedStorageSourceAdapter_BasicFunctionality(t *testing.T) {
 		{
 			name: "handles missing ledgers gracefully",
 			config: map[string]interface{}{
-				"bucket_name":    "test-bucket",
-				"network":        "testnet",
-				"start_ledger":   float64(2000),
-				"end_ledger":     float64(2005),
-				"buffer_size":    float64(10),
-				"num_workers":    float64(2),
+				"bucket_name":  "test-bucket",
+				"network":      "testnet",
+				"start_ledger": float64(2000),
+				"end_ledger":   float64(2005),
+				"buffer_size":  float64(10),
+				"num_workers":  float64(2),
 			},
 			setupMock: func(m *MockDataStore) {
 				// Add only some ledgers (missing 2002 and 2004)
@@ -205,12 +203,12 @@ func TestBufferedStorageSourceAdapter_BasicFunctionality(t *testing.T) {
 		{
 			name: "respects context cancellation",
 			config: map[string]interface{}{
-				"bucket_name":    "test-bucket",
-				"network":        "testnet",
-				"start_ledger":   float64(3000),
-				"end_ledger":     float64(3100), // Large range
-				"buffer_size":    float64(10),
-				"num_workers":    float64(1),
+				"bucket_name":  "test-bucket",
+				"network":      "testnet",
+				"start_ledger": float64(3000),
+				"end_ledger":   float64(3100), // Large range
+				"buffer_size":  float64(10),
+				"num_workers":  float64(1),
 			},
 			setupMock: func(m *MockDataStore) {
 				// Add many ledgers with delay
@@ -226,20 +224,20 @@ func TestBufferedStorageSourceAdapter_BasicFunctionality(t *testing.T) {
 		{
 			name: "handles configuration with workers and retries",
 			config: map[string]interface{}{
-				"bucket_name":    "test-bucket",
-				"network":        "testnet",
-				"start_ledger":   float64(4000),
-				"end_ledger":     float64(4002),
-				"buffer_size":    float64(2),
-				"num_workers":    float64(5),
-				"retry_limit":    float64(3),
-				"retry_wait":     float64(1),
+				"bucket_name":  "test-bucket",
+				"network":      "testnet",
+				"start_ledger": float64(4000),
+				"end_ledger":   float64(4002),
+				"buffer_size":  float64(2),
+				"num_workers":  float64(5),
+				"retry_limit":  float64(3),
+				"retry_wait":   float64(1),
 			},
 			setupMock: func(m *MockDataStore) {
 				// Simulate transient errors on first attempts
 				m.behavior.ErrorOnGetNth[1] = errors.New("temporary error")
 				m.behavior.ErrorOnGetNth[2] = errors.New("temporary error")
-				
+
 				// Add ledgers (will succeed on 3rd attempt)
 				for i := uint32(4000); i <= 4002; i++ {
 					ledger := createTestLedger(i)
@@ -284,7 +282,7 @@ func TestBufferedStorageSourceAdapter_BasicFunctionality(t *testing.T) {
 				assert.NoError(t, err)
 				messages := mockProcessor.GetMessages()
 				assert.Len(t, messages, tt.expectedCount)
-				
+
 				if tt.validateResults != nil {
 					tt.validateResults(t, messages)
 				}
@@ -373,7 +371,7 @@ func TestBufferedStorageSourceAdapter_Concurrency(t *testing.T) {
 	}
 
 	mockStore := NewMockDataStore()
-	
+
 	// Add test ledgers
 	for i := uint32(10000); i < 10000+numLedgers; i++ {
 		ledger := createTestLedger(i)
@@ -419,7 +417,7 @@ func BenchmarkBufferedStorageSourceAdapter(b *testing.B) {
 	}
 
 	mockStore := NewMockDataStore()
-	
+
 	// Pre-generate ledgers
 	for i := 0; i < b.N; i++ {
 		ledger := createTestLedger(uint32(i))
@@ -453,11 +451,11 @@ func createTestAdapter(t testing.TB, config map[string]interface{}, mockStore *M
 	// Create a modified adapter that uses our mock
 	adapter, err := NewBufferedStorageSourceAdapter(config)
 	require.NoError(t, err)
-	
+
 	// We need to inject the mock datastore
 	// This would require modifying the adapter to accept a datastore interface
 	// For now, we'll assume the adapter can be configured with a mock
-	
+
 	return adapter.(*BufferedStorageSourceAdapter)
 }
 
@@ -504,20 +502,20 @@ func TestBufferedStorageSourceAdapter_Integration(t *testing.T) {
 
 	// This would test with actual GCS/S3 connections
 	// For now, we'll use mock but structure it like an integration test
-	
+
 	config := map[string]interface{}{
-		"bucket_name":        "stellar-testnet-data",
-		"network":           "testnet",
-		"start_ledger":      float64(1000),
-		"end_ledger":        float64(1010),
-		"buffer_size":       float64(5),
-		"num_workers":       float64(3),
-		"ledgers_per_file":  float64(1),
+		"bucket_name":         "stellar-testnet-data",
+		"network":             "testnet",
+		"start_ledger":        float64(1000),
+		"end_ledger":          float64(1010),
+		"buffer_size":         float64(5),
+		"num_workers":         float64(3),
+		"ledgers_per_file":    float64(1),
 		"files_per_partition": float64(FilesPerPartition),
 	}
 
 	mockStore := NewMockDataStore()
-	
+
 	// Simulate realistic data
 	for i := uint32(1000); i <= 1010; i++ {
 		ledger := createTestLedger(i)
@@ -527,13 +525,13 @@ func TestBufferedStorageSourceAdapter_Integration(t *testing.T) {
 	}
 
 	adapter := createTestAdapter(t, config, mockStore)
-	
+
 	// Chain multiple processors
 	processors := []cdpProcessor.Processor{
 		NewMockProcessor(),
 		NewMockProcessor(),
 	}
-	
+
 	for _, p := range processors {
 		adapter.Subscribe(p)
 	}
