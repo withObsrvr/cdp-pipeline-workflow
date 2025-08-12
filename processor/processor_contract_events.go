@@ -40,6 +40,7 @@ type DiagnosticData struct {
 	InSuccessfulContractCall bool            `json:"in_successful_contract_call"`
 }
 
+// ContractEventProcessor uses the SDK's helper methods for V3/V4 compatibility
 type ContractEventProcessor struct {
 	processors        []Processor
 	networkPassphrase string
@@ -84,12 +85,8 @@ func (p *ContractEventProcessor) Process(ctx context.Context, msg Message) error
 	}
 	defer txReader.Close()
 
-	// Track metadata versions seen
-	v3Count := 0
-	v4Count := 0
-	otherVersionCount := 0
-	
 	// Process each transaction
+	eventsInLedger := 0
 	for {
 		tx, err := txReader.Read()
 		if err == io.EOF {
@@ -99,111 +96,70 @@ func (p *ContractEventProcessor) Process(ctx context.Context, msg Message) error
 			return fmt.Errorf("error reading transaction: %w", err)
 		}
 
-		// Check if transaction has Soroban meta with events
-		// V3: Events are in sorobanMeta.Events
-		// V4: Events are moved to tx.UnsafeMeta.V4.Events (Protocol 23)
-		var sorobanEvents []xdr.ContractEvent
-		
-		switch tx.UnsafeMeta.V {
-		case 3:
-			v3Count++
-			// V3 metadata - events are in SorobanTransactionMeta
-			sorobanMeta := tx.UnsafeMeta.V3.SorobanMeta
-			if sorobanMeta != nil && sorobanMeta.Events != nil {
-				sorobanEvents = sorobanMeta.Events
-			}
-		case 4:
-			v4Count++
-			// V4 metadata (Protocol 23) - events moved to TransactionMetaV4.events
-			// Note: In V4, SorobanTransactionMetaV2 no longer contains events
-			
-			// Debug: Check if V4 is accessible
-			if tx.UnsafeMeta.V4 == nil {
-				log.Printf("WARNING: V4 metadata is nil for transaction %s", tx.Result.TransactionHash.HexString())
-				continue
-			}
-			
-			// Skip logging every transaction to reduce noise
-			
-			// Check for events in V4.Events
-			if tx.UnsafeMeta.V4.Events != nil && len(tx.UnsafeMeta.V4.Events) > 0 {
-				log.Printf("V4.Events is not nil, has %d events", len(tx.UnsafeMeta.V4.Events))
-				// Extract ContractEvent from each TransactionEvent
-				for i, txEvent := range tx.UnsafeMeta.V4.Events {
-					log.Printf("Event %d: Type=%v, Stage=%v", i, txEvent.Event.Type, txEvent.Stage)
-					// TransactionEvent wraps ContractEvent with a stage indicator
-					if txEvent.Event.Type == xdr.ContractEventTypeContract {
-						sorobanEvents = append(sorobanEvents, txEvent.Event)
-					}
-				}
-				log.Printf("Found %d V4 transaction events, extracted %d contract events in tx %s", 
-					len(tx.UnsafeMeta.V4.Events), len(sorobanEvents), tx.Result.TransactionHash.HexString())
-			}
-			// Also check diagnostic events which may contain contract events
-			if tx.UnsafeMeta.V4.DiagnosticEvents != nil && len(tx.UnsafeMeta.V4.DiagnosticEvents) > 0 {
-				log.Printf("V4.DiagnosticEvents has %d events for tx %s", len(tx.UnsafeMeta.V4.DiagnosticEvents), tx.Result.TransactionHash.HexString())
-				contractDiagnosticCount := 0
-				for _, diagEvent := range tx.UnsafeMeta.V4.DiagnosticEvents {
-					if diagEvent.Event.Type == xdr.ContractEventTypeContract {
-						contractDiagnosticCount++
-						// In V4, contract events might be in diagnostic events!
-						if diagEvent.InSuccessfulContractCall {
-							sorobanEvents = append(sorobanEvents, diagEvent.Event)
-							log.Printf("Found contract event in V4 diagnostic events (InSuccessfulContractCall=%v)", diagEvent.InSuccessfulContractCall)
-						}
-					}
-				}
-				if contractDiagnosticCount > 0 {
-					log.Printf("Found %d contract events in V4 diagnostic events, extracted %d from successful calls", contractDiagnosticCount, len(sorobanEvents))
-				}
-			}
-		default:
-			otherVersionCount++
-			// Pre-V3 or unknown future versions - skip
+		// Skip failed transactions
+		if !tx.Result.Successful() {
 			continue
 		}
-		
-		// For now, only process V3 events until we implement V4 TransactionEvent handling
-		if len(sorobanEvents) == 0 {
-			continue // No Soroban events, skip
+
+		// Use the SDK's helper method to get all transaction events
+		// This abstracts away V3 vs V4 differences
+		txEvents, err := tx.GetTransactionEvents()
+		if err != nil {
+			// Not a Soroban transaction or no events
+			continue
 		}
 
-		// Log that we found events
-		log.Printf("Found %d Soroban events in transaction %s", len(sorobanEvents), tx.Result.TransactionHash.HexString())
-		
-		// Process each event from SorobanMeta
-		for eventIdx, event := range sorobanEvents {
-			// Only process contract events (not system events)
-			if event.Type != xdr.ContractEventTypeContract {
-				log.Printf("Skipping non-contract event (type: %v)", event.Type)
-				continue
-			}
+		// Process contract events from all operations
+		for opIndex, opEvents := range txEvents.OperationEvents {
+			for eventIdx, event := range opEvents {
+				// Only process contract events (not system events)
+				if event.Type != xdr.ContractEventTypeContract {
+					continue
+				}
 
-			// For now, we don't have operation index from the event itself,
-			// so we'll use 0 as default (this could be improved in the future)
-			opIdx := 0
-			
-			contractEvent, err := p.processContractEvent(tx, opIdx, eventIdx, event, ledgerCloseMeta)
-			if err != nil {
-				log.Printf("Error processing contract event: %v", err)
-				continue
-			}
+				eventsInLedger++
+				contractEvent, err := p.processContractEvent(tx, opIndex, eventIdx, event, ledgerCloseMeta)
+				if err != nil {
+					log.Printf("Error processing contract event: %v", err)
+					continue
+				}
 
-			if contractEvent != nil {
-				log.Printf("Successfully processed contract event from contract %s", contractEvent.ContractID)
-				if err := p.forwardToProcessors(ctx, contractEvent); err != nil {
-					log.Printf("Error forwarding event: %v", err)
+				if contractEvent != nil {
+					log.Printf("Successfully processed contract event from contract %s (op %d, event %d)", 
+						contractEvent.ContractID, opIndex, eventIdx)
+					if err := p.forwardToProcessors(ctx, contractEvent); err != nil {
+						log.Printf("Error forwarding event: %v", err)
+					}
+				}
+			}
+		}
+
+		// Also process transaction-level events if available (V4 only)
+		for eventIdx, txEvent := range txEvents.TransactionEvents {
+			if txEvent.Event.Type == xdr.ContractEventTypeContract {
+				eventsInLedger++
+				// Transaction-level events don't have a specific operation index
+				contractEvent, err := p.processContractEvent(tx, -1, eventIdx, txEvent.Event, ledgerCloseMeta)
+				if err != nil {
+					log.Printf("Error processing transaction-level event: %v", err)
+					continue
+				}
+
+				if contractEvent != nil {
+					log.Printf("Successfully processed transaction-level event from contract %s", 
+						contractEvent.ContractID)
+					if err := p.forwardToProcessors(ctx, contractEvent); err != nil {
+						log.Printf("Error forwarding event: %v", err)
+					}
 				}
 			}
 		}
 	}
 
-	// Log metadata version statistics
-	if v3Count > 0 || v4Count > 0 || otherVersionCount > 0 {
-		log.Printf("Ledger %d metadata versions - V3: %d, V4: %d, Other: %d", 
-			sequence, v3Count, v4Count, otherVersionCount)
+	if eventsInLedger > 0 {
+		log.Printf("Found %d contract events in ledger %d", eventsInLedger, sequence)
 	}
-	
+
 	p.mu.Lock()
 	p.stats.ProcessedLedgers++
 	p.stats.LastLedger = sequence
@@ -213,38 +169,10 @@ func (p *ContractEventProcessor) Process(ctx context.Context, msg Message) error
 	return nil
 }
 
-// filterContractEvents groups contract events by operation index
-func filterContractEvents(diagnosticEvents []xdr.DiagnosticEvent) map[int][]xdr.ContractEvent {
-	events := make(map[int][]xdr.ContractEvent)
-
-	for _, diagEvent := range diagnosticEvents {
-		if !diagEvent.InSuccessfulContractCall || diagEvent.Event.Type != xdr.ContractEventTypeContract {
-			continue
-		}
-
-		// Use the operation index as the key
-		opIndex := 0 // Default to 0 if no specific index available
-		events[opIndex] = append(events[opIndex], diagEvent.Event)
-	}
-	return events
-}
-
-// DetectEventType detects the event type from the first topic if available
-func DetectEventType(topics []xdr.ScVal) string {
-	if len(topics) > 0 {
-		eventName, err := ConvertScValToJSON(topics[0])
-		if err == nil {
-			if str, ok := eventName.(string); ok {
-				return str
-			}
-		}
-	}
-	return "unknown"
-}
-
 func (p *ContractEventProcessor) processContractEvent(
 	tx ingest.LedgerTransaction,
-	opIndex, eventIndex int,
+	opIndex int,
+	eventIndex int,
 	event xdr.ContractEvent,
 	meta xdr.LedgerCloseMeta,
 ) (*ContractEvent, error) {
@@ -307,7 +235,7 @@ func (p *ContractEventProcessor) processContractEvent(
 		ContractID:        contractID,
 		Type:              string(event.Type),
 		EventType:         eventType,
-		Topic:             event.Body.V0.Topics, // Use V0 topics from the event body
+		Topic:             event.Body.V0.Topics,
 		TopicDecoded:      topicDecoded,
 		Data:              data,
 		DataDecoded:       dataDecoded,
@@ -319,10 +247,9 @@ func (p *ContractEventProcessor) processContractEvent(
 
 	// Add diagnostic events if available
 	diagnosticEvents, err := tx.GetDiagnosticEvents()
-	if err == nil {
+	if err == nil && len(diagnosticEvents) > 0 {
 		var diagnosticData []DiagnosticData
 		for _, diagEvent := range diagnosticEvents {
-			// Since we don't have ExtensionPoint, we'll use operation index directly
 			if diagEvent.Event.Type == xdr.ContractEventTypeContract {
 				eventData, err := json.Marshal(diagEvent.Event)
 				if err != nil {
@@ -338,6 +265,36 @@ func (p *ContractEventProcessor) processContractEvent(
 	}
 
 	return contractEvent, nil
+}
+
+// DetectEventType attempts to determine the event type from topics
+func DetectEventType(topics []xdr.ScVal) string {
+	// Check topics for common event type patterns
+	for _, topic := range topics {
+		if topic.Type == xdr.ScValTypeScvSymbol {
+			sym := string(topic.MustSym())
+			// Common event types
+			switch sym {
+			case "transfer", "Transfer":
+				return "transfer"
+			case "mint", "Mint":
+				return "mint"
+			case "burn", "Burn":
+				return "burn"
+			case "swap", "Swap":
+				return "swap"
+			case "sync", "Sync":
+				return "sync"
+			case "deposit", "Deposit":
+				return "deposit"
+			case "withdraw", "Withdraw":
+				return "withdraw"
+			case "new_pair", "NewPair":
+				return "new_pair"
+			}
+		}
+	}
+	return "unknown"
 }
 
 func (p *ContractEventProcessor) forwardToProcessors(ctx context.Context, event *ContractEvent) error {

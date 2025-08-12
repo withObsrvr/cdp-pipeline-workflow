@@ -238,6 +238,7 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 	case "ContractCreation":
 		return processor.NewContractCreationProcessor(processorConfig.Config)
 	case "ContractEvent":
+		// Use processor that handles V3/V4 with SDK helpers
 		return processor.NewContractEventProcessor(processorConfig.Config)
 	case "LatestLedger":
 		return processor.NewLatestLedgerProcessor(processorConfig.Config)
