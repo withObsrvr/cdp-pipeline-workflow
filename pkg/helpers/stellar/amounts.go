@@ -51,10 +51,12 @@ func FormatAmountWithPrecision(raw int64, decimals int) string {
 
 // AddAmounts safely adds two amounts, checking for overflow
 func AddAmounts(a, b int64) (int64, error) {
-	if a > 0 && b > math.MaxInt64-a {
+	// Check for positive overflow: a + b > MaxInt64
+	if b > 0 && a > math.MaxInt64-b {
 		return 0, fmt.Errorf("amount overflow: %d + %d", a, b)
 	}
-	if a < 0 && b < math.MinInt64-a {
+	// Check for negative overflow: a + b < MinInt64
+	if b < 0 && a < math.MinInt64-b {
 		return 0, fmt.Errorf("amount underflow: %d + %d", a, b)
 	}
 	return a + b, nil

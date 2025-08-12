@@ -102,8 +102,9 @@ func (c *Client) sendHeartbeat(ctx context.Context) {
 
 	_, err := c.client.Heartbeat(ctx, heartbeat)
 	if err != nil {
-		// Log error but don't stop heartbeat loop
-		fmt.Printf("Failed to send heartbeat: %v\n", err)
+		// Log error with service context but don't stop heartbeat loop
+		fmt.Printf("Failed to send heartbeat for service %s (ID: %s): %v\n", 
+			c.serviceInfo.Metadata["service_name"], c.serviceInfo.ServiceId, err)
 	}
 }
 

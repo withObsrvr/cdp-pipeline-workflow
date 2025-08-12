@@ -2,6 +2,8 @@ package control
 
 import (
     "fmt"
+    "os"
+    "strconv"
     "sync"
     "time"
 )
@@ -9,6 +11,17 @@ import (
 // StatsProvider is implemented by components that track statistics
 type StatsProvider interface {
     GetStats() ComponentStats
+}
+
+// getHealthCheckTimeout returns the health check timeout duration.
+// It reads from HEALTH_CHECK_TIMEOUT_SECONDS env var, defaulting to 30 seconds.
+func getHealthCheckTimeout() time.Duration {
+    if timeoutStr := os.Getenv("HEALTH_CHECK_TIMEOUT_SECONDS"); timeoutStr != "" {
+        if seconds, err := strconv.Atoi(timeoutStr); err == nil && seconds > 0 {
+            return time.Duration(seconds) * time.Second
+        }
+    }
+    return 30 * time.Second
 }
 
 // ComponentStats represents statistics from a single component
@@ -89,9 +102,11 @@ func (ps *PipelineStats) IsHealthy() bool {
     ps.mu.RLock()
     defer ps.mu.RUnlock()
     
+    timeout := getHealthCheckTimeout()
+    
     // Pipeline is healthy if all components reported stats recently
     for _, comp := range ps.Components {
-        if time.Since(comp.LastUpdated) > 30*time.Second {
+        if time.Since(comp.LastUpdated) > timeout {
             return false
         }
     }
@@ -103,14 +118,17 @@ func (ps *PipelineStats) GetHealthDetails() map[string]string {
     ps.mu.RLock()
     defer ps.mu.RUnlock()
     
+    timeout := getHealthCheckTimeout()
+    
     details := make(map[string]string)
     details["pipeline_id"] = ps.PipelineID
     details["uptime"] = time.Since(ps.StartTime).String()
     details["component_count"] = fmt.Sprintf("%d", len(ps.Components))
+    details["health_check_timeout"] = timeout.String()
     
     for _, comp := range ps.Components {
         status := "healthy"
-        if time.Since(comp.LastUpdated) > 30*time.Second {
+        if time.Since(comp.LastUpdated) > timeout {
             status = "stale"
         }
         details[comp.ComponentName+"_status"] = status

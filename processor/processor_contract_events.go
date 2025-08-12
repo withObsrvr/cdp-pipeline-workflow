@@ -46,12 +46,13 @@ type ContractEventProcessor struct {
 	networkPassphrase string
 	mu                sync.RWMutex
 	stats             struct {
-		ProcessedLedgers  uint32
-		EventsFound       uint64
-		SuccessfulEvents  uint64
-		FailedEvents      uint64
-		LastLedger        uint32
-		LastProcessedTime time.Time
+		ProcessedLedgers      uint32
+		EventsFound           uint64
+		SuccessfulEvents      uint64
+		FailedEvents          uint64
+		SkippedTransactions   uint64
+		LastLedger            uint32
+		LastProcessedTime     time.Time
 	}
 }
 
@@ -98,6 +99,9 @@ func (p *ContractEventProcessor) Process(ctx context.Context, msg Message) error
 
 		// Skip failed transactions
 		if !tx.Result.Successful() {
+			p.mu.Lock()
+			p.stats.SkippedTransactions++
+			p.mu.Unlock()
 			continue
 		}
 
@@ -313,12 +317,13 @@ func (p *ContractEventProcessor) forwardToProcessors(ctx context.Context, event 
 
 // GetStats returns the current processing statistics
 func (p *ContractEventProcessor) GetStats() struct {
-	ProcessedLedgers  uint32
-	EventsFound       uint64
-	SuccessfulEvents  uint64
-	FailedEvents      uint64
-	LastLedger        uint32
-	LastProcessedTime time.Time
+	ProcessedLedgers    uint32
+	EventsFound         uint64
+	SuccessfulEvents    uint64
+	FailedEvents        uint64
+	SkippedTransactions uint64
+	LastLedger          uint32
+	LastProcessedTime   time.Time
 } {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

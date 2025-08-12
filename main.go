@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,17 @@ const (
 	// legacyConfigFlag is the flag used for backward compatibility with the old CLI
 	legacyConfigFlag = "-config"
 )
+
+// getHeartbeatInterval returns the heartbeat interval duration.
+// It reads from HEARTBEAT_INTERVAL_SECONDS env var, defaulting to 10 seconds.
+func getHeartbeatInterval() time.Duration {
+	if intervalStr := os.Getenv("HEARTBEAT_INTERVAL_SECONDS"); intervalStr != "" {
+		if seconds, err := strconv.Atoi(intervalStr); err == nil && seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+	return 10 * time.Second
+}
 
 type Config struct {
 	Pipelines map[string]PipelineConfig `yaml:"pipelines"`
@@ -364,8 +376,8 @@ func createConsumers(consumerConfigs []consumer.ConsumerConfig) ([]processor.Pro
 
 
 func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
-	// Create pipeline ID
-	pipelineID := fmt.Sprintf("cdp-%s-%d", pipelineConfig.Name, time.Now().Unix())
+	// Create stable pipeline ID using just the pipeline name
+	pipelineID := fmt.Sprintf("cdp-%s", pipelineConfig.Name)
 	
 	// Initialize pipeline stats
 	pipelineStats := control.NewPipelineStats(pipelineID)
@@ -398,8 +410,10 @@ func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
 				log.Printf("Failed to register with control plane: %v", err)
 			} else {
 				log.Printf("Registered pipeline %s with control plane", pipelineID)
-				// Start heartbeat loop
-				go controlClient.StartHeartbeat(ctx, 10*time.Second)
+				// Start heartbeat loop with configurable interval
+				heartbeatInterval := getHeartbeatInterval()
+				log.Printf("Starting heartbeat with interval: %s", heartbeatInterval)
+				go controlClient.StartHeartbeat(ctx, heartbeatInterval)
 				defer controlClient.Close()
 			}
 		}
