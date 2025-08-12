@@ -6,6 +6,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The CDP Pipeline Workflow is a Stellar blockchain data processing pipeline built in Go. The system processes Stellar ledger data through a modular architecture consisting of Sources, Processors, and Consumers that can be chained together via YAML configuration files.
 
+## ⚠️ CRITICAL: Use Stellar Go SDK Helper Methods
+
+**When processing Stellar transactions, ALWAYS use SDK helper methods instead of accessing metadata directly.** The SDK abstracts protocol version differences (V1, V2, V3, V4) automatically.
+
+### Key SDK Helper Methods to Use:
+
+1. **Event Processing**: Use `tx.GetTransactionEvents()` NOT `tx.UnsafeMeta.V3.SorobanMeta.Events`
+2. **Transaction Success**: Use `tx.Result.Successful()` NOT manual result code checks
+3. **Operation Data**: Use `op.Body.MustPayment()` etc. NOT manual field access
+4. **Address Encoding**: Use `strkey.Encode()` NOT base64 or manual encoding
+
+### Example - Correct Event Processing:
+```go
+// ✅ CORRECT - Uses SDK helper
+txEvents, err := tx.GetTransactionEvents()
+if err != nil {
+    continue // Not a Soroban transaction
+}
+
+// ❌ WRONG - Direct metadata access
+if tx.UnsafeMeta.V == 3 {
+    events = tx.UnsafeMeta.V3.SorobanMeta.Events
+}
+```
+
+**See documentation:**
+- `docs/stellar-go-sdk-helper-methods.md` - Comprehensive SDK helper guide
+- `docs/stellar-sdk-quick-reference.md` - Quick lookup reference
+- `docs/stellar-processor-migration-plan.md` - Migration plan for all processors
+
 ## Development Commands
 
 ### Building the Application

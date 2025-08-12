@@ -9,11 +9,14 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/withObsrvr/cdp-pipeline-workflow/consumer"
 	"github.com/withObsrvr/cdp-pipeline-workflow/internal/cli/cmd"
 	"github.com/withObsrvr/cdp-pipeline-workflow/internal/cli/runner"
+	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/control"
 	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/pipeline"
 	"github.com/withObsrvr/cdp-pipeline-workflow/processor"
 	"gopkg.in/yaml.v2"
@@ -30,6 +33,17 @@ const (
 	// legacyConfigFlag is the flag used for backward compatibility with the old CLI
 	legacyConfigFlag = "-config"
 )
+
+// getHeartbeatInterval returns the heartbeat interval duration.
+// It reads from HEARTBEAT_INTERVAL_SECONDS env var, defaulting to 10 seconds.
+func getHeartbeatInterval() time.Duration {
+	if intervalStr := os.Getenv("HEARTBEAT_INTERVAL_SECONDS"); intervalStr != "" {
+		if seconds, err := strconv.Atoi(intervalStr); err == nil && seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+	return 10 * time.Second
+}
 
 type Config struct {
 	Pipelines map[string]PipelineConfig `yaml:"pipelines"`
@@ -236,6 +250,7 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 	case "ContractCreation":
 		return processor.NewContractCreationProcessor(processorConfig.Config)
 	case "ContractEvent":
+		// Use processor that handles V3/V4 with SDK helpers
 		return processor.NewContractEventProcessor(processorConfig.Config)
 	case "LatestLedger":
 		return processor.NewLatestLedgerProcessor(processorConfig.Config)
@@ -361,6 +376,49 @@ func createConsumers(consumerConfigs []consumer.ConsumerConfig) ([]processor.Pro
 
 
 func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
+	// Create stable pipeline ID using just the pipeline name
+	pipelineID := fmt.Sprintf("cdp-%s", pipelineConfig.Name)
+	
+	// Initialize pipeline stats
+	pipelineStats := control.NewPipelineStats(pipelineID)
+	
+	// Setup control plane client if endpoint is provided
+	var controlClient *control.Client
+	if endpoint := os.Getenv("FLOWCTL_ENDPOINT"); endpoint != "" {
+		var err error
+		controlClient, err = control.NewClient(endpoint, pipelineID, pipelineConfig.Name)
+		if err != nil {
+			log.Printf("Failed to create control plane client: %v", err)
+			// Continue without control plane
+		} else {
+			// Set metrics and health providers
+			controlClient.SetMetricsProvider(pipelineStats)
+			controlClient.SetHealthChecker(pipelineStats)
+			
+			// Register with control plane
+			metadata := map[string]string{
+				"config_name": pipelineConfig.Name,
+				"version":     Version,
+			}
+			
+			// Add source type to metadata
+			if pipelineConfig.Source.Type != "" {
+				metadata["source_type"] = pipelineConfig.Source.Type
+			}
+			
+			if err := controlClient.Register(ctx, metadata); err != nil {
+				log.Printf("Failed to register with control plane: %v", err)
+			} else {
+				log.Printf("Registered pipeline %s with control plane", pipelineID)
+				// Start heartbeat loop with configurable interval
+				heartbeatInterval := getHeartbeatInterval()
+				log.Printf("Starting heartbeat with interval: %s", heartbeatInterval)
+				go controlClient.StartHeartbeat(ctx, heartbeatInterval)
+				defer controlClient.Close()
+			}
+		}
+	}
+	
 	// Create source
 	source, err := createSourceAdapter(pipelineConfig.Source)
 	if err != nil {

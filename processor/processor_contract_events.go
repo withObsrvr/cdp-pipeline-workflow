@@ -12,6 +12,7 @@ import (
 	"github.com/stellar/go/ingest"
 	"github.com/stellar/go/strkey"
 	"github.com/stellar/go/xdr"
+	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/control"
 )
 
 // ContractEvent represents an event emitted by a contract
@@ -39,17 +40,19 @@ type DiagnosticData struct {
 	InSuccessfulContractCall bool            `json:"in_successful_contract_call"`
 }
 
+// ContractEventProcessor uses the SDK's helper methods for V3/V4 compatibility
 type ContractEventProcessor struct {
 	processors        []Processor
 	networkPassphrase string
 	mu                sync.RWMutex
 	stats             struct {
-		ProcessedLedgers  uint32
-		EventsFound       uint64
-		SuccessfulEvents  uint64
-		FailedEvents      uint64
-		LastLedger        uint32
-		LastProcessedTime time.Time
+		ProcessedLedgers      uint32
+		EventsFound           uint64
+		SuccessfulEvents      uint64
+		FailedEvents          uint64
+		SkippedTransactions   uint64
+		LastLedger            uint32
+		LastProcessedTime     time.Time
 	}
 }
 
@@ -84,6 +87,7 @@ func (p *ContractEventProcessor) Process(ctx context.Context, msg Message) error
 	defer txReader.Close()
 
 	// Process each transaction
+	eventsInLedger := 0
 	for {
 		tx, err := txReader.Read()
 		if err == io.EOF {
@@ -93,29 +97,71 @@ func (p *ContractEventProcessor) Process(ctx context.Context, msg Message) error
 			return fmt.Errorf("error reading transaction: %w", err)
 		}
 
-		// Get diagnostic events from transaction
-		diagnosticEvents, err := tx.GetDiagnosticEvents()
-		if err != nil {
-			log.Printf("Error getting diagnostic events: %v", err)
+		// Skip failed transactions
+		if !tx.Result.Successful() {
+			p.mu.Lock()
+			p.stats.SkippedTransactions++
+			p.mu.Unlock()
 			continue
 		}
 
-		// Process events
-		for opIdx, events := range filterContractEvents(diagnosticEvents) {
-			for eventIdx, event := range events {
-				contractEvent, err := p.processContractEvent(tx, opIdx, eventIdx, event, ledgerCloseMeta)
+		// Use the SDK's helper method to get all transaction events
+		// This abstracts away V3 vs V4 differences
+		txEvents, err := tx.GetTransactionEvents()
+		if err != nil {
+			// Not a Soroban transaction or no events
+			continue
+		}
+
+		// Process contract events from all operations
+		for opIndex, opEvents := range txEvents.OperationEvents {
+			for eventIdx, event := range opEvents {
+				// Only process contract events (not system events)
+				if event.Type != xdr.ContractEventTypeContract {
+					continue
+				}
+
+				eventsInLedger++
+				contractEvent, err := p.processContractEvent(tx, opIndex, eventIdx, event, ledgerCloseMeta)
 				if err != nil {
 					log.Printf("Error processing contract event: %v", err)
 					continue
 				}
 
 				if contractEvent != nil {
+					log.Printf("Successfully processed contract event from contract %s (op %d, event %d)", 
+						contractEvent.ContractID, opIndex, eventIdx)
 					if err := p.forwardToProcessors(ctx, contractEvent); err != nil {
 						log.Printf("Error forwarding event: %v", err)
 					}
 				}
 			}
 		}
+
+		// Also process transaction-level events if available (V4 only)
+		for eventIdx, txEvent := range txEvents.TransactionEvents {
+			if txEvent.Event.Type == xdr.ContractEventTypeContract {
+				eventsInLedger++
+				// Transaction-level events don't have a specific operation index
+				contractEvent, err := p.processContractEvent(tx, -1, eventIdx, txEvent.Event, ledgerCloseMeta)
+				if err != nil {
+					log.Printf("Error processing transaction-level event: %v", err)
+					continue
+				}
+
+				if contractEvent != nil {
+					log.Printf("Successfully processed transaction-level event from contract %s", 
+						contractEvent.ContractID)
+					if err := p.forwardToProcessors(ctx, contractEvent); err != nil {
+						log.Printf("Error forwarding event: %v", err)
+					}
+				}
+			}
+		}
+	}
+
+	if eventsInLedger > 0 {
+		log.Printf("Found %d contract events in ledger %d", eventsInLedger, sequence)
 	}
 
 	p.mu.Lock()
@@ -127,38 +173,10 @@ func (p *ContractEventProcessor) Process(ctx context.Context, msg Message) error
 	return nil
 }
 
-// filterContractEvents groups contract events by operation index
-func filterContractEvents(diagnosticEvents []xdr.DiagnosticEvent) map[int][]xdr.ContractEvent {
-	events := make(map[int][]xdr.ContractEvent)
-
-	for _, diagEvent := range diagnosticEvents {
-		if !diagEvent.InSuccessfulContractCall || diagEvent.Event.Type != xdr.ContractEventTypeContract {
-			continue
-		}
-
-		// Use the operation index as the key
-		opIndex := 0 // Default to 0 if no specific index available
-		events[opIndex] = append(events[opIndex], diagEvent.Event)
-	}
-	return events
-}
-
-// DetectEventType detects the event type from the first topic if available
-func DetectEventType(topics []xdr.ScVal) string {
-	if len(topics) > 0 {
-		eventName, err := ConvertScValToJSON(topics[0])
-		if err == nil {
-			if str, ok := eventName.(string); ok {
-				return str
-			}
-		}
-	}
-	return "unknown"
-}
-
 func (p *ContractEventProcessor) processContractEvent(
 	tx ingest.LedgerTransaction,
-	opIndex, eventIndex int,
+	opIndex int,
+	eventIndex int,
 	event xdr.ContractEvent,
 	meta xdr.LedgerCloseMeta,
 ) (*ContractEvent, error) {
@@ -221,7 +239,7 @@ func (p *ContractEventProcessor) processContractEvent(
 		ContractID:        contractID,
 		Type:              string(event.Type),
 		EventType:         eventType,
-		Topic:             event.Body.V0.Topics, // Use V0 topics from the event body
+		Topic:             event.Body.V0.Topics,
 		TopicDecoded:      topicDecoded,
 		Data:              data,
 		DataDecoded:       dataDecoded,
@@ -233,10 +251,9 @@ func (p *ContractEventProcessor) processContractEvent(
 
 	// Add diagnostic events if available
 	diagnosticEvents, err := tx.GetDiagnosticEvents()
-	if err == nil {
+	if err == nil && len(diagnosticEvents) > 0 {
 		var diagnosticData []DiagnosticData
 		for _, diagEvent := range diagnosticEvents {
-			// Since we don't have ExtensionPoint, we'll use operation index directly
 			if diagEvent.Event.Type == xdr.ContractEventTypeContract {
 				eventData, err := json.Marshal(diagEvent.Event)
 				if err != nil {
@@ -252,6 +269,36 @@ func (p *ContractEventProcessor) processContractEvent(
 	}
 
 	return contractEvent, nil
+}
+
+// DetectEventType attempts to determine the event type from topics
+func DetectEventType(topics []xdr.ScVal) string {
+	// Check topics for common event type patterns
+	for _, topic := range topics {
+		if topic.Type == xdr.ScValTypeScvSymbol {
+			sym := string(topic.MustSym())
+			// Common event types
+			switch sym {
+			case "transfer", "Transfer":
+				return "transfer"
+			case "mint", "Mint":
+				return "mint"
+			case "burn", "Burn":
+				return "burn"
+			case "swap", "Swap":
+				return "swap"
+			case "sync", "Sync":
+				return "sync"
+			case "deposit", "Deposit":
+				return "deposit"
+			case "withdraw", "Withdraw":
+				return "withdraw"
+			case "new_pair", "NewPair":
+				return "new_pair"
+			}
+		}
+	}
+	return "unknown"
 }
 
 func (p *ContractEventProcessor) forwardToProcessors(ctx context.Context, event *ContractEvent) error {
@@ -270,14 +317,35 @@ func (p *ContractEventProcessor) forwardToProcessors(ctx context.Context, event 
 
 // GetStats returns the current processing statistics
 func (p *ContractEventProcessor) GetStats() struct {
-	ProcessedLedgers  uint32
-	EventsFound       uint64
-	SuccessfulEvents  uint64
-	FailedEvents      uint64
-	LastLedger        uint32
-	LastProcessedTime time.Time
+	ProcessedLedgers    uint32
+	EventsFound         uint64
+	SuccessfulEvents    uint64
+	FailedEvents        uint64
+	SkippedTransactions uint64
+	LastLedger          uint32
+	LastProcessedTime   time.Time
 } {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.stats
+}
+
+// GetStats implements the control.StatsProvider interface
+func (p *ContractEventProcessor) GetStatsForControl() control.ComponentStats {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	
+	return control.ComponentStats{
+		ComponentType: "processor",
+		ComponentName: "ContractEventProcessor",
+		Stats: map[string]interface{}{
+			"processed_ledgers":   p.stats.ProcessedLedgers,
+			"events_found":        p.stats.EventsFound,
+			"successful_events":   p.stats.SuccessfulEvents,
+			"failed_events":       p.stats.FailedEvents,
+			"last_ledger":         p.stats.LastLedger,
+			"last_processed_time": p.stats.LastProcessedTime.Unix(),
+		},
+		LastUpdated: time.Now(),
+	}
 }
