@@ -1,0 +1,53 @@
+# Build stage
+FROM golang:1.23-bookworm AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    make \
+    libzmq3-dev \
+    libczmq-dev \
+    libsodium-dev \
+    pkg-config \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN CGO_ENABLED=1 go build -o cdp-pipeline-workflow
+
+# Final stage - using debian slim for glibc compatibility
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libzmq5 \
+    libczmq4 \
+    libsodium23 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the binary from builder
+COPY --from=builder /build/cdp-pipeline-workflow /app/
+
+# Create necessary directories
+RUN mkdir -p /app/logs /app/data /app/tmp
+
+# Set SSL certificate path
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+# Set the entrypoint
+CMD ["/app/cdp-pipeline-workflow"]

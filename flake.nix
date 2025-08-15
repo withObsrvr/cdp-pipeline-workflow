@@ -56,7 +56,7 @@
 
           # IMPORTANT: Update this hash after first build attempt
           # Run: nix build 2>&1 | grep "got:" | awk '{print $2}'
-          vendorHash = "sha256-VslXeonRVn/+QKlIz/sT5YCq2dZz1UtQGgDHD7d4C+E=";
+          vendorHash = "sha256-yC3AVXHmkuqdsV5qK2oRyByUnmTF7jCkyHg6qbiJHWU=";
 
           nativeBuildInputs = systemDeps;
           buildInputs = systemDeps;
@@ -95,7 +95,7 @@
         pushToProd = pkgs.writeShellScriptBin "push-to-dockerhub-prod" ''
           set -e
           
-          IMAGE_NAME="flowctl"
+          IMAGE_NAME="obsrvr-flow-pipeline"
           TAG="''${1:-latest}"
           USERNAME="''${2:-withobsrvr}"
           

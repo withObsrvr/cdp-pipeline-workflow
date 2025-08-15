@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	
@@ -27,7 +28,7 @@ func CreateSourceAdapterFunc(sourceConfig SourceConfig) (SourceAdapter, error) {
 	case "GCSBufferedStorageSourceAdapter":
 		return NewGCSBufferedStorageSourceAdapter(sourceConfig.Config)
 	case "FSBufferedStorageSourceAdapter":
-		return NewFSBufferedStorageSourceAdapter(sourceConfig.Config)
+		return nil, errors.New("FSBufferedStorageSourceAdapter is deprecated and no longer supported")
 	case "S3BufferedStorageSourceAdapter":
 		// Try enhanced version first, fall back to legacy
 		if adapter, err := NewS3BufferedStorageSourceAdapterEnhanced(sourceConfig.Config); err == nil {

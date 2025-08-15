@@ -231,15 +231,28 @@ func (adapter *BufferedStorageSourceAdapterEnhanced) processLedgerRange(ctx cont
 	}
 
 	log.Printf("Processing ledger range: %v", ledgerRange)
+	log.Printf("DataStore config: Type=%s, Params=%+v", dataStoreConfig.Type, dataStoreConfig.Params)
+	log.Printf("Schema: LedgersPerFile=%d, FilesPerPartition=%d", schema.LedgersPerFile, schema.FilesPerPartition)
 
 	var processedLedgers uint32
 	lastLogTime := time.Now()
 
-	err := cdp.ApplyLedgerMetadata(
+	log.Printf("Calling ApplyLedgerMetadata...")
+	log.Printf("Creating datastore with config: %+v", dataStoreConfig)
+	
+	// Try to create the datastore first to check for errors
+	store, err := datastore.NewDataStore(ctx, dataStoreConfig)
+	if err != nil {
+		return errors.Wrap(err, "failed to create datastore")
+	}
+	log.Printf("DataStore created successfully: %T", store)
+	
+	err = cdp.ApplyLedgerMetadata(
 		ledgerRange,
 		publisherConfig,
 		ctx,
 		func(lcm xdr.LedgerCloseMeta) error {
+			log.Printf("Processing ledger %d", lcm.LedgerSequence())
 			currentTime := time.Now()
 
 			if err := adapter.processLedger(ctx, lcm); err != nil {
@@ -285,6 +298,7 @@ func (adapter *BufferedStorageSourceAdapterEnhanced) processLedgerRange(ctx cont
 		},
 	)
 	
+	log.Printf("ApplyLedgerMetadata returned: %v", err)
 
 	// Handle the end-of-phase EOF specifically for rolling windows
 	if err == io.EOF && reachedEndLedger {
