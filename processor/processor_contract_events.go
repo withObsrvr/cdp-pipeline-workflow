@@ -231,13 +231,26 @@ func (p *ContractEventProcessor) processContractEvent(
 	// Detect event type from topics
 	eventType := DetectEventType(event.Body.V0.Topics)
 
+	// Convert event type to readable string
+	var eventTypeStr string
+	switch event.Type {
+	case xdr.ContractEventTypeContract:
+		eventTypeStr = "contract"
+	case xdr.ContractEventTypeSystem:
+		eventTypeStr = "system"
+	case xdr.ContractEventTypeDiagnostic:
+		eventTypeStr = "diagnostic"
+	default:
+		eventTypeStr = fmt.Sprintf("unknown_%d", event.Type)
+	}
+
 	// Create contract event record
 	contractEvent := &ContractEvent{
 		Timestamp:         time.Unix(int64(meta.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime), 0),
 		LedgerSequence:    meta.LedgerSequence(),
 		TransactionHash:   tx.Result.TransactionHash.HexString(),
 		ContractID:        contractID,
-		Type:              string(event.Type),
+		Type:              eventTypeStr,
 		EventType:         eventType,
 		Topic:             event.Body.V0.Topics,
 		TopicDecoded:      topicDecoded,
@@ -255,7 +268,9 @@ func (p *ContractEventProcessor) processContractEvent(
 		var diagnosticData []DiagnosticData
 		for _, diagEvent := range diagnosticEvents {
 			if diagEvent.Event.Type == xdr.ContractEventTypeContract {
-				eventData, err := json.Marshal(diagEvent.Event)
+				// Decode the diagnostic event similar to main event
+				decodedDiagEvent := p.decodeContractEvent(diagEvent.Event)
+				eventData, err := json.Marshal(decodedDiagEvent)
 				if err != nil {
 					continue
 				}
@@ -295,7 +310,31 @@ func DetectEventType(topics []xdr.ScVal) string {
 				return "withdraw"
 			case "new_pair", "NewPair":
 				return "new_pair"
+			case "fee", "Fee":
+				return "fee"
+			case "approval", "Approval":
+				return "approval"
+			case "revoke", "Revoke":
+				return "revoke"
+			case "claim", "Claim":
+				return "claim"
+			case "stake", "Stake":
+				return "stake"
+			case "unstake", "Unstake":
+				return "unstake"
+			case "reward", "Reward":
+				return "reward"
+			case "liquidity", "Liquidity":
+				return "liquidity"
+			case "price_update", "PriceUpdate":
+				return "price_update"
 			}
+		}
+	}
+	// If no recognized event type found in topics, return the first symbol topic as event type
+	for _, topic := range topics {
+		if topic.Type == xdr.ScValTypeScvSymbol {
+			return string(topic.MustSym())
 		}
 	}
 	return "unknown"
@@ -328,6 +367,58 @@ func (p *ContractEventProcessor) GetStats() struct {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.stats
+}
+
+// decodeContractEvent decodes a contract event into a more readable format
+func (p *ContractEventProcessor) decodeContractEvent(event xdr.ContractEvent) map[string]interface{} {
+	// Extract contract ID
+	contractID, _ := strkey.Encode(strkey.VersionByteContract, event.ContractId[:])
+	
+	// Convert event type to readable string
+	var eventTypeStr string
+	switch event.Type {
+	case xdr.ContractEventTypeContract:
+		eventTypeStr = "contract"
+	case xdr.ContractEventTypeSystem:
+		eventTypeStr = "system"
+	case xdr.ContractEventTypeDiagnostic:
+		eventTypeStr = "diagnostic"
+	default:
+		eventTypeStr = fmt.Sprintf("unknown_%d", event.Type)
+	}
+	
+	// Decode topics
+	var topicDecoded []interface{}
+	for _, topic := range event.Body.V0.Topics {
+		decoded, err := ConvertScValToJSON(topic)
+		if err != nil {
+			decoded = nil
+		}
+		topicDecoded = append(topicDecoded, decoded)
+	}
+	
+	// Decode event data
+	var dataDecoded interface{}
+	eventData := event.Body.V0.Data
+	if eventData.Type != xdr.ScValTypeScvVoid {
+		decoded, err := ConvertScValToJSON(eventData)
+		if err != nil {
+			dataDecoded = nil
+		} else {
+			dataDecoded = decoded
+		}
+	}
+	
+	// Detect event type from topics
+	eventType := DetectEventType(event.Body.V0.Topics)
+	
+	return map[string]interface{}{
+		"contract_id":   contractID,
+		"type":          eventTypeStr,
+		"event_type":    eventType,
+		"topics":        topicDecoded,
+		"data":          dataDecoded,
+	}
 }
 
 // GetStats implements the control.StatsProvider interface
