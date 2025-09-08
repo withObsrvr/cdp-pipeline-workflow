@@ -180,24 +180,24 @@ func AssetFromContractData(ledgerEntry xdr.LedgerEntry, passphrase string) *xdr.
 }
 
 // Helper functions for balance extraction
-func ContractBalanceFromContractData(ledgerEntry xdr.LedgerEntry, passphrase string) ([32]byte, *big.Int, bool) {
+func ContractBalanceFromContractData(ledgerEntry xdr.LedgerEntry, passphrase string) (*xdr.ScAddress, *big.Int, bool) {
 	contractData, ok := ledgerEntry.Data.GetContractData()
 	if !ok {
-		return [32]byte{}, nil, false
+		return nil, nil, false
 	}
 
 	_, err := xdr.MustNewNativeAsset().ContractID(passphrase)
 	if err != nil {
-		return [32]byte{}, nil, false
+		return nil, nil, false
 	}
 
 	if contractData.Contract.ContractId == nil {
-		return [32]byte{}, nil, false
+		return nil, nil, false
 	}
 
 	keyEnumVecPtr, ok := contractData.Key.GetVec()
 	if !ok || keyEnumVecPtr == nil {
-		return [32]byte{}, nil, false
+		return nil, nil, false
 	}
 	keyEnumVec := *keyEnumVecPtr
 	if len(keyEnumVec) != 2 || !keyEnumVec[0].Equals(
@@ -206,52 +206,47 @@ func ContractBalanceFromContractData(ledgerEntry xdr.LedgerEntry, passphrase str
 			Sym:  &balanceMetadataSym,
 		},
 	) {
-		return [32]byte{}, nil, false
+		return nil, nil, false
 	}
 
 	scAddress, ok := keyEnumVec[1].GetAddress()
 	if !ok {
-		return [32]byte{}, nil, false
-	}
-
-	holder, ok := scAddress.GetContractId()
-	if !ok {
-		return [32]byte{}, nil, false
+		return nil, nil, false
 	}
 
 	balanceMapPtr, ok := contractData.Val.GetMap()
 	if !ok || balanceMapPtr == nil {
-		return [32]byte{}, nil, false
+		return nil, nil, false
 	}
 	balanceMap := *balanceMapPtr
 	if !ok || len(balanceMap) != 3 {
-		return [32]byte{}, nil, false
+		return nil, nil, false
 	}
 
 	var keySym xdr.ScSymbol
 	if keySym, ok = balanceMap[0].Key.GetSym(); !ok || keySym != "amount" {
-		return [32]byte{}, nil, false
+		return nil, nil, false
 	}
 	if keySym, ok = balanceMap[1].Key.GetSym(); !ok || keySym != "authorized" ||
 		!balanceMap[1].Val.IsBool() {
-		return [32]byte{}, nil, false
+		return nil, nil, false
 	}
 	if keySym, ok = balanceMap[2].Key.GetSym(); !ok || keySym != "clawback" ||
 		!balanceMap[2].Val.IsBool() {
-		return [32]byte{}, nil, false
+		return nil, nil, false
 	}
 	amount, ok := balanceMap[0].Val.GetI128()
 	if !ok {
-		return [32]byte{}, nil, false
+		return nil, nil, false
 	}
 
 	// amount cannot be negative
 	if int64(amount.Hi) < 0 {
-		return [32]byte{}, nil, false
+		return nil, nil, false
 	}
 	amt := new(big.Int).Lsh(new(big.Int).SetInt64(int64(amount.Hi)), 64)
 	amt.Add(amt, new(big.Int).SetUint64(uint64(amount.Lo)))
-	return holder, amt, true
+	return &scAddress, amt, true
 }
 
 func NewContractLedgerReader(config map[string]interface{}) (*ContractLedgerReader, error) {
@@ -364,7 +359,7 @@ func (p *ContractLedgerReader) GetStats() struct {
 
 // Add these type definitions after the existing var block
 type AssetFromContractDataFunc func(ledgerEntry xdr.LedgerEntry, passphrase string) *xdr.Asset
-type ContractBalanceFromContractDataFunc func(ledgerEntry xdr.LedgerEntry, passphrase string) ([32]byte, *big.Int, bool)
+type ContractBalanceFromContractDataFunc func(ledgerEntry xdr.LedgerEntry, passphrase string) (*xdr.ScAddress, *big.Int, bool)
 
 type TransformContractDataStruct struct {
 	AssetFromContractData           AssetFromContractDataFunc
@@ -434,9 +429,46 @@ func (t *TransformContractDataStruct) TransformContractData(change xdr.LedgerEnt
 	var contractDataBalance string
 
 	dataBalanceHolder, dataBalance, _ := t.ContractBalanceFromContractData(ledgerEntry, passphrase)
-	if dataBalance != nil {
-		holderHashByte, _ := xdr.Hash(dataBalanceHolder).MarshalBinary()
-		contractDataBalanceHolder, _ = strkey.Encode(strkey.VersionByteContract, holderHashByte)
+	if dataBalance != nil && dataBalanceHolder != nil {
+		// Properly encode the balance holder address based on its type
+		switch dataBalanceHolder.Type {
+		case xdr.ScAddressTypeScAddressTypeAccount:
+			if dataBalanceHolder.AccountId != nil {
+				accountID := dataBalanceHolder.AccountId.Ed25519
+				contractDataBalanceHolder, _ = strkey.Encode(strkey.VersionByteAccountID, accountID[:])
+			}
+		case xdr.ScAddressTypeScAddressTypeContract:
+			if dataBalanceHolder.ContractId != nil {
+				contractID := *dataBalanceHolder.ContractId
+				contractDataBalanceHolder, _ = strkey.Encode(strkey.VersionByteContract, contractID[:])
+			}
+		case xdr.ScAddressTypeScAddressTypeMuxedAccount:
+			if dataBalanceHolder.MuxedAccount != nil {
+				// For muxed accounts, encode with Ed25519 + ID
+				muxedData := make([]byte, 40) // 32 bytes for Ed25519 + 8 bytes for ID
+				copy(muxedData[:32], dataBalanceHolder.MuxedAccount.Ed25519[:])
+				// Encode the ID as big-endian uint64
+				for i := 0; i < 8; i++ {
+					muxedData[32+i] = byte(dataBalanceHolder.MuxedAccount.Id >> (56 - 8*i))
+				}
+				contractDataBalanceHolder, _ = strkey.Encode(strkey.VersionByteMuxedAccount, muxedData)
+			}
+		case xdr.ScAddressTypeScAddressTypeClaimableBalance:
+			if dataBalanceHolder.ClaimableBalanceId != nil {
+				// ClaimableBalanceId is a union, currently only V0 is supported
+				var claimableBalanceHash [32]byte
+				switch dataBalanceHolder.ClaimableBalanceId.Type {
+				case xdr.ClaimableBalanceIdTypeClaimableBalanceIdTypeV0:
+					claimableBalanceHash = [32]byte(*dataBalanceHolder.ClaimableBalanceId.V0)
+				}
+				contractDataBalanceHolder, _ = strkey.Encode(strkey.VersionByteClaimableBalance, claimableBalanceHash[:])
+			}
+		case xdr.ScAddressTypeScAddressTypeLiquidityPool:
+			if dataBalanceHolder.LiquidityPoolId != nil {
+				poolID := [32]byte(*dataBalanceHolder.LiquidityPoolId)
+				contractDataBalanceHolder, _ = strkey.Encode(strkey.VersionByteLiquidityPool, poolID[:])
+			}
+		}
 		contractDataBalance = dataBalance.String()
 	}
 

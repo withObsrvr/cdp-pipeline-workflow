@@ -1,0 +1,75 @@
+# Wallet Backend Unified Pipeline Configuration - Testnet
+# This pipeline replicates Stellar's wallet-backend functionality in a single unified pipeline
+# for testnet with a small ledger range for testing
+
+pipelines:
+  WalletBackendUnifiedPubnet:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-pubnet-data/landing/ledgers/pubnet"
+        network: "mainnet"
+        buffer_size: 100
+        num_workers: 5
+        retry_limit: 3
+        retry_wait: 5
+        start_ledger: 58570100
+        end_ledger: 58570200
+        ledgers_per_file: 1
+        files_per_partition: 64000
+    
+    processors:
+      # 1. Extract raw XDR data first
+      - type: TransactionXDRExtractor
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+      
+      # 2. Extract state changes
+      - type: WalletBackend
+        config:
+          extract_contract_events: false  # Wallets typically don't need contract events
+          track_participants: true
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+      
+      # 3. Extract participants
+      - type: ParticipantExtractor
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+      
+      # 4. Generate effects
+      - type: StellarEffects
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+      
+      # 5. Extract current account states
+      - type: ProcessAccountDataFull
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+    
+    consumers:
+      # - type: LogDebug
+      #   config:
+      #     log_level: "info"
+      # Single consumer that handles all data types
+      - type: WalletBackendPostgreSQL
+        config:
+          host: "localhost"
+          port: 5432
+          database: "wallet_backend"
+          username: "postgres"
+          password: "password"
+          sslmode: "disable"  # For local testing
+          
+          # Performance tuning (smaller for testing)
+          buffer_size: 10000
+          flush_interval_ms: 2000
+          max_retries: 3
+          retry_delay_ms: 500
+          
+          # Connection pooling
+          max_open_conns: 5
+          max_idle_conns: 2
+          
+          # Schema options
+          create_schema: true
+          drop_existing: true  # Clean slate for testing

@@ -95,6 +95,8 @@ func CreateProcessorFunc(processorConfig processor.ProcessorConfig) (processor.P
 		return processor.NewContractCreationProcessor(processorConfig.Config)
 	case "ContractEvent":
 		return processor.NewContractEventProcessor(processorConfig.Config)
+	case "StellarContractEvent":
+		return processor.NewStellarContractEventProcessor(processorConfig.Config)
 	case "LatestLedger":
 		return processor.NewLatestLedgerProcessor(processorConfig.Config)
 	case "AccountTransaction":
@@ -127,6 +129,14 @@ func CreateProcessorFunc(processorConfig processor.ProcessorConfig) (processor.P
 		return processor.NewKaleProcessor(processorConfig.Config)
 	case "ContractData":
 		return processor.NewContractDataProcessor(processorConfig.Config)
+	case "TransactionXDRExtractor":
+		return processor.ProcessorTransactionXDRExtractor(processorConfig.Config), nil
+	case "WalletBackend":
+		return processor.ProcessorWalletBackend(processorConfig.Config), nil
+	case "ParticipantExtractor":
+		return processor.ProcessorParticipantExtractor(processorConfig.Config), nil
+	case "StellarEffects":
+		return processor.ProcessorStellarEffects(processorConfig.Config), nil
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}
@@ -200,6 +210,10 @@ func CreateConsumerFunc(consumerConfig consumer.ConsumerConfig) (processor.Proce
 		return consumer.NewSaveToParquet(consumerConfig.Config)
 	case "DebugLogger":
 		return consumer.NewDebugLogger(consumerConfig.Config)
+	case "LogDebug":
+		return consumer.NewLogDebug(consumerConfig.Config)
+	case "WalletBackendPostgreSQL":
+		return consumer.ConsumerWalletBackendPostgreSQL(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}

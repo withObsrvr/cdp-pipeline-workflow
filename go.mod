@@ -28,7 +28,7 @@ require (
 	github.com/slack-go/slack v0.15.0
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.20.1
-	github.com/stellar/go v0.0.0-20250814084516-daf4dd26824d
+	github.com/stellar/go v0.0.0-20250822224526-9397ce4b6da2
 	github.com/stretchr/testify v1.10.0
 	github.com/tidwall/gjson v1.14.2
 	github.com/withobsrvr/flowctl v0.0.2

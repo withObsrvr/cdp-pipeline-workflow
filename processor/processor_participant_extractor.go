@@ -1,0 +1,389 @@
+package processor
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/strkey"
+	"github.com/stellar/go/support/log"
+	"github.com/stellar/go/xdr"
+)
+
+// ParticipantOutput represents all participants in a transaction
+type ParticipantOutput struct {
+	LedgerSequence   uint32   `json:"ledger_sequence"`
+	TransactionHash  string   `json:"transaction_hash"`
+	TransactionIndex int32    `json:"transaction_index"`
+	Timestamp        int64    `json:"timestamp"`
+	Participants     []string `json:"participants"`
+	// Detailed participant roles
+	SourceAccounts      []string `json:"source_accounts"`
+	DestinationAccounts []string `json:"destination_accounts"`
+	SignerAccounts      []string `json:"signer_accounts"`
+	TrustlineAccounts   []string `json:"trustline_accounts"`
+	OfferAccounts       []string `json:"offer_accounts"`
+	ContractAccounts    []string `json:"contract_accounts,omitempty"`
+}
+
+// ParticipantExtractor identifies all accounts involved in a transaction
+type ParticipantExtractor struct {
+	subscribers       []Processor
+	networkPassphrase string
+}
+
+// ProcessorParticipantExtractor creates a new participant extractor processor
+func ProcessorParticipantExtractor(config map[string]interface{}) Processor {
+	networkPassphrase := "Test SDF Network ; September 2015" // Default to testnet
+	if np, ok := config["network_passphrase"].(string); ok {
+		networkPassphrase = np
+	}
+	
+	return &ParticipantExtractor{
+		subscribers:       []Processor{},
+		networkPassphrase: networkPassphrase,
+	}
+}
+
+// Subscribe sets the next processor in the chain
+func (p *ParticipantExtractor) Subscribe(proc Processor) {
+	p.subscribers = append(p.subscribers, proc)
+}
+
+// Process extracts all participants from a transaction
+func (p *ParticipantExtractor) Process(ctx context.Context, msg Message) error {
+	// Extract LedgerCloseMeta
+	ledgerCloseMeta, ok := msg.Payload.(*xdr.LedgerCloseMeta)
+	if !ok {
+		// Check if it's already a pass-through message
+		if lcm, ok := msg.Payload.(xdr.LedgerCloseMeta); ok {
+			ledgerCloseMeta = &lcm
+		} else {
+			return fmt.Errorf("expected LedgerCloseMeta, got %T", msg.Payload)
+		}
+	}
+
+	// Process all transactions in the ledger
+	outputs, err := p.processLedger(ctx, ledgerCloseMeta)
+	if err != nil {
+		return fmt.Errorf("failed to process ledger: %w", err)
+	}
+
+	// Create new message with original payload and updated metadata
+	outputMsg := Message{
+		Payload:  ledgerCloseMeta,
+		Metadata: msg.Metadata,
+	}
+
+	// Initialize metadata if nil
+	if outputMsg.Metadata == nil {
+		outputMsg.Metadata = make(map[string]interface{})
+	}
+
+	// Add participants to metadata
+	outputMsg.Metadata["participants"] = outputs
+	outputMsg.Metadata["processor_participant_extractor"] = true
+
+	// Forward to subscribers
+	for _, subscriber := range p.subscribers {
+		if err := subscriber.Process(ctx, outputMsg); err != nil {
+			log.Errorf("Error in subscriber processing: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// processLedger processes all transactions in a ledger
+func (p *ParticipantExtractor) processLedger(ctx context.Context, ledgerCloseMeta *xdr.LedgerCloseMeta) ([]ParticipantOutput, error) {
+	ledgerTxReader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(p.networkPassphrase, *ledgerCloseMeta)
+	if err != nil {
+		return nil, fmt.Errorf("error creating ledger transaction reader: %w", err)
+	}
+	defer ledgerTxReader.Close()
+
+	closeTime := uint64(ledgerCloseMeta.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime)
+	timestamp := time.Unix(int64(closeTime), 0).UTC()
+
+	var outputs []ParticipantOutput
+
+	// Process each transaction in the ledger
+	for {
+		tx, err := ledgerTxReader.Read()
+		if err != nil {
+			if err.Error() == "EOF" {
+				break
+			}
+			log.Errorf("Error reading transaction: %v", err)
+			continue
+		}
+
+		if !tx.Result.Successful() {
+			continue // Skip failed transactions
+		}
+
+		output := p.extractTransactionParticipants(&tx, ledgerCloseMeta, timestamp)
+		outputs = append(outputs, *output)
+	}
+
+	return outputs, nil
+}
+
+// extractTransactionParticipants extracts all participants from a single transaction
+func (p *ParticipantExtractor) extractTransactionParticipants(tx *ingest.LedgerTransaction, ledgerCloseMeta *xdr.LedgerCloseMeta, timestamp time.Time) *ParticipantOutput {
+	output := &ParticipantOutput{
+		LedgerSequence:      uint32(ledgerCloseMeta.LedgerSequence()),
+		TransactionHash:     tx.Result.TransactionHash.HexString(),
+		TransactionIndex:    int32(tx.Index),
+		Timestamp:           timestamp.Unix(),
+		Participants:        []string{},
+		SourceAccounts:      []string{},
+		DestinationAccounts: []string{},
+		SignerAccounts:      []string{},
+		TrustlineAccounts:   []string{},
+		OfferAccounts:       []string{},
+		ContractAccounts:    []string{},
+	}
+
+	// Track unique participants
+	participantSet := make(map[string]bool)
+	
+	// Extract transaction source account
+	txSource := tx.Envelope.SourceAccount()
+	txSourceAddr := txSource.ToAccountId().Address()
+	participantSet[txSourceAddr] = true
+	output.SourceAccounts = append(output.SourceAccounts, txSourceAddr)
+	
+	// Process each operation
+	for _, op := range tx.Envelope.Operations() {
+		// Get operation source account (if different from transaction source)
+		if op.SourceAccount != nil {
+			opSource := *op.SourceAccount
+			opSourceAddr := opSource.ToAccountId().Address()
+			if !participantSet[opSourceAddr] {
+				participantSet[opSourceAddr] = true
+				output.SourceAccounts = append(output.SourceAccounts, opSourceAddr)
+			}
+		}
+
+		// Extract participants based on operation type
+		p.extractOperationParticipants(op, output, participantSet, txSourceAddr)
+	}
+
+	// Extract participants from metadata
+	p.extractMetadataParticipants(tx, participantSet, output)
+
+	// Convert participant set to slice
+	for participant := range participantSet {
+		output.Participants = append(output.Participants, participant)
+	}
+
+	return output
+}
+
+// extractOperationParticipants extracts participants from a single operation
+func (p *ParticipantExtractor) extractOperationParticipants(op xdr.Operation, output *ParticipantOutput, participantSet map[string]bool, txSourceAddr string) {
+	switch op.Body.Type {
+	case xdr.OperationTypeCreateAccount:
+		if create, ok := op.Body.GetCreateAccountOp(); ok {
+			destAddr := create.Destination.Address()
+			participantSet[destAddr] = true
+			output.DestinationAccounts = append(output.DestinationAccounts, destAddr)
+		}
+
+	case xdr.OperationTypePayment:
+		if payment, ok := op.Body.GetPaymentOp(); ok {
+			destAddr := payment.Destination.ToAccountId().Address()
+			participantSet[destAddr] = true
+			output.DestinationAccounts = append(output.DestinationAccounts, destAddr)
+		}
+
+	case xdr.OperationTypePathPaymentStrictReceive:
+		if pathPayment, ok := op.Body.GetPathPaymentStrictReceiveOp(); ok {
+			destAddr := pathPayment.Destination.ToAccountId().Address()
+			participantSet[destAddr] = true
+			output.DestinationAccounts = append(output.DestinationAccounts, destAddr)
+		}
+
+	case xdr.OperationTypePathPaymentStrictSend:
+		if pathPayment, ok := op.Body.GetPathPaymentStrictSendOp(); ok {
+			destAddr := pathPayment.Destination.ToAccountId().Address()
+			participantSet[destAddr] = true
+			output.DestinationAccounts = append(output.DestinationAccounts, destAddr)
+		}
+
+	case xdr.OperationTypeManageSellOffer, xdr.OperationTypeManageBuyOffer:
+		// The source account is the offer creator
+		if op.SourceAccount != nil {
+			offerAddr := (*op.SourceAccount).ToAccountId().Address()
+			output.OfferAccounts = append(output.OfferAccounts, offerAddr)
+		} else {
+			output.OfferAccounts = append(output.OfferAccounts, txSourceAddr)
+		}
+
+	case xdr.OperationTypeCreatePassiveSellOffer:
+		// The source account is the offer creator
+		if op.SourceAccount != nil {
+			offerAddr := (*op.SourceAccount).ToAccountId().Address()
+			output.OfferAccounts = append(output.OfferAccounts, offerAddr)
+		} else {
+			output.OfferAccounts = append(output.OfferAccounts, txSourceAddr)
+		}
+
+	case xdr.OperationTypeSetOptions:
+		// Check for signer changes
+		if setOpts, ok := op.Body.GetSetOptionsOp(); ok {
+			if setOpts.Signer != nil && setOpts.Signer.Key.Type == xdr.SignerKeyTypeSignerKeyTypeEd25519 {
+				if ed25519, ok := setOpts.Signer.Key.GetEd25519(); ok {
+					signerAddr := strkey.MustEncode(strkey.VersionByteAccountID, ed25519[:])
+					if !participantSet[signerAddr] {
+						participantSet[signerAddr] = true
+						output.SignerAccounts = append(output.SignerAccounts, signerAddr)
+					}
+				}
+			}
+		}
+
+	case xdr.OperationTypeChangeTrust:
+		// The source account is establishing trust
+		if op.SourceAccount != nil {
+			trustAddr := (*op.SourceAccount).ToAccountId().Address()
+			output.TrustlineAccounts = append(output.TrustlineAccounts, trustAddr)
+		} else {
+			output.TrustlineAccounts = append(output.TrustlineAccounts, txSourceAddr)
+		}
+
+	case xdr.OperationTypeAllowTrust:
+		if allowTrust, ok := op.Body.GetAllowTrustOp(); ok {
+			trustorAddr := allowTrust.Trustor.Address()
+			participantSet[trustorAddr] = true
+			output.TrustlineAccounts = append(output.TrustlineAccounts, trustorAddr)
+		}
+
+	case xdr.OperationTypeAccountMerge:
+		// AccountMerge destination is stored as MuxedAccount in body
+		if dest := op.Body.Destination; dest != nil {
+			destAddr := dest.ToAccountId().Address()
+			participantSet[destAddr] = true
+			output.DestinationAccounts = append(output.DestinationAccounts, destAddr)
+		}
+
+	case xdr.OperationTypeClaimClaimableBalance:
+		// The source account is the claimant
+		if op.SourceAccount != nil {
+			claimantAddr := (*op.SourceAccount).ToAccountId().Address()
+			output.DestinationAccounts = append(output.DestinationAccounts, claimantAddr)
+		} else {
+			output.DestinationAccounts = append(output.DestinationAccounts, txSourceAddr)
+		}
+
+	case xdr.OperationTypeBeginSponsoringFutureReserves:
+		if sponsor, ok := op.Body.GetBeginSponsoringFutureReservesOp(); ok {
+			sponsoredAddr := sponsor.SponsoredId.Address()
+			participantSet[sponsoredAddr] = true
+			output.DestinationAccounts = append(output.DestinationAccounts, sponsoredAddr)
+		}
+
+	case xdr.OperationTypeClawback:
+		if clawback, ok := op.Body.GetClawbackOp(); ok {
+			fromAddr := clawback.From.ToAccountId().Address()
+			participantSet[fromAddr] = true
+			output.SourceAccounts = append(output.SourceAccounts, fromAddr)
+		}
+
+	case xdr.OperationTypeClawbackClaimableBalance:
+		// Balance ID contains the claimants, but we'd need to look them up
+		// from the ledger state
+
+	case xdr.OperationTypeInvokeHostFunction:
+		// Extract contract addresses from Soroban operations
+		if invoke, ok := op.Body.GetInvokeHostFunctionOp(); ok {
+			if invoke.HostFunction.Type == xdr.HostFunctionTypeHostFunctionTypeInvokeContract {
+				if args, ok := invoke.HostFunction.GetInvokeContract(); ok {
+					// Contract addresses would need to be extracted from the SCAddress
+					// This requires more complex handling of Soroban addresses
+					_ = args
+				}
+			}
+		}
+	}
+}
+
+// extractMetadataParticipants extracts participants from transaction metadata
+func (p *ParticipantExtractor) extractMetadataParticipants(tx *ingest.LedgerTransaction, participantSet map[string]bool, output *ParticipantOutput) {
+	// Extract changes from transaction metadata
+	changes, err := tx.GetChanges()
+	if err != nil {
+		return
+	}
+
+	for _, change := range changes {
+		switch change.Type {
+		case xdr.LedgerEntryTypeAccount:
+			if change.Post != nil {
+				if account, ok := change.Post.Data.GetAccount(); ok {
+					addr := account.AccountId.Address()
+					participantSet[addr] = true
+				}
+			}
+			if change.Pre != nil {
+				if account, ok := change.Pre.Data.GetAccount(); ok {
+					addr := account.AccountId.Address()
+					participantSet[addr] = true
+				}
+			}
+
+		case xdr.LedgerEntryTypeTrustline:
+			if change.Post != nil {
+				if trustline, ok := change.Post.Data.GetTrustLine(); ok {
+					addr := trustline.AccountId.Address()
+					participantSet[addr] = true
+				}
+			}
+			if change.Pre != nil {
+				if trustline, ok := change.Pre.Data.GetTrustLine(); ok {
+					addr := trustline.AccountId.Address()
+					participantSet[addr] = true
+				}
+			}
+
+		case xdr.LedgerEntryTypeOffer:
+			if change.Post != nil {
+				if offer, ok := change.Post.Data.GetOffer(); ok {
+					addr := offer.SellerId.Address()
+					participantSet[addr] = true
+				}
+			}
+			if change.Pre != nil {
+				if offer, ok := change.Pre.Data.GetOffer(); ok {
+					addr := offer.SellerId.Address()
+					participantSet[addr] = true
+				}
+			}
+
+		case xdr.LedgerEntryTypeClaimableBalance:
+			// Claimable balances have multiple claimants that could be extracted
+			if change.Post != nil {
+				if cb, ok := change.Post.Data.GetClaimableBalance(); ok {
+					for _, claimant := range cb.Claimants {
+						if claimant.Type == xdr.ClaimantTypeClaimantTypeV0 {
+							if v0, ok := claimant.GetV0(); ok {
+								addr := v0.Destination.Address()
+								participantSet[addr] = true
+							}
+						}
+					}
+				}
+			}
+
+		case xdr.LedgerEntryTypeLiquidityPool:
+			// Liquidity pools don't have direct account owners
+			// Participants would be tracked through deposit/withdraw operations
+
+		case xdr.LedgerEntryTypeContractData, xdr.LedgerEntryTypeContractCode:
+			// Contract data might reference accounts but would require
+			// parsing the contract-specific data structures
+		}
+	}
+}
