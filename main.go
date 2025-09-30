@@ -247,6 +247,10 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewContractLedgerReader(processorConfig.Config)
 	case "ContractInvocation":
 		return processor.NewContractInvocationProcessor(processorConfig.Config)
+	case "ContractInvocationV2":
+		return processor.NewContractInvocationProcessorV2(processorConfig.Config)
+	case "ContractInvocationV3":
+		return processor.NewContractInvocationProcessorV3(processorConfig.Config)
 	case "ContractCreation":
 		return processor.NewContractCreationProcessor(processorConfig.Config)
 	case "ContractEvent":
@@ -294,6 +298,10 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.ProcessorStellarEffects(processorConfig.Config), nil
 	case "TransactionXDRExtractor":
 		return processor.ProcessorTransactionXDRExtractor(processorConfig.Config), nil
+	case "Passthrough":
+		return processor.ProcessorPassthrough(processorConfig.Config), nil
+	case "LedgerToJSON":
+		return processor.ProcessorLedgerToJSON(processorConfig.Config), nil
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}
@@ -365,6 +373,10 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveContractDataToPostgreSQL(consumerConfig.Config)
 	case "SaveToParquet":
 		return consumer.NewSaveToParquet(consumerConfig.Config)
+	case "SaveToLedgerParquet":
+		return consumer.NewSaveToLedgerParquet(consumerConfig.Config)
+	case "SaveToDuckLake":
+		return consumer.NewSaveToDuckLake(consumerConfig.Config)
 	case "DebugLogger":
 		return consumer.NewDebugLogger(consumerConfig.Config)
 	case "BufferedPostgreSQL":

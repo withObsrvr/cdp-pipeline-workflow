@@ -1,0 +1,78 @@
+pipelines:
+  FullLedgerToParquet:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-pubnet-data/landing/ledgers/pubnet"
+        network: "mainnet"
+        num_workers: 20           # Increase workers for faster processing
+        retry_limit: 3
+        retry_wait: 5
+        start_ledger: 59076383   # Adjust start ledger as needed
+        end_ledger: 59076384      # Or specify end_ledger for bounded processing
+        continuous_mode: true     # Enable for continuous processing
+        ledgers_per_file: 1
+        files_per_partition: 64000
+    
+    processors:
+      - type: "Passthrough"
+        name: "ledger-passthrough"
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+          add_metadata: true      # Add minimal metadata for tracking
+          include_full_xdr: true  # Include base64 encoded XDR
+    
+    consumers:
+      - type: SaveToParquet
+        config:
+          # Storage configuration
+          storage_type: "FS"
+          local_path: "~/Documents/data/stellar-archive"
+          path_prefix: "silver/full_ledger"
+          
+          # File organization
+          partition_by: "ledger_sequence_day"  # Partition by ledger date
+          files_per_partition: 100             # Multiple files per partition
+          max_file_size_mb: 512               # Larger files for full ledger data
+          
+          # Compression and performance
+          compression: "zstd"                  # Better compression for XDR data
+          buffer_size: 1000                    # Buffer more records
+          write_batch_size: 500                # Write in larger batches
+          rotation_interval_minutes: 60        # Rotate hourly
+          
+          # Schema handling
+          schema_evolution_mode: "backward_compatible"  # Handle schema changes
+          include_metadata: true               # Include pipeline metadata
+          
+          # Parquet-specific settings
+          parquet_config:
+            row_group_size: 100               # Records per row group
+            page_size_kb: 1024               # 1MB pages for better compression
+            enable_dictionary: true           # Enable dictionary encoding
+            dictionary_page_size_kb: 4096    # 4MB dictionary pages
+            
+          # Optional: Custom schema for better parquet compatibility
+          # If not provided, will auto-generate from XDR structure
+          custom_schema:
+            fields:
+              - name: "ledger_sequence"
+                type: "int64"
+                source: "ledger_header.ledger_seq"
+              - name: "ledger_hash"
+                type: "string"
+                source: "ledger_header.hash"
+              - name: "close_time"
+                type: "timestamp"
+                source: "ledger_header.close_time"
+              - name: "transaction_count"
+                type: "int32"
+                source: "metadata.transaction_count"
+              - name: "ledger_xdr"
+                type: "binary"
+                source: "full_xdr"           # Store complete XDR as binary
+              
+          # Monitoring and debugging
+          debug: false
+          log_interval: 1000                  # Log progress every 1000 records
+          metrics_enabled: true               # Enable CloudWatch/Stackdriver metrics

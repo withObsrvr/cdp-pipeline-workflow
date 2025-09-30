@@ -1,0 +1,40 @@
+pipelines:
+  FullLedgerAWSParquet:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-pubnet-data/landing/ledgers/pubnet"
+        network: "mainnet"
+        num_workers: 20
+        retry_limit: 3
+        retry_wait: 5
+        start_ledger: 59076383    # Same ledger as AWS example
+        end_ledger: 59076384      # Process 2 ledgers
+        ledgers_per_file: 1
+        files_per_partition: 64000
+    
+    processors:
+      - type: "LedgerToJSON"
+        name: "ledger-to-json"
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+    
+    consumers:
+      - type: SaveToLedgerParquet
+        config:
+          # Output configuration
+          output_path: "~/Documents/data/stellar-archive/aws_compatible"
+          
+          # Buffer and file settings
+          buffer_size: 1                   # One ledger per file like AWS
+          max_file_size_mb: 1024           # 1GB max file size
+          
+          # Compression to match AWS
+          compression: "zstd"
+          
+          # Rotation settings
+          rotation_interval_minutes: 60
+          
+          # Debugging
+          debug: true
+          log_level: "debug"

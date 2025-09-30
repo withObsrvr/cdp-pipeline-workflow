@@ -1,0 +1,115 @@
+# Example: DuckLake with S3/R2/GCS storage
+# This shows how to use DuckLake with cloud object storage
+
+pipelines:
+  LedgerToS3DuckLake:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-pubnet-data/landing/ledgers/pubnet"
+        network: "mainnet"
+        num_workers: 20
+        retry_limit: 3
+        retry_wait: 5
+        start_ledger: 59076383
+        end_ledger: 59080000      # Larger range
+        ledgers_per_file: 1
+        files_per_partition: 64000
+    
+    processors:
+      - type: "LedgerToJSON"
+        name: "ledger-to-json"
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+    
+    consumers:
+      - type: SaveToDuckLake
+        config:
+          # DuckLake with S3 storage
+          catalog_path: "ducklake:s3://obsrvr-lake/catalogs/stellar.ducklake"
+          data_path: "s3://obsrvr-lake/ducklake/stellar"
+          
+          # Or with R2 (Cloudflare)
+          # catalog_path: "ducklake:r2://obsrvr-lake/catalogs/stellar.ducklake"
+          # data_path: "r2://obsrvr-lake/ducklake/stellar"
+          
+          # Or with GCS
+          # catalog_path: "ducklake:gs://obsrvr-lake/catalogs/stellar.ducklake"
+          # data_path: "gs://obsrvr-lake/ducklake/stellar"
+          
+          table_name: "ledgers"
+          schema_name: "public"
+          
+          # Larger batches for cloud storage
+          batch_size: 100
+          commit_interval_seconds: 60
+          
+          # S3 credentials (can also use environment variables)
+          # aws_access_key_id: "your-key"
+          # aws_secret_access_key: "your-secret"
+          # aws_region: "us-east-1"
+
+  # Multi-tenant example
+  CustomerALedgers:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "customer-a-bucket/ledgers"
+        network: "mainnet"
+        num_workers: 5
+        start_ledger: 59000000
+        end_ledger: 59100000
+    
+    processors:
+      - type: "LedgerToJSON"
+        name: "ledger-to-json"
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+    
+    consumers:
+      - type: SaveToDuckLake
+        config:
+          # Shared catalog with tenant-specific schema
+          catalog_path: "ducklake:s3://obsrvr-lake/catalogs/multi-tenant.ducklake"
+          data_path: "s3://obsrvr-lake/ducklake/tenants/customer-a"
+          
+          table_name: "ledgers"
+          schema_name: "customer_a"  # Separate schema per tenant
+          
+          batch_size: 50
+          commit_interval_seconds: 30
+
+  # Real-time pipeline with small batches
+  RealtimeLedgers:
+    source:
+      type: CaptiveCoreInboundAdapter
+      config:
+        core_binary_path: "/usr/local/bin/stellar-core"
+        core_config_path: "./stellar-core.cfg"
+        network_passphrase: "Public Global Stellar Network ; September 2015"
+        history_archive_urls:
+          - "https://history.stellar.org/prd/core-live/core_live_001"
+        start_ledger: "current"
+    
+    processors:
+      - type: "LedgerToJSON"
+        name: "ledger-to-json"
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+    
+    consumers:
+      - type: SaveToDuckLake
+        config:
+          catalog_path: "ducklake:realtime.ducklake"
+          data_path: "./realtime_ducklake"
+          
+          table_name: "ledgers_live"
+          schema_name: "main"
+          
+          # Small batches for low latency
+          batch_size: 1              # Commit every ledger
+          commit_interval_seconds: 5 # Or every 5 seconds
+          
+          # Enable auto-compaction for real-time data
+          auto_compact: true
+          compact_interval_minutes: 60

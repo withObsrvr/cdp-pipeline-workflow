@@ -53,6 +53,8 @@ result
 result-*
 .direnv/
 
+ai-docs/
+
 # Nix flake lock file (optional - can be committed for reproducibility)
 # flake.lock
 flowctl
