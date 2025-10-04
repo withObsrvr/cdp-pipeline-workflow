@@ -7,7 +7,9 @@ import (
 )
 
 // LedgerParquetSchema defines the Arrow schema for Stellar ledger parquet files
-// that matches AWS's format with nested structures
+// that matches the Stellar/AWS export format with nested structures
+// This schema is compatible with files exported by stellar-etl and Stellar's
+// official data exports to AWS S3
 type LedgerParquetSchema struct {
 	Schema       *arrow.Schema
 	MemoryPool   memory.Allocator
@@ -100,6 +102,8 @@ func NewLedgerParquetSchema() *LedgerParquetSchema {
 		{Name: "transactions", Type: arrow.ListOf(arrow.StructOf(transactionFields...))},
 	}
 
+	// No schema-level metadata is required for this schema.
+	// Pass nil for metadata; add metadata here if future consumers require it.
 	schema := arrow.NewSchema(ledgerFields, nil)
 
 	return &LedgerParquetSchema{
@@ -107,6 +111,26 @@ func NewLedgerParquetSchema() *LedgerParquetSchema {
 		MemoryPool: memory.NewGoAllocator(),
 	}
 }
+
+// Field indices for the ledger schema - used for type-safe field access
+const (
+	LedgerFieldSequence                 = 0
+	LedgerFieldLedgerHash               = 1
+	LedgerFieldPreviousLedgerHash       = 2
+	LedgerFieldClosedAt                 = 3
+	LedgerFieldProtocolVersion          = 4
+	LedgerFieldTotalCoins               = 5
+	LedgerFieldFeePool                  = 6
+	LedgerFieldBaseFee                  = 7
+	LedgerFieldBaseReserve              = 8
+	LedgerFieldMaxTxSetSize             = 9
+	LedgerFieldSuccessfulTransactionCount = 10
+	LedgerFieldFailedTransactionCount   = 11
+	LedgerFieldSorobanFeeWrite1Kb       = 12
+	LedgerFieldNodeId                   = 13
+	LedgerFieldSignature                = 14
+	LedgerFieldTransactions             = 15
+)
 
 // LedgerRecordBuilder helps build ledger records with proper nested structure
 type LedgerRecordBuilder struct {
@@ -125,82 +149,82 @@ func NewLedgerRecordBuilder(schema *LedgerParquetSchema) *LedgerRecordBuilder {
 
 // SequenceBuilder returns the builder for sequence field
 func (b *LedgerRecordBuilder) SequenceBuilder() *array.Int64Builder {
-	return b.builder.Field(0).(*array.Int64Builder)
+	return b.builder.Field(LedgerFieldSequence).(*array.Int64Builder)
 }
 
 // LedgerHashBuilder returns the builder for ledger_hash field
 func (b *LedgerRecordBuilder) LedgerHashBuilder() *array.StringBuilder {
-	return b.builder.Field(1).(*array.StringBuilder)
+	return b.builder.Field(LedgerFieldLedgerHash).(*array.StringBuilder)
 }
 
 // PreviousLedgerHashBuilder returns the builder for previous_ledger_hash field
 func (b *LedgerRecordBuilder) PreviousLedgerHashBuilder() *array.StringBuilder {
-	return b.builder.Field(2).(*array.StringBuilder)
+	return b.builder.Field(LedgerFieldPreviousLedgerHash).(*array.StringBuilder)
 }
 
 // ClosedAtBuilder returns the builder for closed_at field
 func (b *LedgerRecordBuilder) ClosedAtBuilder() *array.TimestampBuilder {
-	return b.builder.Field(3).(*array.TimestampBuilder)
+	return b.builder.Field(LedgerFieldClosedAt).(*array.TimestampBuilder)
 }
 
 // ProtocolVersionBuilder returns the builder for protocol_version field
 func (b *LedgerRecordBuilder) ProtocolVersionBuilder() *array.Int32Builder {
-	return b.builder.Field(4).(*array.Int32Builder)
+	return b.builder.Field(LedgerFieldProtocolVersion).(*array.Int32Builder)
 }
 
 // TotalCoinsBuilder returns the builder for total_coins field
 func (b *LedgerRecordBuilder) TotalCoinsBuilder() *array.Int64Builder {
-	return b.builder.Field(5).(*array.Int64Builder)
+	return b.builder.Field(LedgerFieldTotalCoins).(*array.Int64Builder)
 }
 
 // FeePoolBuilder returns the builder for fee_pool field
 func (b *LedgerRecordBuilder) FeePoolBuilder() *array.Int64Builder {
-	return b.builder.Field(6).(*array.Int64Builder)
+	return b.builder.Field(LedgerFieldFeePool).(*array.Int64Builder)
 }
 
 // BaseFeeBuilder returns the builder for base_fee field
 func (b *LedgerRecordBuilder) BaseFeeBuilder() *array.Int32Builder {
-	return b.builder.Field(7).(*array.Int32Builder)
+	return b.builder.Field(LedgerFieldBaseFee).(*array.Int32Builder)
 }
 
 // BaseReserveBuilder returns the builder for base_reserve field
 func (b *LedgerRecordBuilder) BaseReserveBuilder() *array.Int32Builder {
-	return b.builder.Field(8).(*array.Int32Builder)
+	return b.builder.Field(LedgerFieldBaseReserve).(*array.Int32Builder)
 }
 
 // MaxTxSetSizeBuilder returns the builder for max_tx_set_size field
 func (b *LedgerRecordBuilder) MaxTxSetSizeBuilder() *array.Int32Builder {
-	return b.builder.Field(9).(*array.Int32Builder)
+	return b.builder.Field(LedgerFieldMaxTxSetSize).(*array.Int32Builder)
 }
 
 // SuccessfulTransactionCountBuilder returns the builder for successful_transaction_count field
 func (b *LedgerRecordBuilder) SuccessfulTransactionCountBuilder() *array.Int32Builder {
-	return b.builder.Field(10).(*array.Int32Builder)
+	return b.builder.Field(LedgerFieldSuccessfulTransactionCount).(*array.Int32Builder)
 }
 
 // FailedTransactionCountBuilder returns the builder for failed_transaction_count field
 func (b *LedgerRecordBuilder) FailedTransactionCountBuilder() *array.Int32Builder {
-	return b.builder.Field(11).(*array.Int32Builder)
+	return b.builder.Field(LedgerFieldFailedTransactionCount).(*array.Int32Builder)
 }
 
 // SorobanFeeWrite1KbBuilder returns the builder for soroban_fee_write_1kb field
 func (b *LedgerRecordBuilder) SorobanFeeWrite1KbBuilder() *array.Int64Builder {
-	return b.builder.Field(12).(*array.Int64Builder)
+	return b.builder.Field(LedgerFieldSorobanFeeWrite1Kb).(*array.Int64Builder)
 }
 
 // NodeIdBuilder returns the builder for node_id field
 func (b *LedgerRecordBuilder) NodeIdBuilder() *array.StringBuilder {
-	return b.builder.Field(13).(*array.StringBuilder)
+	return b.builder.Field(LedgerFieldNodeId).(*array.StringBuilder)
 }
 
 // SignatureBuilder returns the builder for signature field
 func (b *LedgerRecordBuilder) SignatureBuilder() *array.StringBuilder {
-	return b.builder.Field(14).(*array.StringBuilder)
+	return b.builder.Field(LedgerFieldSignature).(*array.StringBuilder)
 }
 
 // TransactionsBuilder returns the builder for transactions field
 func (b *LedgerRecordBuilder) TransactionsBuilder() *array.ListBuilder {
-	return b.builder.Field(15).(*array.ListBuilder)
+	return b.builder.Field(LedgerFieldTransactions).(*array.ListBuilder)
 }
 
 // NewRecord builds and returns the record
