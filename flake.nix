@@ -130,7 +130,7 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             # Go development
-            go_1_23
+            go_1_25
             
             # System dependencies and development tools
           ] ++ systemDeps ++ devTools;

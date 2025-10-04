@@ -1,0 +1,157 @@
+# Wallet Backend Unified Pipeline - Parallel Processing Approach
+# This configuration runs multiple pipelines in parallel to collect all required data
+
+pipelines:
+  # Pipeline 1: Extract XDR data
+  WalletBackendXDR:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-testnet-data/landing/ledgers/testnet"
+        network: "testnet"
+        buffer_size: 100
+        num_workers: 5
+        start_ledger: 49000
+        end_ledger: 49100
+        ledgers_per_file: 1
+        files_per_partition: 64000
+    processors:
+      - type: TransactionXDRExtractor
+        config: {}
+    consumers:
+      - type: WalletBackendPostgreSQL
+        config:
+          host: "localhost"
+          port: 5432
+          database: "wallet_backend_test"
+          username: "postgres"
+          password: "password"
+          sslmode: "disable"
+          buffer_size: 100
+          flush_interval_ms: 2000
+          create_schema: true
+          drop_existing: false
+
+  # Pipeline 2: Extract state changes and participants
+  WalletBackendStateChanges:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-testnet-data/landing/ledgers/testnet"
+        network: "testnet"
+        buffer_size: 100
+        num_workers: 5
+        start_ledger: 49000
+        end_ledger: 49100
+        ledgers_per_file: 1
+        files_per_partition: 64000
+    processors:
+      - type: LedgerReader  # This converts LedgerCloseMeta to LedgerTransaction
+        config: {}
+      - type: WalletBackend
+        config:
+          extract_contract_events: false
+          track_participants: true
+    consumers:
+      - type: WalletBackendPostgreSQL
+        config:
+          host: "localhost"
+          port: 5432
+          database: "wallet_backend_test"
+          username: "postgres"
+          password: "password"
+          sslmode: "disable"
+          buffer_size: 100
+          flush_interval_ms: 2000
+          create_schema: false  # Already created by first pipeline
+
+  # Pipeline 3: Extract participants
+  WalletBackendParticipants:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-testnet-data/landing/ledgers/testnet"
+        network: "testnet"
+        buffer_size: 100
+        num_workers: 5
+        start_ledger: 49000
+        end_ledger: 49100
+        ledgers_per_file: 1
+        files_per_partition: 64000
+    processors:
+      - type: LedgerReader  # This converts LedgerCloseMeta to LedgerTransaction
+        config: {}
+      - type: ParticipantExtractor
+        config: {}
+    consumers:
+      - type: WalletBackendPostgreSQL
+        config:
+          host: "localhost"
+          port: 5432
+          database: "wallet_backend_test"
+          username: "postgres"
+          password: "password"
+          sslmode: "disable"
+          buffer_size: 100
+          flush_interval_ms: 2000
+          create_schema: false
+
+  # Pipeline 4: Generate effects
+  WalletBackendEffects:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-testnet-data/landing/ledgers/testnet"
+        network: "testnet"
+        buffer_size: 100
+        num_workers: 5
+        start_ledger: 49000
+        end_ledger: 49100
+        ledgers_per_file: 1
+        files_per_partition: 64000
+    processors:
+      - type: StellarEffects
+        config:
+          network_passphrase: "Test SDF Network ; September 2015"
+    consumers:
+      - type: WalletBackendPostgreSQL
+        config:
+          host: "localhost"
+          port: 5432
+          database: "wallet_backend_test"
+          username: "postgres"
+          password: "password"
+          sslmode: "disable"
+          buffer_size: 100
+          flush_interval_ms: 2000
+          create_schema: false
+
+  # Pipeline 5: Extract account data
+  WalletBackendAccounts:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-testnet-data/landing/ledgers/testnet"
+        network: "testnet"
+        buffer_size: 100
+        num_workers: 5
+        start_ledger: 49000
+        end_ledger: 49100
+        ledgers_per_file: 1
+        files_per_partition: 64000
+    processors:
+      - type: ProcessAccountDataFull
+        config:
+          network_passphrase: "Test SDF Network ; September 2015"
+    consumers:
+      - type: WalletBackendPostgreSQL
+        config:
+          host: "localhost"
+          port: 5432
+          database: "wallet_backend_test"
+          username: "postgres"
+          password: "password"
+          sslmode: "disable"
+          buffer_size: 100
+          flush_interval_ms: 2000
+          create_schema: false

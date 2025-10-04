@@ -1,0 +1,48 @@
+pipelines:
+  FullLedgerAWSStyle:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-pubnet-data/landing/ledgers/pubnet"
+        network: "mainnet"
+        num_workers: 20           # Increase workers for faster processing
+        retry_limit: 3
+        retry_wait: 5
+        start_ledger: 59076383    # Same ledger as AWS example
+        end_ledger: 59076384      # Process 2 ledgers
+        ledgers_per_file: 1
+        files_per_partition: 64000
+    
+    processors:
+      - type: "LedgerToJSON"
+        name: "ledger-to-json"
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+    
+    consumers:
+      - type: SaveToParquet
+        config:
+          # Storage configuration
+          storage_type: "FS"
+          local_path: "~/Documents/data/stellar-archive"
+          path_prefix: "aws_style/full_ledger"
+          
+          # File organization - single row per ledger like AWS
+          partition_by: "ledger_sequence"
+          files_per_partition: 1
+          max_file_size_mb: 512
+          
+          # Compression and performance
+          compression: "zstd"              # Match AWS compression
+          buffer_size: 1                   # One ledger per file
+          write_batch_size: 1
+          rotation_interval_minutes: 60
+          
+          # Schema handling
+          schema_evolution_mode: "backward_compatible"
+          include_metadata: true
+          
+          # Monitoring and debugging
+          debug: false
+          log_interval: 1
+          metrics_enabled: true

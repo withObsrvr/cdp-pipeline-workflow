@@ -1,0 +1,45 @@
+# Testnet configuration for full ledger to parquet
+pipelines:
+  FullLedgerTestnet:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-testnet-data/landing/ledgers/testnet"
+        network: "testnet"
+        num_workers: 10
+        retry_limit: 3
+        retry_wait: 5
+        start_ledger: 1000      # Recent testnet ledgers
+        end_ledger: 2000        # Small range for testing
+        ledgers_per_file: 1
+        files_per_partition: 64000
+    
+    processors:
+      - type: "Passthrough"
+        config:
+          network_passphrase: "Test SDF Network ; September 2015"
+          add_metadata: true
+    
+    consumers:
+      - type: SaveToParquet
+        config:
+          # Local storage for testing
+          storage_type: "FS"
+          local_path: "~/Documents/data/stellar-archive/full_ledger"
+          path_prefix: "testnet"
+          
+          # Smaller settings for testing
+          partition_by: "ledger_sequence"
+          max_file_size_mb: 128
+          compression: "snappy"        # Faster compression for testing
+          buffer_size: 100
+          rotation_interval_minutes: 30
+          
+          # Schema options
+          include_schema: true         # Include parquet schema in files
+          schema_merge_strategy: "latest"  # Use latest schema version
+          
+          # Debug settings
+          debug: true
+          log_failed_records: true
+          sample_output_path: "/tmp/ledger_sample.json"  # Sample output for debugging

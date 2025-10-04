@@ -1,0 +1,41 @@
+name: stellar_contract_events_filtered_pipeline
+description: Pipeline for processing specific types of Soroban contract events
+
+source:
+  type: BufferedStorageSourceAdapter
+  config:
+    # Configuration for ingesting from archive files
+    start_ledger: 2000000
+    end_ledger: 2100000
+    buffer_size: 10
+    num_workers: 1
+    
+    # Storage backend configuration
+    url_template: "file://path/to/ledgers/{0}.xdr.gz"
+    
+    # Network configuration
+    network_passphrase: "Test SDF Network ; September 2015"  # For testnet
+
+processors:
+  - type: StellarContractEvent
+    config:
+      name: stellar_contract_event_processor
+      network_passphrase: "Test SDF Network ; September 2015"
+      
+      # Optional: Filter specific event types
+      # 0 = System events
+      # 1 = Contract events (transfer, mint, burn, etc.)
+      # 2 = Diagnostic events (performance metrics, function calls)
+      # 
+      # Examples:
+      # event_types: [1]        # Only contract events
+      # event_types: [0, 1]     # System and contract events
+      # event_types: [2]        # Only diagnostic events
+      # 
+      # Omit event_types to include all events (default)
+      event_types: [1]  # Only process contract events
+
+consumers:
+  - type: SaveToZeroMQ
+    config:
+      endpoint: "tcp://127.0.0.1:5557"

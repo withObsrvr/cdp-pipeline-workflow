@@ -69,17 +69,17 @@ type SourceAdapter interface {
 func main() {
 	// Initialize factory functions for the runner
 	initializeFactories()
-	
+
 	// Check if running in legacy mode (flowctl -config ...)
 	if len(os.Args) > 1 && os.Args[1] == legacyConfigFlag {
 		// Run legacy flag-based CLI
 		runLegacyCLI()
 		return
 	}
-	
+
 	// Set version information
 	cmd.SetVersionInfo(Version, GitCommit, BuildDate)
-	
+
 	// Run new Cobra-based CLI
 	if err := cmd.Execute(); err != nil {
 		os.Exit(1)
@@ -100,7 +100,7 @@ func initializeFactories() {
 		CreateProcessor: CreateProcessorFunc,
 		CreateConsumer:  CreateConsumerFunc,
 	}
-	
+
 	// Set the factories in the cmd package
 	cmd.SetFactories(factories)
 }
@@ -247,11 +247,17 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewContractLedgerReader(processorConfig.Config)
 	case "ContractInvocation":
 		return processor.NewContractInvocationProcessor(processorConfig.Config)
+	case "ContractInvocationV2":
+		return processor.NewContractInvocationProcessorV2(processorConfig.Config)
+	case "ContractInvocationV3":
+		return processor.NewContractInvocationProcessorV3(processorConfig.Config)
 	case "ContractCreation":
 		return processor.NewContractCreationProcessor(processorConfig.Config)
 	case "ContractEvent":
 		// Use processor that handles V3/V4 with SDK helpers
 		return processor.NewContractEventProcessor(processorConfig.Config)
+	case "StellarContractEvent":
+		return processor.NewStellarContractEventProcessor(processorConfig.Config)
 	case "LatestLedger":
 		return processor.NewLatestLedgerProcessor(processorConfig.Config)
 	case "AccountTransaction":
@@ -284,6 +290,18 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewKaleProcessor(processorConfig.Config)
 	case "ContractData":
 		return processor.NewContractDataProcessor(processorConfig.Config)
+	case "WalletBackend":
+		return processor.ProcessorWalletBackend(processorConfig.Config), nil
+	case "ParticipantExtractor":
+		return processor.ProcessorParticipantExtractor(processorConfig.Config), nil
+	case "StellarEffects":
+		return processor.ProcessorStellarEffects(processorConfig.Config), nil
+	case "TransactionXDRExtractor":
+		return processor.ProcessorTransactionXDRExtractor(processorConfig.Config), nil
+	case "Passthrough":
+		return processor.ProcessorPassthrough(processorConfig.Config), nil
+	case "LedgerToJSON":
+		return processor.ProcessorLedgerToJSON(processorConfig.Config), nil
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}
@@ -355,8 +373,25 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveContractDataToPostgreSQL(consumerConfig.Config)
 	case "SaveToParquet":
 		return consumer.NewSaveToParquet(consumerConfig.Config)
+	case "SaveToLedgerParquet":
+		return consumer.NewSaveToLedgerParquet(consumerConfig.Config)
+	case "SaveToDuckLake":
+		return consumer.NewSaveToDuckLake(consumerConfig.Config)
 	case "DebugLogger":
 		return consumer.NewDebugLogger(consumerConfig.Config)
+	case "BufferedPostgreSQL":
+		return consumer.ConsumerBufferedPostgreSQL(consumerConfig.Config), nil
+	case "WalletBackendPostgreSQL":
+		log.Printf("Creating WalletBackendPostgreSQL consumer...")
+		cons, err := consumer.ConsumerWalletBackendPostgreSQL(consumerConfig.Config)
+		if err != nil {
+			log.Printf("Failed to create WalletBackendPostgreSQL: %v", err)
+			return nil, err
+		}
+		log.Printf("WalletBackendPostgreSQL created successfully")
+		return cons, nil
+	case "LogDebug":
+		return consumer.NewLogDebug(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}
@@ -374,14 +409,20 @@ func createConsumers(consumerConfigs []consumer.ConsumerConfig) ([]processor.Pro
 	return consumers, nil
 }
 
-
-func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
+func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) (err error) {
+	// Recover from any panic
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic in setupPipeline: %v", r)
+			log.Printf("PANIC in setupPipeline: %v", r)
+		}
+	}()
 	// Create stable pipeline ID using just the pipeline name
 	pipelineID := fmt.Sprintf("cdp-%s", pipelineConfig.Name)
-	
+
 	// Initialize pipeline stats
 	pipelineStats := control.NewPipelineStats(pipelineID)
-	
+
 	// Setup control plane client if endpoint is provided
 	var controlClient *control.Client
 	if endpoint := os.Getenv("FLOWCTL_ENDPOINT"); endpoint != "" {
@@ -394,18 +435,18 @@ func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
 			// Set metrics and health providers
 			controlClient.SetMetricsProvider(pipelineStats)
 			controlClient.SetHealthChecker(pipelineStats)
-			
+
 			// Register with control plane
 			metadata := map[string]string{
 				"config_name": pipelineConfig.Name,
 				"version":     Version,
 			}
-			
+
 			// Add source type to metadata
 			if pipelineConfig.Source.Type != "" {
 				metadata["source_type"] = pipelineConfig.Source.Type
 			}
-			
+
 			if err := controlClient.Register(ctx, metadata); err != nil {
 				log.Printf("Failed to register with control plane: %v", err)
 			} else {
@@ -418,7 +459,7 @@ func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
 			}
 		}
 	}
-	
+
 	// Create source
 	source, err := createSourceAdapter(pipelineConfig.Source)
 	if err != nil {
@@ -438,10 +479,12 @@ func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
 	// Create consumers
 	consumers := make([]processor.Processor, len(pipelineConfig.Consumers))
 	for i, consConfig := range pipelineConfig.Consumers {
+		log.Printf("Creating consumer %d: %s", i, consConfig.Type)
 		cons, err := createConsumer(consConfig)
 		if err != nil {
 			return fmt.Errorf("error creating consumer %s: %w", consConfig.Type, err)
 		}
+		log.Printf("Successfully created consumer %s (%T)", consConfig.Type, cons)
 		consumers[i] = cons
 	}
 
@@ -458,7 +501,7 @@ func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
 
 	// Run the source with context
 	err = source.Run(ctx)
-	
+
 	// Flush any remaining data in consumers
 	log.Printf("Pipeline source completed, flushing consumers...")
 	for _, cons := range consumers {
@@ -468,6 +511,6 @@ func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) error {
 			}
 		}
 	}
-	
+
 	return err
 }

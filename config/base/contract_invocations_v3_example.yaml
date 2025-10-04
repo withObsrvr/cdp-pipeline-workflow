@@ -1,0 +1,164 @@
+# Example configuration for Contract Invocation Processor V3
+# V3 combines V2's comprehensive processing with V1's single-message output
+
+pipelines:
+  # Example 1: V3 with minimal configuration (V1-compatible output)
+  ContractInvocationsV3Basic:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-testnet-data/landing/ledgers/testnet"
+        network: "testnet"
+        num_workers: 10
+        retry_limit: 3
+        retry_wait: 5
+        start_ledger: 937
+        end_ledger: 940
+        ledgers_per_file: 1
+        files_per_partition: 64000
+    processors:
+      - type: ContractInvocationV3
+        config:
+          network_passphrase: "Test SDF Network ; September 2015"
+          # Default configuration - outputs V1-compatible structure
+          # with V2 auth context enhancements
+    consumers:
+      - type: SaveToZeroMQ
+        config:
+          address: "tcp://127.0.0.1:5555"
+
+  # Example 2: V3 with full enrichment
+  ContractInvocationsV3Full:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "obsrvr-stellar-ledger-data-testnet-data/landing/ledgers/testnet"
+        network: "testnet"
+        start_ledger: 84100
+        end_ledger: 84300
+    processors:
+      - type: ContractInvocationV3
+        config:
+          network_passphrase: "Test SDF Network ; September 2015"
+          include_raw_xdr: true        # Include raw XDR for all fields
+          include_call_graph: true     # Include full call graph structure
+          include_all_events: true     # Include complete event array
+          include_auth_proof: true     # Generate auth proofs
+          max_call_depth: 15
+    consumers:
+      - type: SaveToPostgreSQL
+        config:
+          host: "localhost"
+          port: 5432
+          database: "obsrvr_contract_invocations"
+          username: "postgres"
+          password: "SecurePassword"
+          sslmode: "disable"
+          table: "contract_invocations_v3"
+
+  # Example 3: V3 with filtering for specific contracts
+  ContractInvocationsV3Filtered:
+    source:
+      type: CaptiveCoreInboundAdapter
+      config:
+        network: "mainnet"
+        start_ledger: "now"
+        binary_path: "/usr/bin/stellar-core"
+        core_config_path: "/etc/stellar-core.cfg"
+    processors:
+      - type: ContractInvocationV3
+        config:
+          network_passphrase: "Public Global Stellar Network ; September 2015"
+          include_raw_xdr: false      # Save space
+          include_call_graph: false   # Just flattened calls
+          include_all_events: true    # But include all events
+          event_filters:
+            contract_ids:
+              - "CASJKXVOKEBFC6HRNLLZKMEFJXYS3S5GOXM5DQRD7NDPIOQHCPAOLH7O"
+            event_types:
+              - "transfer"
+              - "mint"
+              - "burn"
+    consumers:
+      - type: SaveToMongoDB
+        config:
+          uri: "mongodb://localhost:27017"
+          database: "stellar_contracts"
+          collection: "invocations_v3"
+
+  # Example 4: V3 for backward compatibility with V1 consumers
+  ContractInvocationsV3Compatible:
+    source:
+      type: BufferedStorageSourceAdapter
+      config:
+        bucket_name: "stellar-ledgers-testnet"
+        network: "testnet"
+        start_ledger: 1000
+        end_ledger: 2000
+    processors:
+      - type: ContractInvocationV3
+        config:
+          network_passphrase: "Test SDF Network ; September 2015"
+          # Minimal config produces output compatible with V1 consumers
+          # but with enhanced auth context
+          include_raw_xdr: true      # V1 includes raw XDR
+          include_call_graph: false  # V1 doesn't have this
+          include_all_events: false  # V1 only has diagnostic events
+    consumers:
+      # Can use same consumers as V1 pipelines
+      - type: SaveToExcel
+        config:
+          filename: "contract_invocations_v3.xlsx"
+          sheet_name: "Invocations"
+
+  # Example 5: V3 with comprehensive monitoring
+  ContractInvocationsV3Monitoring:
+    source:
+      type: RpcAdapter
+      config:
+        rpc_url: "https://soroban-testnet.stellar.org"
+        network_passphrase: "Test SDF Network ; September 2015"
+        start_ledger: "latest"
+    processors:
+      - type: ContractInvocationV3
+        config:
+          network_passphrase: "Test SDF Network ; September 2015"
+          include_raw_xdr: false
+          include_call_graph: true    # For visualization
+          include_all_events: true    # For complete monitoring
+          include_auth_proof: true    # For security audit
+          max_call_depth: 20
+    consumers:
+      # Send comprehensive data for monitoring
+      - type: SaveToClickHouse
+        config:
+          hosts: ["localhost:9000"]
+          database: "monitoring"
+          table: "contract_invocations_comprehensive"
+      # Also send to websocket for real-time dashboard
+      - type: SaveToWebSocket
+        config:
+          port: 8080
+          path: "/invocations"
+
+# Configuration Summary:
+#
+# V3 Default Behavior:
+# - include_raw_xdr: true (for V1 compatibility)
+# - include_call_graph: false (to minimize message size)
+# - include_all_events: false (only diagnostic events for V1 compatibility)
+# - include_auth_proof: false (optional enhancement)
+#
+# Output Structure:
+# - Single message per contract invocation (like V1)
+# - Contains V1 fields: timestamp, contract_id, function_name, contract_calls, state_changes, diagnostic_events
+# - Enhanced with: auth_context, event_summary
+# - Optional: call_graph, all_events (based on config)
+#
+# Migration from V1:
+# - V1 consumers can read V3 output without changes (backward compatible)
+# - New consumers can leverage enhanced fields
+#
+# Migration from V2:
+# - V2 consumers expecting event stream need to be updated
+# - Or run V2 and V3 in parallel during transition

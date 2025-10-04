@@ -2,7 +2,6 @@ package processor
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -82,19 +81,26 @@ func (p *ProcessAccountData) Process(ctx context.Context, msg Message) error {
 	processingCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	ledgerMeta, ok := msg.Payload.(xdr.LedgerCloseMeta)
+	// Extract LedgerCloseMeta
+	ledgerMeta, ok := msg.Payload.(*xdr.LedgerCloseMeta)
 	if !ok {
-		return fmt.Errorf("expected xdr.LedgerCloseMeta, got %T", msg.Payload)
+		// Check if it's already a pass-through message
+		if lcm, ok := msg.Payload.(xdr.LedgerCloseMeta); ok {
+			ledgerMeta = &lcm
+		} else {
+			return fmt.Errorf("expected LedgerCloseMeta, got %T", msg.Payload)
+		}
 	}
 
 	log.Printf("Processing ledger %d for account data", ledgerMeta.LedgerSequence())
 
 	// Extract account changes from ledgerMeta
-	accountChanges := getAccountChanges(ledgerMeta)
+	accountChanges := getAccountChanges(*ledgerMeta)
 	log.Printf("Found %d account changes in ledger %d", len(accountChanges), ledgerMeta.LedgerSequence())
 
 	// Track errors but don't fail immediately
 	var processingErrors []error
+	var accountRecords []AccountRecord
 
 	// Process each account change.
 	for i, change := range accountChanges {
@@ -106,7 +112,7 @@ func (p *ProcessAccountData) Process(ctx context.Context, msg Message) error {
 		log.Printf("Processing account change %d of %d (type: %s)",
 			i+1, len(accountChanges), change.Type)
 
-		record, err := processAccountChange(change, ledgerMeta)
+		record, err := processAccountChange(change, *ledgerMeta)
 		if err != nil {
 			log.Printf("Error processing account change: %v", err)
 			processingErrors = append(processingErrors, fmt.Errorf("error processing change %d: %w", i+1, err))
@@ -126,43 +132,50 @@ func (p *ProcessAccountData) Process(ctx context.Context, msg Message) error {
 			p.stats.DeletedAccounts++
 		}
 
-		// Marshal the record to JSON.
-		data, err := json.Marshal(record)
-		if err != nil {
-			log.Printf("Error marshaling account record: %v", err)
-			processingErrors = append(processingErrors, fmt.Errorf("error marshaling record for account %s: %w", record.AccountID, err))
-			continue
-		}
-
-		// Forward the message to downstream processors.
-		log.Printf("Forwarding account %s to %d processors",
-			record.AccountID, len(p.processors))
-
-		// Create a new message with the JSON payload
-		accountMsg := Message{
-			Payload: data,
-		}
-
-		// Forward to each processor with individual error handling
-		for j, processor := range p.processors {
-			// Create a separate context for each processor with a reasonable timeout
-			procCtx, procCancel := context.WithTimeout(processingCtx, 30*time.Second)
-
-			err := processor.Process(procCtx, accountMsg)
-			procCancel() // Cancel the context immediately after use
-
-			if err != nil {
-				log.Printf("Error forwarding account record to processor %d: %v", j+1, err)
-				processingErrors = append(processingErrors, fmt.Errorf("error in processor %d for account %s: %w", j+1, record.AccountID, err))
-				// Continue with other processors
-			}
-		}
+		accountRecords = append(accountRecords, *record)
 	}
 
 	p.stats.LastProcessedTime = time.Now()
 	log.Printf("Finished processing ledger %d, processed %d accounts (created: %d, updated: %d, deleted: %d)",
 		ledgerMeta.LedgerSequence(), p.stats.ProcessedAccounts, p.stats.CreatedAccounts,
 		p.stats.UpdatedAccounts, p.stats.DeletedAccounts)
+
+	// Create new message with original payload and updated metadata
+	outputMsg := Message{
+		Payload:  ledgerMeta,
+		Metadata: msg.Metadata,
+	}
+
+	// Initialize metadata if nil
+	if outputMsg.Metadata == nil {
+		outputMsg.Metadata = make(map[string]interface{})
+	}
+
+	// Add account records to metadata
+	outputMsg.Metadata["accounts"] = accountRecords
+	outputMsg.Metadata["processor_account_data"] = true
+
+	// Forward to subscribers
+	log.Printf("Forwarding %d account records to %d processors",
+		len(accountRecords), len(p.processors))
+
+	for i, processor := range p.processors {
+		log.Printf("ProcessAccountData: Forwarding to processor %d/%d (%T)", i+1, len(p.processors), processor)
+		// Create a separate context for each processor with a reasonable timeout
+		procCtx, procCancel := context.WithTimeout(processingCtx, 30*time.Second)
+
+		log.Printf("ProcessAccountData: About to call Process on %T", processor)
+		err := processor.Process(procCtx, outputMsg)
+		log.Printf("ProcessAccountData: Process call returned for %T, err=%v", processor, err)
+		procCancel() // Cancel the context immediately after use
+
+		if err != nil {
+			log.Printf("Error forwarding to processor %d (%T): %v", i+1, processor, err)
+			processingErrors = append(processingErrors, fmt.Errorf("error in processor: %w", err))
+		} else {
+			log.Printf("Successfully forwarded to processor %d (%T)", i+1, processor)
+		}
+	}
 
 	// If we had any errors, return a combined error
 	if len(processingErrors) > 0 {
@@ -417,6 +430,22 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 								}
 							}
 						}
+					case 4:
+						v4Meta := txProcessing.TxApplyProcessing.MustV4()
+						if v4Meta.Operations != nil {
+							log.Printf("getAccountChanges: V4 meta has %d operations", len(v4Meta.Operations))
+							for j, opMeta := range v4Meta.Operations {
+								if opMeta.Changes != nil {
+									log.Printf("getAccountChanges: V4 operation %d has %d changes",
+										j, len(opMeta.Changes))
+									changes = append(changes, opMeta.Changes...)
+								}
+							}
+						}
+						// V4 also includes Soroban transaction data
+						if v4Meta.SorobanMeta != nil {
+							log.Printf("getAccountChanges: V4 has Soroban meta")
+						}
 					default:
 						log.Printf("getAccountChanges: Unknown TxApplyProcessing version: %d",
 							txProcessing.TxApplyProcessing.V)
@@ -483,6 +512,22 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 								}
 							}
 						}
+					case 4:
+						v4Meta := txProcessing.TxApplyProcessing.MustV4()
+						if v4Meta.Operations != nil {
+							log.Printf("getAccountChanges: V4 meta has %d operations", len(v4Meta.Operations))
+							for j, opMeta := range v4Meta.Operations {
+								if opMeta.Changes != nil {
+									log.Printf("getAccountChanges: V4 operation %d has %d changes",
+										j, len(opMeta.Changes))
+									changes = append(changes, opMeta.Changes...)
+								}
+							}
+						}
+						// V4 also includes Soroban transaction data
+						if v4Meta.SorobanMeta != nil {
+							log.Printf("getAccountChanges: V4 has Soroban meta")
+						}
 					default:
 						log.Printf("getAccountChanges: Unknown TxApplyProcessing version: %d",
 							txProcessing.TxApplyProcessing.V)
@@ -509,6 +554,88 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 			}
 
 			// Add more exploration of the V1 structure as needed
+		}
+	case 2:
+		if meta.V2 != nil {
+			log.Printf("getAccountChanges: Processing V2 meta")
+			
+			// Process TxProcessing entries
+			if meta.V2.TxProcessing != nil {
+				log.Printf("getAccountChanges: Found %d TxProcessing entries in V2 meta", len(meta.V2.TxProcessing))
+				
+				for i, txProcessing := range meta.V2.TxProcessing {
+					// Process fee changes
+					if txProcessing.FeeProcessing != nil {
+						log.Printf("getAccountChanges: V2 TxProcessing[%d] has %d FeeProcessing changes",
+							i, len(txProcessing.FeeProcessing))
+						changes = append(changes, txProcessing.FeeProcessing...)
+					}
+					
+					// Process transaction metadata based on version
+					log.Printf("getAccountChanges: V2 TxProcessing[%d] TxApplyProcessing version: %d",
+						i, txProcessing.TxApplyProcessing.V)
+					
+					switch txProcessing.TxApplyProcessing.V {
+					case 1:
+						v1Meta := txProcessing.TxApplyProcessing.MustV1()
+						if v1Meta.Operations != nil {
+							log.Printf("getAccountChanges: V1 meta has %d operations", len(v1Meta.Operations))
+							for j, opMeta := range v1Meta.Operations {
+								if opMeta.Changes != nil {
+									log.Printf("getAccountChanges: V1 operation %d has %d changes",
+										j, len(opMeta.Changes))
+									changes = append(changes, opMeta.Changes...)
+								}
+							}
+						}
+					case 2:
+						v2Meta := txProcessing.TxApplyProcessing.MustV2()
+						if v2Meta.Operations != nil {
+							log.Printf("getAccountChanges: V2 meta has %d operations", len(v2Meta.Operations))
+							for j, opMeta := range v2Meta.Operations {
+								if opMeta.Changes != nil {
+									log.Printf("getAccountChanges: V2 operation %d has %d changes",
+										j, len(opMeta.Changes))
+									changes = append(changes, opMeta.Changes...)
+								}
+							}
+						}
+					case 3:
+						v3Meta := txProcessing.TxApplyProcessing.MustV3()
+						if v3Meta.Operations != nil {
+							log.Printf("getAccountChanges: V3 meta has %d operations", len(v3Meta.Operations))
+							for j, opMeta := range v3Meta.Operations {
+								if opMeta.Changes != nil {
+									log.Printf("getAccountChanges: V3 operation %d has %d changes",
+										j, len(opMeta.Changes))
+									changes = append(changes, opMeta.Changes...)
+								}
+							}
+						}
+					case 4:
+						v4Meta := txProcessing.TxApplyProcessing.MustV4()
+						if v4Meta.Operations != nil {
+							log.Printf("getAccountChanges: V4 meta has %d operations", len(v4Meta.Operations))
+							for j, opMeta := range v4Meta.Operations {
+								if opMeta.Changes != nil {
+									log.Printf("getAccountChanges: V4 operation %d has %d changes",
+										j, len(opMeta.Changes))
+									changes = append(changes, opMeta.Changes...)
+								}
+							}
+						}
+						// V4 also includes Soroban transaction data
+						if v4Meta.SorobanMeta != nil {
+							log.Printf("getAccountChanges: V4 has Soroban meta")
+						}
+					default:
+						log.Printf("getAccountChanges: Unknown TxApplyProcessing version: %d",
+							txProcessing.TxApplyProcessing.V)
+					}
+				}
+			} else {
+				log.Printf("getAccountChanges: No TxProcessing entries found in V2 meta")
+			}
 		}
 	default:
 		log.Printf("getAccountChanges: Unknown meta version: %d", meta.V)

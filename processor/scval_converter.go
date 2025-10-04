@@ -265,6 +265,67 @@ func convertScAddress(addr xdr.ScAddress) (interface{}, error) {
 			"address": contractStr,
 		}, nil
 		
+	case xdr.ScAddressTypeScAddressTypeMuxedAccount:
+		// Muxed accounts are not allowed in storage keys per CAP-67
+		// but may appear in other contexts
+		if addr.MuxedAccount == nil {
+			return nil, fmt.Errorf("ScAddressTypeMuxedAccount has nil MuxedAccount")
+		}
+		// For muxed accounts, we need to encode both the Ed25519 key and the ID
+		// The MuxedEd25519Account has Ed25519 (32 bytes) + Id (uint64)
+		muxedData := make([]byte, 40) // 32 bytes for Ed25519 + 8 bytes for ID
+		copy(muxedData[:32], addr.MuxedAccount.Ed25519[:])
+		// Encode the ID as big-endian uint64
+		for i := 0; i < 8; i++ {
+			muxedData[32+i] = byte(addr.MuxedAccount.Id >> (56 - 8*i))
+		}
+		muxedStr, err := strkey.Encode(strkey.VersionByteMuxedAccount, muxedData)
+		if err != nil {
+			return nil, fmt.Errorf("error encoding muxed address: %w", err)
+		}
+		return map[string]interface{}{
+			"type":    "muxed_account",
+			"address": muxedStr,
+			"id":      addr.MuxedAccount.Id,
+		}, nil
+		
+	case xdr.ScAddressTypeScAddressTypeClaimableBalance:
+		// Per CAP-67: disallowed by host, conversions will fail
+		if addr.ClaimableBalanceId == nil {
+			return nil, fmt.Errorf("ScAddressTypeClaimableBalance has nil ClaimableBalanceId")
+		}
+		// ClaimableBalanceId is a union, currently only V0 is supported
+		var claimableBalanceHash [32]byte
+		switch addr.ClaimableBalanceId.Type {
+		case xdr.ClaimableBalanceIdTypeClaimableBalanceIdTypeV0:
+			claimableBalanceHash = [32]byte(*addr.ClaimableBalanceId.V0)
+		default:
+			return nil, fmt.Errorf("unsupported ClaimableBalanceId type: %v", addr.ClaimableBalanceId.Type)
+		}
+		claimableBalanceStr, err := strkey.Encode(strkey.VersionByteClaimableBalance, claimableBalanceHash[:])
+		if err != nil {
+			return nil, fmt.Errorf("error encoding claimable balance address: %w", err)
+		}
+		return map[string]interface{}{
+			"type":    "claimable_balance",
+			"address": claimableBalanceStr,
+		}, nil
+		
+	case xdr.ScAddressTypeScAddressTypeLiquidityPool:
+		// Per CAP-67: disallowed by host, conversions will fail
+		if addr.LiquidityPoolId == nil {
+			return nil, fmt.Errorf("ScAddressTypeLiquidityPool has nil LiquidityPoolId")
+		}
+		poolID := [32]byte(*addr.LiquidityPoolId)
+		poolStr, err := strkey.Encode(strkey.VersionByteLiquidityPool, poolID[:])
+		if err != nil {
+			return nil, fmt.Errorf("error encoding liquidity pool address: %w", err)
+		}
+		return map[string]interface{}{
+			"type":    "liquidity_pool",
+			"address": poolStr,
+		}, nil
+		
 	default:
 		return nil, fmt.Errorf("unknown ScAddress type: %v", addr.Type)
 	}
