@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log"
 
-	_ "github.com/marcboeker/go-duckdb"
+	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/withObsrvr/cdp-pipeline-workflow/processor"
 )
 

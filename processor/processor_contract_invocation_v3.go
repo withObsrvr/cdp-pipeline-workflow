@@ -770,12 +770,29 @@ func (p *ContractInvocationProcessorV3) forwardInvocation(ctx context.Context, i
 		return fmt.Errorf("error marshaling invocation: %w", err)
 	}
 
+	// Create message with processor metadata for DuckLake schema detection
+	msg := Message{
+		Payload: jsonBytes,
+		Metadata: map[string]interface{}{
+			"processor_type":  string(ProcessorTypeContractInvocation),
+			"processor_name":  "ContractInvocationProcessorV3",
+			"version":         invocation.ProcessorVersion,
+			"timestamp":       invocation.Timestamp,
+			"ledger_sequence": invocation.LedgerSequence,
+		},
+	}
+
+	// Preserve archive source metadata if present
+	if invocation.ArchiveMetadata != nil {
+		msg.Metadata["archive_source"] = invocation.ArchiveMetadata
+	}
+
 	for _, processor := range p.processors {
-		if err := processor.Process(ctx, Message{Payload: jsonBytes}); err != nil {
+		if err := processor.Process(ctx, msg); err != nil {
 			return fmt.Errorf("error in processor chain: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 

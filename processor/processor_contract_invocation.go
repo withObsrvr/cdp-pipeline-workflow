@@ -295,8 +295,25 @@ func (p *ContractInvocationProcessor) forwardToProcessors(ctx context.Context, i
 		return fmt.Errorf("error marshaling invocation: %w", err)
 	}
 
+	// Create message with processor type metadata for schema registry
+	msg := Message{
+		Payload: jsonBytes,
+		Metadata: map[string]interface{}{
+			"processor_type": string(ProcessorTypeContractInvocation),
+			"processor_name": "ContractInvocationProcessor",
+			"version":        "1.0.0",
+			"timestamp":      time.Now(),
+			"ledger_sequence": invocation.LedgerSequence,
+		},
+	}
+
+	// Preserve archive metadata if available
+	if invocation.ArchiveMetadata != nil {
+		msg.Metadata["archive_source"] = invocation.ArchiveMetadata
+	}
+
 	for _, processor := range p.processors {
-		if err := processor.Process(ctx, Message{Payload: jsonBytes}); err != nil {
+		if err := processor.Process(ctx, msg); err != nil {
 			return fmt.Errorf("error in processor chain: %w", err)
 		}
 	}
