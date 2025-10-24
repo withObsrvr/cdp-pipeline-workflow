@@ -72,16 +72,19 @@ type cacheEntry struct {
 
 // NewStellarNetworkClient creates a new Stellar network client
 func NewStellarNetworkClient(network string) (*StellarNetworkClient, error) {
-	log.Printf("DEBUG: Creating StellarNetworkClient for network: %s", network)
-	constants, ok := networkConstants[network]
-	if !ok {
-		return nil, fmt.Errorf("unsupported network: %s", network)
+	// Normalize network name - "mainnet" is an alias for "pubnet"
+	normalizedNetwork := network
+	if network == "mainnet" {
+		normalizedNetwork = "pubnet"
 	}
 
-	log.Printf("DEBUG: Using Horizon URL: %s for network: %s", constants.HorizonURL, network)
+	constants, ok := networkConstants[normalizedNetwork]
+	if !ok {
+		return nil, fmt.Errorf("unsupported network: %s (supported: pubnet/mainnet, testnet)", network)
+	}
 
 	client := &StellarNetworkClient{
-		network:    network,
+		network:    normalizedNetwork, // Use normalized network for internal operations
 		horizonURL: constants.HorizonURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,

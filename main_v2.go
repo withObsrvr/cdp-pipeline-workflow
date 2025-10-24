@@ -44,15 +44,15 @@ func loadConfigWithV2(configFile string) (*v2config.LoadResult, error) {
 }
 
 // runPipelinesFromV2Config runs pipelines from a v2 config load result
-func runPipelinesFromV2Config(ctx context.Context, result *v2config.LoadResult) {
+func runPipelinesFromV2Config(ctx context.Context, result *v2config.LoadResult, checkpointDir string) {
 	for name, pipeline := range result.Config.Pipelines {
 		log.Printf("Starting pipeline: %s", name)
-		
+
 		// Convert v2 pipeline to legacy format
 		pipelineConfig := convertV2Pipeline(pipeline)
 		pipelineConfig.Name = name // Set the pipeline name
-		
-		err := setupPipeline(ctx, pipelineConfig)
+
+		err := setupPipeline(ctx, pipelineConfig, checkpointDir)
 		log.Printf("DEBUG: setupPipeline returned error: %v", err)
 		if err != nil {
 			// Check if this is a rolling window completion (EOF from callback)

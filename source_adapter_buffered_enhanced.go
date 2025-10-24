@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -13,6 +15,7 @@ import (
 	"github.com/stellar/go/ingest/ledgerbackend"
 	"github.com/stellar/go/support/datastore"
 	"github.com/stellar/go/xdr"
+	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/checkpoint"
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
 	"github.com/withObsrvr/cdp-pipeline-workflow/utils"
 )
@@ -25,6 +28,12 @@ type BufferedStorageSourceAdapterEnhanced struct {
 	enhancedConfig    *EnhancedSourceConfig
 	continuousProc    *ContinuousLedgerProcessor
 	lastProcessedTime time.Time
+
+	// Checkpointing support
+	checkpointMgr   *checkpoint.Manager
+	currentLedger   atomic.Uint32 // Thread-safe current ledger tracking
+	totalProcessed  atomic.Uint64
+	totalErrors     atomic.Uint64
 }
 
 // BufferedStorageConfigEnhanced includes both legacy and time-based fields
@@ -43,14 +52,65 @@ type BufferedStorageConfigEnhanced struct {
 	*EnhancedSourceConfig
 }
 
-// NewBufferedStorageSourceAdapterEnhanced creates an enhanced buffered storage adapter with time-based support
+// NewBufferedStorageSourceAdapterEnhancedWithCheckpoint creates an enhanced buffered storage adapter with checkpointing support
+func NewBufferedStorageSourceAdapterEnhancedWithCheckpoint(config map[string]interface{}, checkpointDir string) (SourceAdapter, error) {
+	adapter, err := newBufferedStorageSourceAdapterEnhancedInternal(config)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create checkpoint manager if directory provided
+	if checkpointDir != "" {
+		pipelineID := os.Getenv("PIPELINE_ID")
+		if pipelineID == "" {
+			pipelineID = "unknown"
+		}
+
+		// Extract team slug from checkpoint directory path
+		// Expected format: /checkpoints/{team_slug}/{pipeline_id}
+		teamSlug := extractTeamSlugFromPath(checkpointDir)
+		if teamSlug == "" {
+			teamSlug = "default-team"
+		}
+
+		pipelineName := fmt.Sprintf("buffered-storage-%s", pipelineID)
+
+		mgr, err := checkpoint.NewManager(checkpointDir, pipelineID, teamSlug, pipelineName, config)
+		if err != nil {
+			log.Printf("[WARN] Failed to create checkpoint manager: %v (continuing without checkpointing)", err)
+		} else {
+			adapter.checkpointMgr = mgr
+			log.Printf("[INFO] Checkpoint manager enabled for pipeline %s/%s", teamSlug, pipelineID)
+		}
+	}
+
+	return adapter, nil
+}
+
+// extractTeamSlugFromPath extracts team slug from checkpoint directory path
+// Expected format: /checkpoints/{team_slug}/{pipeline_id}
+func extractTeamSlugFromPath(path string) string {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) >= 2 {
+		// Return second-to-last part (team slug)
+		return parts[len(parts)-2]
+	}
+	return ""
+}
+
+// NewBufferedStorageSourceAdapterEnhanced creates an enhanced buffered storage adapter with time-based support (legacy, no checkpointing)
 func NewBufferedStorageSourceAdapterEnhanced(config map[string]interface{}) (SourceAdapter, error) {
+	return newBufferedStorageSourceAdapterEnhancedInternal(config)
+}
+
+// newBufferedStorageSourceAdapterEnhancedInternal is the internal constructor
+func newBufferedStorageSourceAdapterEnhancedInternal(config map[string]interface{}) (*BufferedStorageSourceAdapterEnhanced, error) {
 	// Parse enhanced configuration first
 	enhancedConfig, err := ParseEnhancedConfig(config)
 	if err != nil {
 		// Fall back to legacy parsing if enhanced parsing fails
-		log.Printf("Enhanced config parsing failed, trying legacy mode: %v", err)
-		return NewBufferedStorageSourceAdapter(config)
+		log.Printf("Enhanced config parsing failed, cannot create enhanced adapter: %v", err)
+		return nil, fmt.Errorf("enhanced config parsing failed: %w", err)
 	}
 
 	// Parse BufferedStorage-specific configuration
@@ -143,6 +203,25 @@ func (adapter *BufferedStorageSourceAdapterEnhanced) Run(ctx context.Context) er
 
 	// Get the resolved ledger range
 	startLedger, endLedger := adapter.enhancedConfig.GetLedgerRange()
+
+	// CHECKPOINTING: Load checkpoint and override start ledger if found
+	if adapter.checkpointMgr != nil {
+		if cp, err := adapter.checkpointMgr.LoadCheckpoint(); err == nil {
+			log.Printf("[INFO] Found checkpoint from %s", cp.CheckpointTimestamp.Format(time.RFC3339))
+			log.Printf("[INFO] Resuming from ledger %d", cp.LastProcessedLedger+1)
+			startLedger = cp.LastProcessedLedger + 1
+			// Update config to reflect resumed ledger
+			adapter.enhancedConfig.ResolvedStartLedger = startLedger
+		} else {
+			log.Printf("[INFO] No checkpoint found, starting from config start_ledger: %d", startLedger)
+		}
+
+		// Start auto-checkpoint in background
+		getState := func() uint32 {
+			return adapter.currentLedger.Load()
+		}
+		go adapter.checkpointMgr.StartAutoCheckpoint(ctx, getState)
+	}
 
 	log.Printf("Starting BufferedStorageSourceAdapter from ledger %d", startLedger)
 	if adapter.enhancedConfig.IsMixedContinuous() {
@@ -252,16 +331,33 @@ func (adapter *BufferedStorageSourceAdapterEnhanced) processLedgerRange(ctx cont
 		publisherConfig,
 		ctx,
 		func(lcm xdr.LedgerCloseMeta) error {
-			log.Printf("Processing ledger %d", lcm.LedgerSequence())
+			ledgerSeq := lcm.LedgerSequence()
+			log.Printf("Processing ledger %d", ledgerSeq)
 			currentTime := time.Now()
 
+			// CHECKPOINTING: Update current ledger
+			if adapter.checkpointMgr != nil {
+				adapter.currentLedger.Store(ledgerSeq)
+				adapter.totalProcessed.Add(1)
+			}
+
 			if err := adapter.processLedger(ctx, lcm); err != nil {
-				log.Printf("Error processing ledger %d: %v", lcm.LedgerSequence(), err)
+				log.Printf("Error processing ledger %d: %v", ledgerSeq, err)
+				// CHECKPOINTING: Track errors
+				if adapter.checkpointMgr != nil {
+					adapter.totalErrors.Add(1)
+					adapter.checkpointMgr.UpdateStats(adapter.totalProcessed.Load(), adapter.totalErrors.Load())
+				}
 				return err
 			}
 
 			processedLedgers++
 			adapter.lastProcessedTime = currentTime
+
+			// CHECKPOINTING: Update stats periodically
+			if adapter.checkpointMgr != nil && processedLedgers%100 == 0 {
+				adapter.checkpointMgr.UpdateStats(adapter.totalProcessed.Load(), adapter.totalErrors.Load())
+			}
 
 			if time.Since(lastLogTime) > time.Second*10 {
 				rate := float64(processedLedgers) / time.Since(lastLogTime).Seconds()
@@ -368,15 +464,32 @@ func (adapter *BufferedStorageSourceAdapterEnhanced) processLedgerRangeForContin
 		publisherConfig,
 		ctx,
 		func(lcm xdr.LedgerCloseMeta) error {
+			ledgerSeq := lcm.LedgerSequence()
 			currentTime := time.Now()
 
+			// CHECKPOINTING: Update current ledger
+			if adapter.checkpointMgr != nil {
+				adapter.currentLedger.Store(ledgerSeq)
+				adapter.totalProcessed.Add(1)
+			}
+
 			if err := adapter.processLedger(ctx, lcm); err != nil {
-				log.Printf("Error processing ledger %d: %v", lcm.LedgerSequence(), err)
+				log.Printf("Error processing ledger %d: %v", ledgerSeq, err)
+				// CHECKPOINTING: Track errors
+				if adapter.checkpointMgr != nil {
+					adapter.totalErrors.Add(1)
+					adapter.checkpointMgr.UpdateStats(adapter.totalProcessed.Load(), adapter.totalErrors.Load())
+				}
 				return err
 			}
 
 			processedLedgers++
 			adapter.lastProcessedTime = currentTime
+
+			// CHECKPOINTING: Update stats periodically
+			if adapter.checkpointMgr != nil && processedLedgers%100 == 0 {
+				adapter.checkpointMgr.UpdateStats(adapter.totalProcessed.Load(), adapter.totalErrors.Load())
+			}
 
 			if time.Since(lastLogTime) > time.Second*10 {
 				rate := float64(processedLedgers) / time.Since(lastLogTime).Seconds()

@@ -101,13 +101,15 @@ func (c *EnhancedSourceConfig) Validate() error {
 	isFullLegacy := hasLegacyStart && hasLegacyEnd && !hasTimeStart && !hasTimeEnd
 	isFullTime := hasTimeStart && (hasTimeEnd || c.ContinuousMode) && !hasLegacyStart && !hasLegacyEnd
 	isMixedMode := hasLegacyStart && hasTimeEnd && !hasTimeStart && !hasLegacyEnd
-	
+	isLegacyContinuous := hasLegacyStart && c.ContinuousMode && !hasLegacyEnd && !hasTimeStart && !hasTimeEnd
+
 	// Validate supported combinations
-	if !isFullLegacy && !isFullTime && !isMixedMode {
+	if !isFullLegacy && !isFullTime && !isMixedMode && !isLegacyContinuous {
 		return fmt.Errorf("unsupported configuration combination. Supported modes: " +
 			"1) start_ledger + end_ledger, " +
 			"2) start_time_ago + (end_time_ago OR continuous_mode), " +
-			"3) start_ledger + end_time_ago")
+			"3) start_ledger + end_time_ago, " +
+			"4) start_ledger + continuous_mode")
 	}
 
 	// Validate mixed mode

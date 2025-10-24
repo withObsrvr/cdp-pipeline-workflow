@@ -108,6 +108,7 @@ func initializeFactories() {
 func runLegacyCLI() {
 	// Define command line flags
 	configFile := flag.String("config", "pipeline_config.yaml", "Path to pipeline configuration file")
+	checkpointDir := flag.String("checkpoint-dir", "", "Directory for checkpoint state (enables automatic resume)")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -116,7 +117,7 @@ func runLegacyCLI() {
 	// Try v2 config loader first
 	if config, err := loadConfigWithV2(*configFile); err == nil {
 		// Successfully loaded with v2 loader
-		runPipelinesFromV2Config(ctx, config)
+		runPipelinesFromV2Config(ctx, config, *checkpointDir)
 		return
 	} else {
 		log.Printf("V2 config loader failed, falling back to legacy: %v", err)
@@ -136,7 +137,7 @@ func runLegacyCLI() {
 	// Run each pipeline
 	for name, pipelineConfig := range config.Pipelines {
 		log.Printf("Starting pipeline: %s", name)
-		err := setupPipeline(ctx, pipelineConfig)
+		err := setupPipeline(ctx, pipelineConfig, *checkpointDir)
 		log.Printf("DEBUG: setupPipeline returned error: %v", err)
 		if err != nil {
 			// Check if this is a rolling window completion (EOF from callback)
@@ -155,12 +156,21 @@ func runLegacyCLI() {
 	log.Printf("All pipelines finished.")
 }
 
-func createSourceAdapter(sourceConfig SourceConfig) (SourceAdapter, error) {
+func createSourceAdapter(sourceConfig SourceConfig, checkpointDir string) (SourceAdapter, error) {
 	switch sourceConfig.Type {
 	case "CaptiveCoreInboundAdapter":
 		return NewCaptiveCoreInboundAdapter(sourceConfig.Config)
 	case "BufferedStorageSourceAdapter":
-		// Try enhanced version first, fall back to legacy
+		// Try enhanced version with checkpointing if checkpoint directory provided
+		if checkpointDir != "" {
+			adapter, err := NewBufferedStorageSourceAdapterEnhancedWithCheckpoint(sourceConfig.Config, checkpointDir)
+			if err == nil {
+				return adapter, nil
+			}
+			log.Printf("Enhanced BufferedStorageSourceAdapter with checkpointing failed with: %v, trying without checkpointing", err)
+		}
+
+		// Try enhanced version without checkpointing
 		adapter, err := NewBufferedStorageSourceAdapterEnhanced(sourceConfig.Config)
 		if err == nil {
 			return adapter, nil
@@ -409,7 +419,7 @@ func createConsumers(consumerConfigs []consumer.ConsumerConfig) ([]processor.Pro
 	return consumers, nil
 }
 
-func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) (err error) {
+func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig, checkpointDir string) (err error) {
 	// Recover from any panic
 	defer func() {
 		if r := recover(); r != nil {
@@ -461,7 +471,7 @@ func setupPipeline(ctx context.Context, pipelineConfig PipelineConfig) (err erro
 	}
 
 	// Create source
-	source, err := createSourceAdapter(pipelineConfig.Source)
+	source, err := createSourceAdapter(pipelineConfig.Source, checkpointDir)
 	if err != nil {
 		return fmt.Errorf("error creating source: %w", err)
 	}
