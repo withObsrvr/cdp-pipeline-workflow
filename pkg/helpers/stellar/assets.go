@@ -29,16 +29,16 @@ func AssetToString(asset xdr.Asset) string {
 func CreateAsset(code, issuer string) (xdr.Asset, error) {
 	if issuer == "" {
 		// Native asset (XLM)
-		return xdr.NewNativeAsset()
+		return xdr.MustNewNativeAsset(), nil
 	}
-	
+
 	// Determine asset type based on code length
 	if len(code) <= 4 {
 		return xdr.NewCreditAsset(code, issuer)
 	} else if len(code) <= 12 {
 		return xdr.NewCreditAsset(code, issuer)
 	}
-	
+
 	return xdr.Asset{}, fmt.Errorf("invalid asset code length: %d", len(code))
 }
 
