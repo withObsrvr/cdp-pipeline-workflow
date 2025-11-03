@@ -188,9 +188,11 @@ func (p *ContractInvocationExtractor) extractContractData(invocation *ContractIn
 	return extracted, nil
 }
 
-// generateTOID creates a unique Transaction Operation ID
+// generateTOID creates a unique Transaction Operation ID using Stellar's official format
+// Formula: (ledger << 32) | (tx << 12) | op
+// This matches github.com/stellar/go/toid package
 func (p *ContractInvocationExtractor) generateTOID(ledger uint32, txIdx, opIdx uint32) uint64 {
-	return (uint64(ledger) << 32) | (uint64(txIdx) << 20) | uint64(opIdx)
+	return (uint64(ledger) << 32) | (uint64(txIdx) << 12) | uint64(opIdx)
 }
 
 // findMatchingSchema finds the extraction schema for a contract and function
