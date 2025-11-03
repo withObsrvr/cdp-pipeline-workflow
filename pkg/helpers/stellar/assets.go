@@ -29,6 +29,8 @@ func AssetToString(asset xdr.Asset) string {
 func CreateAsset(code, issuer string) (xdr.Asset, error) {
 	if issuer == "" {
 		// Native asset (XLM)
+		// Note: MustNewNativeAsset() is safe here because native asset creation never fails.
+		// The SDK removed NewNativeAsset() in favor of Must* functions for operations that cannot error.
 		return xdr.MustNewNativeAsset(), nil
 	}
 
