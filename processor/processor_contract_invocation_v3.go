@@ -25,6 +25,8 @@ type ContractInvocationV3 struct {
 	// Core V1-compatible fields
 	Timestamp        time.Time              `json:"timestamp"`
 	LedgerSequence   uint32                 `json:"ledger_sequence"`
+	TransactionIndex uint32                 `json:"transaction_index"` // Transaction order within ledger (for TOID generation)
+	OperationIndex   uint32                 `json:"operation_index"`   // Operation order within transaction (for TOID generation)
 	TransactionHash  string                 `json:"transaction_hash"`
 	ContractID       string                 `json:"contract_id"`
 	InvokingAccount  string                 `json:"invoking_account"`
@@ -332,12 +334,14 @@ func (p *ContractInvocationProcessorV3) processTransaction(
 		// Build the comprehensive V3 invocation
 		invocation := ContractInvocationV3{
 			// Core fields
-			Timestamp:       timestamp,
-			LedgerSequence:  meta.LedgerSequence(),
-			TransactionHash: tx.Result.TransactionHash.HexString(),
-			ContractID:      mainContractID,
-			InvokingAccount: invokingAccount.Address(),
-			FunctionName:    functionName,
+			Timestamp:        timestamp,
+			LedgerSequence:   meta.LedgerSequence(),
+			TransactionIndex: uint32(tx.Index),
+			OperationIndex:   uint32(opIndex),
+			TransactionHash:  tx.Result.TransactionHash.HexString(),
+			ContractID:       mainContractID,
+			InvokingAccount:  invokingAccount.Address(),
+			FunctionName:     functionName,
 			Arguments:       p.convertArgsToRawMessages(args),
 			ArgumentsDecoded: p.createArgumentsDecodedMap(args),
 			Successful:      p.v2Processor.isOperationSuccessful(tx, opIndex),

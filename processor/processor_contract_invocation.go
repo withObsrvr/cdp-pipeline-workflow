@@ -18,6 +18,8 @@ import (
 type ContractInvocation struct {
 	Timestamp        time.Time              `json:"timestamp"`
 	LedgerSequence   uint32                 `json:"ledger_sequence"`
+	TransactionIndex uint32                 `json:"transaction_index"` // Transaction order within ledger (for TOID generation)
+	OperationIndex   uint32                 `json:"operation_index"`   // Operation order within transaction (for TOID generation)
 	TransactionHash  string                 `json:"transaction_hash"`
 	ContractID       string                 `json:"contract_id"`
 	InvokingAccount  string                 `json:"invoking_account"`
@@ -211,13 +213,15 @@ func (p *ContractInvocationProcessor) processContractInvocation(
 
 	// Create invocation record with preserved source metadata
 	invocation := &ContractInvocation{
-		Timestamp:       time.Unix(int64(meta.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime), 0),
-		LedgerSequence:  meta.LedgerSequence(),
-		TransactionHash: tx.Result.TransactionHash.HexString(),
-		ContractID:      contractID,
-		InvokingAccount: invokingAccount.Address(),
-		Successful:      successful,
-		ArchiveMetadata: archiveMetadata,
+		Timestamp:        time.Unix(int64(meta.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime), 0),
+		LedgerSequence:   meta.LedgerSequence(),
+		TransactionIndex: uint32(tx.Index),
+		OperationIndex:   uint32(opIndex),
+		TransactionHash:  tx.Result.TransactionHash.HexString(),
+		ContractID:       contractID,
+		InvokingAccount:  invokingAccount.Address(),
+		Successful:       successful,
+		ArchiveMetadata:  archiveMetadata,
 	}
 
 	// Extract function name and arguments
