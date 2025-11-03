@@ -95,9 +95,13 @@ func (p *ContractFilterProcessor) Process(ctx context.Context, msg Message) erro
 
 	log.Printf("ContractFilterProcessor: processing filtered event for contract %s", event.ContractID)
 
-	// Forward filtered event to downstream processors
+	// Forward filtered event to downstream processors with proper ContractEvent payload
+	eventMsg := Message{
+		Payload: &event, // Pass pointer to ContractEvent
+	}
+
 	for _, processor := range p.processors {
-		if err := processor.Process(ctx, msg); err != nil {
+		if err := processor.Process(ctx, eventMsg); err != nil {
 			return fmt.Errorf("error in processor chain: %w", err)
 		}
 	}
