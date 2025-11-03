@@ -18,6 +18,8 @@ import (
 type ContractInvocation struct {
 	Timestamp        time.Time              `json:"timestamp"`
 	LedgerSequence   uint32                 `json:"ledger_sequence"`
+	TransactionIndex uint32                 `json:"transaction_index"` // Transaction order within ledger (for TOID generation)
+	OperationIndex   uint32                 `json:"operation_index"`   // Operation order within transaction (for TOID generation)
 	TransactionHash  string                 `json:"transaction_hash"`
 	ContractID       string                 `json:"contract_id"`
 	InvokingAccount  string                 `json:"invoking_account"`
@@ -211,13 +213,15 @@ func (p *ContractInvocationProcessor) processContractInvocation(
 
 	// Create invocation record with preserved source metadata
 	invocation := &ContractInvocation{
-		Timestamp:       time.Unix(int64(meta.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime), 0),
-		LedgerSequence:  meta.LedgerSequence(),
-		TransactionHash: tx.Result.TransactionHash.HexString(),
-		ContractID:      contractID,
-		InvokingAccount: invokingAccount.Address(),
-		Successful:      successful,
-		ArchiveMetadata: archiveMetadata,
+		Timestamp:        time.Unix(int64(meta.LedgerHeaderHistoryEntry().Header.ScpValue.CloseTime), 0),
+		LedgerSequence:   meta.LedgerSequence(),
+		TransactionIndex: uint32(tx.Index),
+		OperationIndex:   uint32(opIndex),
+		TransactionHash:  tx.Result.TransactionHash.HexString(),
+		ContractID:       contractID,
+		InvokingAccount:  invokingAccount.Address(),
+		Successful:       successful,
+		ArchiveMetadata:  archiveMetadata,
 	}
 
 	// Extract function name and arguments
@@ -295,8 +299,25 @@ func (p *ContractInvocationProcessor) forwardToProcessors(ctx context.Context, i
 		return fmt.Errorf("error marshaling invocation: %w", err)
 	}
 
+	// Create message with processor type metadata for schema registry
+	msg := Message{
+		Payload: jsonBytes,
+		Metadata: map[string]interface{}{
+			"processor_type": string(ProcessorTypeContractInvocation),
+			"processor_name": "ContractInvocationProcessor",
+			"version":        "1.0.0",
+			"timestamp":      time.Now(),
+			"ledger_sequence": invocation.LedgerSequence,
+		},
+	}
+
+	// Preserve archive metadata if available
+	if invocation.ArchiveMetadata != nil {
+		msg.Metadata["archive_source"] = invocation.ArchiveMetadata
+	}
+
 	for _, processor := range p.processors {
-		if err := processor.Process(ctx, Message{Payload: jsonBytes}); err != nil {
+		if err := processor.Process(ctx, msg); err != nil {
 			return fmt.Errorf("error in processor chain: %w", err)
 		}
 	}

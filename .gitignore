@@ -21,6 +21,8 @@ zephyr-programs.md
 *.duckdb
 *.duckdb.wal
 *.duckdb-wal
+*.ducklake
+*.wal
 stellar-datastore.md
 stellar-galexie.md
 

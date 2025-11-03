@@ -25,6 +25,8 @@ type ContractInvocationV3 struct {
 	// Core V1-compatible fields
 	Timestamp        time.Time              `json:"timestamp"`
 	LedgerSequence   uint32                 `json:"ledger_sequence"`
+	TransactionIndex uint32                 `json:"transaction_index"` // Transaction order within ledger (for TOID generation)
+	OperationIndex   uint32                 `json:"operation_index"`   // Operation order within transaction (for TOID generation)
 	TransactionHash  string                 `json:"transaction_hash"`
 	ContractID       string                 `json:"contract_id"`
 	InvokingAccount  string                 `json:"invoking_account"`
@@ -332,12 +334,14 @@ func (p *ContractInvocationProcessorV3) processTransaction(
 		// Build the comprehensive V3 invocation
 		invocation := ContractInvocationV3{
 			// Core fields
-			Timestamp:       timestamp,
-			LedgerSequence:  meta.LedgerSequence(),
-			TransactionHash: tx.Result.TransactionHash.HexString(),
-			ContractID:      mainContractID,
-			InvokingAccount: invokingAccount.Address(),
-			FunctionName:    functionName,
+			Timestamp:        timestamp,
+			LedgerSequence:   meta.LedgerSequence(),
+			TransactionIndex: uint32(tx.Index),
+			OperationIndex:   uint32(opIndex),
+			TransactionHash:  tx.Result.TransactionHash.HexString(),
+			ContractID:       mainContractID,
+			InvokingAccount:  invokingAccount.Address(),
+			FunctionName:     functionName,
 			Arguments:       p.convertArgsToRawMessages(args),
 			ArgumentsDecoded: p.createArgumentsDecodedMap(args),
 			Successful:      p.v2Processor.isOperationSuccessful(tx, opIndex),
@@ -770,12 +774,29 @@ func (p *ContractInvocationProcessorV3) forwardInvocation(ctx context.Context, i
 		return fmt.Errorf("error marshaling invocation: %w", err)
 	}
 
+	// Create message with processor metadata for DuckLake schema detection
+	msg := Message{
+		Payload: jsonBytes,
+		Metadata: map[string]interface{}{
+			"processor_type":  string(ProcessorTypeContractInvocation),
+			"processor_name":  "ContractInvocationProcessorV3",
+			"version":         invocation.ProcessorVersion,
+			"timestamp":       invocation.Timestamp,
+			"ledger_sequence": invocation.LedgerSequence,
+		},
+	}
+
+	// Preserve archive source metadata if present
+	if invocation.ArchiveMetadata != nil {
+		msg.Metadata["archive_source"] = invocation.ArchiveMetadata
+	}
+
 	for _, processor := range p.processors {
-		if err := processor.Process(ctx, Message{Payload: jsonBytes}); err != nil {
+		if err := processor.Process(ctx, msg); err != nil {
 			return fmt.Errorf("error in processor chain: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 

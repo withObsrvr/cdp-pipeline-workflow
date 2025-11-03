@@ -11,13 +11,27 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
+        # Override DuckDB to version 1.4.1 for DuckLake 0.3 support
+        # DuckLake 0.3 includes better constraint handling and MERGE INTO support
+        # Reference: https://motherduck.com/blog/announcing-duckdb-141-motherduck/
+        duckdb_1_4_1 = pkgs.duckdb.overrideAttrs (oldAttrs: rec {
+          version = "1.4.1";
+
+          src = pkgs.fetchFromGitHub {
+            owner = "duckdb";
+            repo = "duckdb";
+            rev = "v${version}";
+            hash = "sha256-w/mELyRs4B9hJngi1MLed0fHRq/ldkkFV+SDkSxs3O8=";
+          };
+        });
+
         # System dependencies required for CGO
         systemDeps = with pkgs; [
           zeromq
           czmq
           libsodium.dev  # Use dev output for pkg-config files
           arrow-cpp
-          duckdb        # Add duckdb dependency
+          duckdb_1_4_1  # Use DuckDB 1.4.1 instead of default 1.3.2
           pkg-config
           gcc
           gnumake
@@ -56,7 +70,7 @@
 
           # IMPORTANT: Update this hash after first build attempt
           # Run: nix build 2>&1 | grep "got:" | awk '{print $2}'
-          vendorHash = "sha256-yC3AVXHmkuqdsV5qK2oRyByUnmTF7jCkyHg6qbiJHWU=";
+          vendorHash = "sha256-x8ubGVWnVoTraZ1xovu1U8ria+FgI+xTUq4fzmOO1LY=";
 
           nativeBuildInputs = systemDeps;
           buildInputs = systemDeps;
@@ -73,8 +87,8 @@
           # Set build environment
           preBuild = ''
             export CGO_ENABLED=1
-            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium.dev}/include -I${pkgs.arrow-cpp}/include -I${pkgs.duckdb}/include"
-            export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib -L${pkgs.arrow-cpp}/lib -L${pkgs.duckdb}/lib"
+            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium.dev}/include -I${pkgs.arrow-cpp}/include -I${duckdb_1_4_1}/include"
+            export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib -L${pkgs.arrow-cpp}/lib -L${duckdb_1_4_1}/lib"
             export PKG_CONFIG_PATH="${pkgs.zeromq}/lib/pkgconfig:${pkgs.czmq}/lib/pkgconfig:${pkgs.libsodium.dev}/lib/pkgconfig:${pkgs.arrow-cpp}/lib/pkgconfig"
           '';
 
@@ -149,11 +163,11 @@
             echo "  CGO_ENABLED=1"
             echo "  Go version: $(go version)"
             echo ""
-            
+
             # Set up CGO environment
             export CGO_ENABLED=1
-            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium.dev}/include -I${pkgs.arrow-cpp}/include -I${pkgs.duckdb}/include"
-            export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib -L${pkgs.arrow-cpp}/lib -L${pkgs.duckdb}/lib"
+            export CGO_CFLAGS="-I${pkgs.zeromq}/include -I${pkgs.czmq}/include -I${pkgs.libsodium.dev}/include -I${pkgs.arrow-cpp}/include -I${duckdb_1_4_1}/include"
+            export CGO_LDFLAGS="-L${pkgs.zeromq}/lib -L${pkgs.czmq}/lib -L${pkgs.libsodium}/lib -L${pkgs.arrow-cpp}/lib -L${duckdb_1_4_1}/lib"
             export PKG_CONFIG_PATH="${pkgs.zeromq}/lib/pkgconfig:${pkgs.czmq}/lib/pkgconfig:${pkgs.libsodium.dev}/lib/pkgconfig:${pkgs.arrow-cpp}/lib/pkgconfig"
             
             # Set custom prompt to indicate Nix development environment

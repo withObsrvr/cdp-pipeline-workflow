@@ -73,7 +73,10 @@ func IsContractEvent(event xdr.ContractEvent) bool {
 
 // EventContractID returns the contract ID as a string
 func EventContractID(event xdr.ContractEvent) (string, error) {
-	return EncodeContractID(event.ContractId)
+	if event.ContractId == nil {
+		return "", fmt.Errorf("contract ID is nil")
+	}
+	return EncodeContractID(*event.ContractId)
 }
 
 // ExtractI128Amount extracts an i128 amount from ScVal
@@ -83,18 +86,19 @@ func ExtractI128Amount(val xdr.ScVal) (int64, error) {
 	}
 	
 	i128 := val.MustI128()
-	
+
 	// Check if high part is 0 (fits in int64)
 	if i128.Hi != 0 {
 		return 0, fmt.Errorf("i128 value too large for int64")
 	}
-	
+
 	// Check if low part fits in int64
-	if i128.Lo > uint64(math.MaxInt64) {
+	loVal := uint64(i128.Lo)
+	if loVal > uint64(math.MaxInt64) {
 		return 0, fmt.Errorf("i128 value too large for int64")
 	}
-	
-	return int64(i128.Lo), nil
+
+	return int64(loVal), nil
 }
 
 // ExtractU64Amount extracts a u64 amount from ScVal
@@ -103,13 +107,13 @@ func ExtractU64Amount(val xdr.ScVal) (int64, error) {
 		return 0, fmt.Errorf("value is not u64 type")
 	}
 	
-	u64Val := val.MustU64()
-	
+	u64Val := uint64(val.MustU64())
+
 	// Check if fits in int64
 	if u64Val > uint64(math.MaxInt64) {
 		return 0, fmt.Errorf("u64 value too large for int64")
 	}
-	
+
 	return int64(u64Val), nil
 }
 

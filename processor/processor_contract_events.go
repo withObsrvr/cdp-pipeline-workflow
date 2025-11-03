@@ -346,8 +346,23 @@ func (p *ContractEventProcessor) forwardToProcessors(ctx context.Context, event 
 		return fmt.Errorf("error marshaling event: %w", err)
 	}
 
+	// Create message with processor type metadata for schema registry
+	msg := Message{
+		Payload: jsonBytes,
+		Metadata: map[string]interface{}{
+			"processor_type":   string(ProcessorTypeContractEvent),
+			"processor_name":   "ContractEventProcessor",
+			"version":          "1.0.0",
+			"timestamp":        time.Now(),
+			"ledger_sequence":  event.LedgerSequence,
+			"transaction_hash": event.TransactionHash,
+			"contract_id":      event.ContractID,
+			"event_type":       event.EventType,
+		},
+	}
+
 	for _, processor := range p.processors {
-		if err := processor.Process(ctx, Message{Payload: jsonBytes}); err != nil {
+		if err := processor.Process(ctx, msg); err != nil {
 			return fmt.Errorf("error in processor chain: %w", err)
 		}
 	}

@@ -6,12 +6,13 @@ import (
 	"strconv"
 
 	"github.com/stellar/go/amount"
+	"github.com/stellar/go/xdr"
 )
 
 // FormatAmount converts a raw int64 amount to a decimal string
 // Stellar amounts are stored as int64 with 7 decimal places
 func FormatAmount(raw int64) string {
-	return amount.String(raw)
+	return amount.String(xdr.Int64(raw))
 }
 
 // ParseAmount converts a decimal string to raw int64
@@ -24,8 +25,8 @@ func FormatAmountWithPrecision(raw int64, decimals int) string {
 	if decimals > 7 {
 		decimals = 7
 	}
-	
-	formatted := amount.String(raw)
+
+	formatted := amount.String(xdr.Int64(raw))
 	
 	// Find decimal point
 	dotIndex := -1

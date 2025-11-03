@@ -156,7 +156,7 @@ func (p *ContractInvocationExtractor) extractContractData(invocation *ContractIn
 	}
 
 	// Generate TOID (Transaction Operation ID)
-	toid := p.generateTOID(invocation.LedgerSequence, 0, 0) // TODO: Add tx/op indices if available
+	toid := p.generateTOID(invocation.LedgerSequence, invocation.TransactionIndex, invocation.OperationIndex)
 
 	// Create base extracted structure
 	extracted := &ExtractedContractInvocation{
