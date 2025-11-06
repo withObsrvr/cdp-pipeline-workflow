@@ -217,16 +217,46 @@
             </div>
 
             <div id="docker" class="tab-content active">
-                <p>Pull and run using Docker:</p>
+                <p>Pull the Docker image:</p>
                 <div class="command-box">
-                    <button class="copy-button" onclick="copyToClipboard('docker-cmd')">Copy</button>
-                    <code id="docker-cmd">docker pull withobsrvr/obsrvr-flow-pipeline:latest
-docker run -v $(pwd)/config.yaml:/config.yaml \
-  withobsrvr/obsrvr-flow-pipeline:latest \
-  -config /config.yaml</code>
+                    <button class="copy-button" onclick="copyToClipboard('docker-pull')">Copy</button>
+                    <code id="docker-pull">docker pull withobsrvr/obsrvr-flow-pipeline:latest</code>
                 </div>
-                <div class="info-box">
-                    <strong>Note:</strong> Replace <code>config.yaml</code> with your pipeline configuration file.
+
+                <h4 style="margin-top: 2rem;">Basic Usage (Local Files)</h4>
+                <div class="command-box">
+                    <button class="copy-button" onclick="copyToClipboard('docker-basic')">Copy</button>
+                    <code id="docker-basic">docker run --rm \
+  -v $(pwd)/config:/app/config \
+  withobsrvr/obsrvr-flow-pipeline:latest \
+  /app/cdp-pipeline-workflow -config /app/config/pipeline.yaml</code>
+                </div>
+
+                <h4 style="margin-top: 2rem;">With Google Cloud Storage</h4>
+                <div class="command-box">
+                    <button class="copy-button" onclick="copyToClipboard('docker-gcs')">Copy</button>
+                    <code id="docker-gcs">docker run --rm --network host \
+  -v "$HOME/.config/gcloud/application_default_credentials.json":/.config/gcp/credentials.json:ro \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/.config/gcp/credentials.json \
+  -v $(pwd)/config:/app/config \
+  withobsrvr/obsrvr-flow-pipeline:latest \
+  /app/cdp-pipeline-workflow -config /app/config/pipeline.yaml</code>
+                </div>
+
+                <h4 style="margin-top: 2rem;">With AWS S3</h4>
+                <div class="command-box">
+                    <button class="copy-button" onclick="copyToClipboard('docker-aws')">Copy</button>
+                    <code id="docker-aws">docker run --rm --network host \
+  -e AWS_ACCESS_KEY_ID=your_access_key \
+  -e AWS_SECRET_ACCESS_KEY=your_secret_key \
+  -e AWS_REGION=us-east-1 \
+  -v $(pwd)/config:/app/config \
+  withobsrvr/obsrvr-flow-pipeline:latest \
+  /app/cdp-pipeline-workflow -config /app/config/pipeline.yaml</code>
+                </div>
+
+                <div class="info-box" style="margin-top: 1rem;">
+                    <strong>Note:</strong> Replace <code>pipeline.yaml</code> with your configuration file path. For GCS authentication, first run <code>gcloud auth application-default login</code> to generate credentials.
                 </div>
             </div>
 

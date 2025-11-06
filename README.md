@@ -30,11 +30,40 @@ A modular data pipeline for processing Stellar blockchain data at scale. Process
 
 ### Option 1: Docker (Recommended)
 
+Pull the image:
 ```bash
 docker pull withobsrvr/obsrvr-flow-pipeline:latest
-docker run -v $(pwd)/config.yaml:/config.yaml \
+```
+
+**Basic usage (local files):**
+```bash
+docker run --rm \
+  -v $(pwd)/config:/app/config \
   withobsrvr/obsrvr-flow-pipeline:latest \
-  -config /config.yaml
+  /app/cdp-pipeline-workflow -config /app/config/pipeline.yaml
+```
+
+**With Google Cloud Storage:**
+```bash
+# First authenticate: gcloud auth application-default login
+
+docker run --rm --network host \
+  -v "$HOME/.config/gcloud/application_default_credentials.json":/.config/gcp/credentials.json:ro \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/.config/gcp/credentials.json \
+  -v $(pwd)/config:/app/config \
+  withobsrvr/obsrvr-flow-pipeline:latest \
+  /app/cdp-pipeline-workflow -config /app/config/pipeline.yaml
+```
+
+**With AWS S3:**
+```bash
+docker run --rm --network host \
+  -e AWS_ACCESS_KEY_ID=your_access_key \
+  -e AWS_SECRET_ACCESS_KEY=your_secret_key \
+  -e AWS_REGION=us-east-1 \
+  -v $(pwd)/config:/app/config \
+  withobsrvr/obsrvr-flow-pipeline:latest \
+  /app/cdp-pipeline-workflow -config /app/config/pipeline.yaml
 ```
 
 ### Option 2: Build from Source
@@ -93,10 +122,19 @@ pipeline:
 Run the pipeline:
 
 ```bash
+# Docker
+docker run --rm \
+  -v $(pwd)/config:/app/config \
+  withobsrvr/obsrvr-flow-pipeline:latest \
+  /app/cdp-pipeline-workflow -config /app/config/config.yaml
+
+# Or from source
 ./cdp-pipeline-workflow -config config.yaml
 ```
 
-## Environment Variables
+## Environment Variables (for Source Builds)
+
+When building from source, you'll need to set these environment variables:
 
 **AWS S3:**
 ```bash
@@ -108,6 +146,7 @@ export AWS_REGION=us-east-1
 **Google Cloud Storage:**
 ```bash
 export GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
+# Or authenticate with: gcloud auth application-default login
 ```
 
 ## Configuration
