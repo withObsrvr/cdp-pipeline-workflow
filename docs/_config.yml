@@ -1,0 +1,22 @@
+# GitHub Pages Configuration
+# This file configures GitHub Pages for the CDP Pipeline Workflow documentation
+
+title: CDP Pipeline Workflow
+description: Process Stellar blockchain data at scale
+baseurl: "/cdp-pipeline-workflow"
+url: "https://withobsrvr.github.io"
+
+# Theme (optional - can use default)
+# theme: minima
+
+# Plugins
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+
+# Build settings
+markdown: kramdown
+
+# Exclude from processing
+exclude:
+  - README.md
