@@ -196,7 +196,10 @@ func extractPaymentID(value interface{}) (string, error) {
 	}
 
 	// Add 0x prefix if not present
-	if len(hexStr) > 0 && hexStr[:2] != "0x" {
+	if len(hexStr) >= 2 && hexStr[:2] != "0x" {
+		hexStr = "0x" + hexStr
+	} else if len(hexStr) > 0 && len(hexStr) < 2 {
+		// If hexStr is too short but not empty, add 0x prefix anyway
 		hexStr = "0x" + hexStr
 	}
 

@@ -182,7 +182,7 @@ func (c *SaveEventPaymentToPostgreSQL) Process(ctx context.Context, msg processo
 		ON CONFLICT (id) DO NOTHING
 	`
 
-	_, err = tx.ExecContext(ctx, accountsSQL,
+	result, err := tx.ExecContext(ctx, accountsSQL,
 		eventPayment.FromID,
 		eventPayment.MerchantID,
 		eventPayment.TokenID,
@@ -194,9 +194,13 @@ func (c *SaveEventPaymentToPostgreSQL) Process(ctx context.Context, msg processo
 		return fmt.Errorf("failed to upsert accounts: %w", err)
 	}
 
-	c.mu.Lock()
-	c.stats.AccountsUpserted += 3
-	c.mu.Unlock()
+	// Get actual number of accounts inserted (not counting conflicts)
+	rowsAffected, err := result.RowsAffected()
+	if err == nil {
+		c.mu.Lock()
+		c.stats.AccountsUpserted += uint64(rowsAffected)
+		c.mu.Unlock()
+	}
 
 	// Insert event_payment record
 	// Use ON CONFLICT DO NOTHING for idempotency (in case of retries)

@@ -194,5 +194,3 @@ exclude github.com/envoyproxy/go-control-plane/envoy v1.32.3
 // Let go mod tidy add other dependencies
 
 // replace github.com/stellar/go => github.com/stellar/go v0.0.0-20250716214416-01d16bf8185f
-
-// replace github.com/withobsrvr/flowctl => /home/tillman/Documents/flowctl
