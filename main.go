@@ -282,6 +282,8 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.NewContractFilterProcessor(processorConfig.Config)
 	case "ContractInvocationExtractor":
 		return processor.NewContractInvocationExtractor(processorConfig.Config)
+	case "EventPaymentExtractor":
+		return processor.NewEventPaymentExtractor(processorConfig.Config)
 	case "AccountEffect":
 		return processor.NewAccountEffectProcessor(processorConfig.Config)
 	case "LedgerChanges":
@@ -341,6 +343,10 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveToWebSocket(consumerConfig.Config)
 	case "SaveToPostgreSQL":
 		return consumer.NewSaveToPostgreSQL(consumerConfig.Config)
+	case "SaveEventPaymentToPostgreSQL":
+		return consumer.NewSaveEventPaymentToPostgreSQL(consumerConfig.Config)
+	case "PublishToGooglePubSub":
+		return consumer.NewPublishToGooglePubSub(consumerConfig.Config)
 	case "SaveToClickHouse":
 		return consumer.NewSaveToClickHouse(consumerConfig.Config)
 	case "SaveToMarketAnalytics":

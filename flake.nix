@@ -70,7 +70,7 @@
 
           # IMPORTANT: Update this hash after first build attempt
           # Run: nix build 2>&1 | grep "got:" | awk '{print $2}'
-          vendorHash = "sha256-x8ubGVWnVoTraZ1xovu1U8ria+FgI+xTUq4fzmOO1LY=";
+          vendorHash = "sha256-pb4aMyZb6Za4lZIs6NH2vrRPqorHgT9abTu526n11JE=";
 
           nativeBuildInputs = systemDeps;
           buildInputs = systemDeps;

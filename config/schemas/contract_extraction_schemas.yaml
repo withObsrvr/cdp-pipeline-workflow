@@ -2,7 +2,56 @@
 # This file defines how to extract business data from contract invocations
 
 extraction_schemas:
-  # Carbon sink contract schema
+  # Carbon sink contract schema (v2 - supports G/C/M addresses, no email field)
+  carbon_sink_v2:
+    schema_name: "carbon_sink_v2"
+    function_name: "sink_carbon"
+    contract_ids:
+      - "CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"  # Replace with actual contract ID
+    extractors:
+      funder:
+        argument_index: 0
+        field_path: "address"
+        field_type: "string"
+        required: true
+      recipient:
+        argument_index: 1
+        field_path: "address"
+        field_type: "string"
+        required: true
+      amount:
+        argument_index: 2
+        field_path: ""
+        field_type: "uint64"
+        required: true
+      project_id:
+        argument_index: 3
+        field_path: ""
+        field_type: "string"
+        required: true
+      memo_text:
+        argument_index: 4
+        field_path: ""
+        field_type: "string"
+        required: false
+        default_value: ""
+    validation:
+      funder:
+        min_length: 56
+        max_length: 69
+        pattern: "^([GC][A-Z2-7]{55})|(M[A-Z2-7]{68})$"
+      recipient:
+        min_length: 56
+        max_length: 69
+        pattern: "^([GC][A-Z2-7]{55})|(M[A-Z2-7]{68})$"
+      amount:
+        min_value: 1
+        max_value: 9223372036854776000
+      project_id:
+        min_length: 1
+        max_length: 100
+
+  # Carbon sink contract schema (v1 - legacy, G addresses only)
   carbon_sink_v1:
     schema_name: "carbon_sink_v1"
     function_name: "sink_carbon"
