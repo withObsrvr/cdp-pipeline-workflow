@@ -37,9 +37,8 @@ Then visit: http://localhost:8000
 
 The landing page provides:
 
-- **Three Installation Options:**
+- **Two Installation Options:**
   - Docker (recommended)
-  - Pre-built binaries (Linux, macOS)
   - Build from source
 
 - **Copy-to-Clipboard:** One-click command copying

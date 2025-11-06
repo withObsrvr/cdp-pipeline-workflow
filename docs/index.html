@@ -212,8 +212,8 @@
             <h2>Quick Start</h2>
 
             <div class="tabs">
-                <div class="tab active" onclick="switchTab('docker')">Docker</div>
-                <div class="tab" onclick="switchTab('source')">From Source</div>
+                <div class="tab active" onclick="switchTab('docker', event)">Docker</div>
+                <div class="tab" onclick="switchTab('source', event)">From Source</div>
             </div>
 
             <div id="docker" class="tab-content active">
@@ -299,7 +299,7 @@ brew install zeromq czmq libsodium</code>
     </footer>
 
     <script>
-        function switchTab(tabName) {
+        function switchTab(tabName, event) {
             // Hide all tab contents
             document.querySelectorAll('.tab-content').forEach(content => {
                 content.classList.remove('active');
