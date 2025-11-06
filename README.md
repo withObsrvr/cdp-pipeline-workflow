@@ -1,27 +1,153 @@
 # CDP Pipeline Workflow
 
-A data pipeline for processing Stellar blockchain data, with support for payment and account creation operations(WIP). Many of the consumers and processors are experimental and may not perform as they should.
+A modular data pipeline for processing Stellar blockchain data at scale. Process ledgers, transactions, operations, and contract events from multiple sources with flexible output destinations.
+
+**Quick Start:** Visit [withobsrvr.github.io/cdp-pipeline-workflow](https://withobsrvr.github.io/cdp-pipeline-workflow) for installation instructions.
 
 ## Features
 
-- Processes Stellar blockchain data from multiple sources:
+- **Multiple Data Sources:**
   - Amazon S3
-  - Google Cloud Storage (with OAuth or Service Account)
+  - Google Cloud Storage (OAuth or Service Account)
   - Local filesystem
-- Transforms operations into standardized formats
-- Supports both payment and create account operations(WIP)
-- Outputs to multiple destinations (MongoDB, ZeroMQ, PostgreSQL, DuckDB)
-- Processes account data and stores it in PostgreSQL or DuckDB
+  - Stellar RPC endpoints
+  - Captive Core (direct connection)
 
-## Prerequisites
+- **Flexible Processing:**
+  - Payment operations
+  - Account creation and management
+  - Contract invocations and events
+  - DEX trades and market data
+  - Validator analytics
 
-- Go 1.22 or later
-- Access to one of:
-  - Amazon S3
-  - Google Cloud Storage
-  - Local filesystem
-- MongoDB instance
-- ZeroMQ (optional)
+- **Output Destinations:**
+  - PostgreSQL, MongoDB, ClickHouse, DuckDB
+  - Redis (caching and orderbooks)
+  - Google Cloud Storage, Excel
+  - ZeroMQ, WebSocket streaming
+
+## Installation
+
+### Option 1: Docker (Recommended)
+
+Pull the image:
+```bash
+docker pull withobsrvr/obsrvr-flow-pipeline:latest
+```
+
+**Basic usage (local files):**
+```bash
+docker run --rm \
+  -v $(pwd)/config:/app/config \
+  withobsrvr/obsrvr-flow-pipeline:latest \
+  /app/cdp-pipeline-workflow -config /app/config/pipeline.yaml
+```
+
+**With Google Cloud Storage:**
+```bash
+# First authenticate: gcloud auth application-default login
+
+docker run --rm --network host \
+  -v "$HOME/.config/gcloud/application_default_credentials.json":/.config/gcp/credentials.json:ro \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/.config/gcp/credentials.json \
+  -v $(pwd)/config:/app/config \
+  withobsrvr/obsrvr-flow-pipeline:latest \
+  /app/cdp-pipeline-workflow -config /app/config/pipeline.yaml
+```
+
+**With AWS S3:**
+```bash
+docker run --rm --network host \
+  -e AWS_ACCESS_KEY_ID=your_access_key \
+  -e AWS_SECRET_ACCESS_KEY=your_secret_key \
+  -e AWS_REGION=us-east-1 \
+  -v $(pwd)/config:/app/config \
+  withobsrvr/obsrvr-flow-pipeline:latest \
+  /app/cdp-pipeline-workflow -config /app/config/pipeline.yaml
+```
+
+### Option 2: Build from Source
+
+**Prerequisites:**
+- Go 1.24 or later
+- GCC (for CGO support)
+- System libraries: libzmq3-dev, libczmq-dev, libsodium-dev
+
+**Install dependencies:**
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install -y libzmq3-dev libczmq-dev libsodium-dev build-essential
+
+# macOS
+brew install zeromq czmq libsodium
+```
+
+**Build:**
+
+```bash
+git clone https://github.com/withObsrvr/cdp-pipeline-workflow.git
+cd cdp-pipeline-workflow
+CGO_ENABLED=1 go build -o cdp-pipeline-workflow
+./cdp-pipeline-workflow -config config.yaml
+```
+
+## Quick Start
+
+Create a `config.yaml` file:
+
+```yaml
+pipeline:
+  name: MyFirstPipeline
+  source:
+    type: BufferedStorageSourceAdapter
+    config:
+      bucket_name: "stellar-ledgers"
+      network: "mainnet"
+      start_ledger: 1000
+      end_ledger: 2000
+      num_workers: 4
+  processors:
+    - type: LedgerMetaDecoder
+  consumers:
+    - type: SaveToPostgreSQL
+      config:
+        host: "localhost"
+        port: 5432
+        database: "stellar"
+        username: "postgres"
+        password: "password"
+```
+
+Run the pipeline:
+
+```bash
+# Docker
+docker run --rm \
+  -v $(pwd)/config:/app/config \
+  withobsrvr/obsrvr-flow-pipeline:latest \
+  /app/cdp-pipeline-workflow -config /app/config/config.yaml
+
+# Or from source
+./cdp-pipeline-workflow -config config.yaml
+```
+
+## Environment Variables (for Source Builds)
+
+When building from source, you'll need to set these environment variables:
+
+**AWS S3:**
+```bash
+export AWS_ACCESS_KEY_ID=your_access_key
+export AWS_SECRET_ACCESS_KEY=your_secret_key
+export AWS_REGION=us-east-1
+```
+
+**Google Cloud Storage:**
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
+# Or authenticate with: gcloud auth application-default login
+```
 
 ## Configuration
 
@@ -206,36 +332,23 @@ pipelines:
           db_path: "data/stellar_accounts.duckdb"
 ```
 
-## Installation
+## Additional Resources
 
-```bash
-go get github.com/withObsrvr/cdp-pipeline-workflow
-```
+- **Documentation:** [Full configuration guide](https://github.com/withObsrvr/cdp-pipeline-workflow/blob/main/README.md)
+- **Examples:** Check the `config/` directory for sample configurations
+- **Issues:** [Report bugs or request features](https://github.com/withObsrvr/cdp-pipeline-workflow/issues)
+- **Contributing:** Pull requests are welcome!
 
-## Usage
+## GCS OAuth Authentication (Advanced)
 
-For GCS authentication:
-```bash
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
-./cdp-pipeline-workflow -config /path/to/config.yaml
-```
-
-For S3 authentication:
-```bash
-export AWS_ACCESS_KEY_ID=your_access_key
-export AWS_SECRET_ACCESS_KEY=your_secret_key
-./cdp-pipeline-workflow -config /path/to/config.yaml
-```
-
-For GCS OAuth authentication, you'll need to:
+For OAuth-based Google Cloud Storage access:
 
 1. Create a Google Cloud OAuth 2.0 Client ID:
-   - Go to Google Cloud Console -> APIs & Services -> Credentials
+   - Go to Google Cloud Console → APIs & Services → Credentials
    - Create a new OAuth 2.0 Client ID
    - Download the client configuration file
 
-2. Get an OAuth token using the Google OAuth 2.0 Playground:
-   - Visit https://developers.google.com/oauthplayground/
+2. Get an OAuth token using the [Google OAuth 2.0 Playground](https://developers.google.com/oauthplayground/):
    - Configure OAuth 2.0 with your client ID and secret
    - Select and authorize the "Google Cloud Storage API v1"
    - Exchange authorization code for tokens
@@ -249,6 +362,6 @@ pipeline:
     type: GCSBufferedStorageSourceAdapter
     config:
       access_token: "your-access-token"
-``` 
+```
 
-Note: OAuth tokens are temporary and will expire. For production use, consider using service account authentication instead.
+**Note:** OAuth tokens are temporary and will expire. For production use, consider using service account authentication instead (via `GOOGLE_APPLICATION_CREDENTIALS`).

@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CDP Pipeline Workflow - Stellar Blockchain Data Pipeline</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+            flex: 1;
+        }
+
+        header {
+            text-align: center;
+            padding: 3rem 0;
+        }
+
+        h1 {
+            font-size: 3rem;
+            color: white;
+            margin-bottom: 0.5rem;
+            font-weight: 700;
+        }
+
+        .subtitle {
+            font-size: 1.25rem;
+            color: rgba(255, 255, 255, 0.9);
+            margin-bottom: 3rem;
+        }
+
+        .install-box {
+            background: white;
+            border-radius: 8px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+        }
+
+        .install-box h2 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #667eea;
+        }
+
+        .command-box {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 1rem;
+            border-radius: 4px;
+            font-family: "Monaco", "Courier New", monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
+            margin: 1rem 0;
+            position: relative;
+        }
+
+        .command-box code {
+            display: block;
+        }
+
+        .copy-button {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 0.4rem 0.8rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: background 0.2s;
+        }
+
+        .copy-button:hover {
+            background: #5568d3;
+        }
+
+        .copy-button.copied {
+            background: #48bb78;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .tab {
+            padding: 0.5rem 1rem;
+            background: #f7fafc;
+            border: 2px solid #e2e8f0;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tab.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .info-box {
+            background: #edf2f7;
+            padding: 1rem;
+            border-radius: 4px;
+            margin: 1rem 0;
+            border-left: 4px solid #667eea;
+        }
+
+        .info-box strong {
+            color: #667eea;
+        }
+
+        .links {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-top: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .link-button {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            background: white;
+            color: #667eea;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .link-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .link-button.secondary {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 2px solid white;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 0.9rem;
+        }
+
+        footer a {
+            color: white;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2rem;
+            }
+
+            .subtitle {
+                font-size: 1rem;
+            }
+
+            .install-box {
+                padding: 1.5rem;
+            }
+
+            .links {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>CDP Pipeline Workflow</h1>
+            <p class="subtitle">Process Stellar blockchain data at scale</p>
+        </header>
+
+        <div class="install-box">
+            <h2>Quick Start</h2>
+
+            <div class="tabs">
+                <div class="tab active" onclick="switchTab('docker', event)">Docker</div>
+                <div class="tab" onclick="switchTab('source', event)">From Source</div>
+            </div>
+
+            <div id="docker" class="tab-content active">
+                <p>Pull the Docker image:</p>
+                <div class="command-box">
+                    <button class="copy-button" onclick="copyToClipboard('docker-pull')">Copy</button>
+                    <code id="docker-pull">docker pull withobsrvr/obsrvr-flow-pipeline:latest</code>
+                </div>
+
+                <h4 style="margin-top: 2rem;">Basic Usage (Local Files)</h4>
+                <div class="command-box">
+                    <button class="copy-button" onclick="copyToClipboard('docker-basic')">Copy</button>
+                    <code id="docker-basic">docker run --rm \
+  -v $(pwd)/config:/app/config \
+  withobsrvr/obsrvr-flow-pipeline:latest \
+  /app/cdp-pipeline-workflow -config /app/config/pipeline.yaml</code>
+                </div>
+
+                <h4 style="margin-top: 2rem;">With Google Cloud Storage</h4>
+                <div class="command-box">
+                    <button class="copy-button" onclick="copyToClipboard('docker-gcs')">Copy</button>
+                    <code id="docker-gcs">docker run --rm --network host \
+  -v "$HOME/.config/gcloud/application_default_credentials.json":/.config/gcp/credentials.json:ro \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/.config/gcp/credentials.json \
+  -v $(pwd)/config:/app/config \
+  withobsrvr/obsrvr-flow-pipeline:latest \
+  /app/cdp-pipeline-workflow -config /app/config/pipeline.yaml</code>
+                </div>
+
+                <h4 style="margin-top: 2rem;">With AWS S3</h4>
+                <div class="command-box">
+                    <button class="copy-button" onclick="copyToClipboard('docker-aws')">Copy</button>
+                    <code id="docker-aws">docker run --rm --network host \
+  -e AWS_ACCESS_KEY_ID=your_access_key \
+  -e AWS_SECRET_ACCESS_KEY=your_secret_key \
+  -e AWS_REGION=us-east-1 \
+  -v $(pwd)/config:/app/config \
+  withobsrvr/obsrvr-flow-pipeline:latest \
+  /app/cdp-pipeline-workflow -config /app/config/pipeline.yaml</code>
+                </div>
+
+                <div class="info-box" style="margin-top: 1rem;">
+                    <strong>Note:</strong> Replace <code>pipeline.yaml</code> with your configuration file path. For GCS authentication, first run <code>gcloud auth application-default login</code> to generate credentials.
+                </div>
+            </div>
+
+            <div id="source" class="tab-content">
+                <p>Build from source:</p>
+                <div class="command-box">
+                    <button class="copy-button" onclick="copyToClipboard('source-cmd')">Copy</button>
+                    <code id="source-cmd">git clone https://github.com/withObsrvr/cdp-pipeline-workflow.git
+cd cdp-pipeline-workflow
+CGO_ENABLED=1 go build -o cdp-pipeline-workflow
+./cdp-pipeline-workflow -config config.yaml</code>
+                </div>
+                <div class="info-box">
+                    <strong>Prerequisites:</strong> Go 1.24+, GCC (for CGO), libzmq3-dev, libczmq-dev
+                </div>
+                <p style="margin-top: 1rem;"><strong>System Dependencies:</strong></p>
+                <div class="command-box">
+                    <button class="copy-button" onclick="copyToClipboard('deps-cmd')">Copy</button>
+                    <code id="deps-cmd"># Ubuntu/Debian
+sudo apt-get install -y libzmq3-dev libczmq-dev libsodium-dev build-essential
+
+# macOS
+brew install zeromq czmq libsodium</code>
+                </div>
+            </div>
+        </div>
+
+        <div class="install-box">
+            <h2>Example Configuration</h2>
+            <p>Create a <code>config.yaml</code> file:</p>
+            <div class="command-box">
+                <button class="copy-button" onclick="copyToClipboard('config-cmd')">Copy</button>
+                <code id="config-cmd">pipeline:
+  name: MyPipeline
+  source:
+    type: BufferedStorageSourceAdapter
+    config:
+      bucket_name: "your-bucket"
+      network: "mainnet"
+      start_ledger: 1000
+      end_ledger: 2000
+  processors:
+    - type: LedgerMetaDecoder
+  consumers:
+    - type: SaveToPostgreSQL
+      config:
+        host: "localhost"
+        port: 5432
+        database: "stellar"
+        username: "postgres"
+        password: "password"</code>
+            </div>
+        </div>
+
+        <div class="links">
+            <a href="https://github.com/withObsrvr/cdp-pipeline-workflow" class="link-button">
+                View on GitHub
+            </a>
+            <a href="https://github.com/withObsrvr/cdp-pipeline-workflow/blob/main/README.md" class="link-button secondary">
+                Documentation
+            </a>
+            <a href="https://github.com/withObsrvr/cdp-pipeline-workflow/issues" class="link-button secondary">
+                Report Issues
+            </a>
+        </div>
+    </div>
+
+    <footer>
+        <p>Built with ❤️ for the Stellar ecosystem | <a href="https://github.com/withObsrvr">OBSRVR</a></p>
+    </footer>
+
+    <script>
+        function switchTab(tabName, event) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+
+            // Remove active class from all tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+
+            // Show selected tab content
+            document.getElementById(tabName).classList.add('active');
+
+            // Add active class to clicked tab
+            event.target.classList.add('active');
+        }
+
+        function copyToClipboard(elementId) {
+            const element = document.getElementById(elementId);
+            const text = element.textContent;
+
+            navigator.clipboard.writeText(text).then(() => {
+                const button = element.parentElement.querySelector('.copy-button');
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.classList.add('copied');
+
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.classList.remove('copied');
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+            });
+        }
+    </script>
+</body>
+</html>
