@@ -1,0 +1,64 @@
+# RPC Source Adapter - Streaming Mode Example
+#
+# This configuration runs the RPC source adapter in streaming mode, continuously
+# fetching new ledgers as they are produced on the Stellar network.
+#
+# Key Features:
+# - No end_ledger specified = streaming mode (runs indefinitely)
+# - Checkpointing enabled for crash recovery
+# - Frequent checkpoint saving (after every batch in streaming mode)
+# - Configurable poll interval for catching up to latest ledger
+#
+# Use Case: Real-time blockchain data processing, monitoring new transactions
+
+pipelines:
+  StreamingPipeline:
+    source:
+      type: SorobanSourceAdapter
+      config:
+        # RPC endpoint
+        rpc_url: "https://rpc-testnet.nodeswithobsrvr.co"
+        auth_header: "Api-Key YOUR_API_KEY"
+
+        # Starting point
+        start_ledger: 1281924  # Start from this ledger
+        # No end_ledger = streaming mode
+
+        # Batch processing
+        batch_size: 10  # Fetch 10 ledgers per batch
+
+        # Polling configuration
+        poll_interval: 5  # Poll every 5 seconds when caught up (minimum 1s)
+
+        # RPC method
+        rpc_method: "getLedgers"
+
+        # Checkpointing (for crash recovery)
+        checkpoint_dir: "/data/checkpoints/streaming-pipeline"
+        checkpoint_interval: 10  # Ignored in streaming mode - saves after every batch
+
+    # Add processors as needed
+    processors: []
+
+    # Add consumers as needed
+    consumers: []
+
+# How It Works:
+# 1. Starts processing from start_ledger
+# 2. Fetches ledgers in batches of batch_size
+# 3. Saves checkpoint after EVERY batch (streaming mode behavior)
+# 4. When caught up to latest ledger, waits poll_interval seconds
+# 5. Continues indefinitely until stopped (Ctrl+C)
+# 6. On restart, resumes from last checkpoint
+
+# Crash Recovery:
+# If the pipeline crashes or is stopped (Ctrl+C), it will:
+# - Load the last saved checkpoint
+# - Resume from the next ledger after the checkpoint
+# - Continue processing without missing any ledgers
+
+# Expected Behavior:
+# - Continuous processing of new ledgers
+# - Log: "Running in STREAMING mode (no end_ledger)"
+# - Log: "Caught up: current=X, latest=Y, waiting 5s..." when no new ledgers
+# - Checkpoint saved after every batch that processes ledgers

@@ -1,0 +1,37 @@
+# WebSocket Streaming Pipeline
+# Real-time event streaming via WebSocket server
+
+pipelines:
+  WebSocketStreamingPipeline:
+    source:
+      type: RPCSourceAdapter
+      config:
+        rpc_url: "https://rpc.lightsail.network"
+        auth_header: ""
+        start_ledger: 1454282
+        poll_interval: 5
+        rpc_method: "getEvents"
+
+        filters:
+          - type: "contract"
+            contractIds:
+              - "YOUR_CONTRACT_ID"  # Add your contract ID
+            topics:
+              - ["*", "*", "*", "*"]
+
+        pagination:
+          limit: 1000
+
+        xdrFormat: "json"
+
+    processors:
+      - type: GetEventsRPC
+        config: {}
+
+    consumers:
+      # WebSocket server for real-time streaming
+      - type: SaveToWebSocket
+        config:
+          port: "8080"              # WebSocket server port (default: 8080)
+          path: "/ws"               # WebSocket endpoint path (default: /ws)
+          max_queue_size: 1000      # Max messages to queue per client (default: 1000)

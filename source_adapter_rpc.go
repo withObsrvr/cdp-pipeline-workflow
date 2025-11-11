@@ -3,14 +3,18 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"net/http/httputil"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/stellar/go/xdr"
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
 )
 
@@ -90,7 +94,13 @@ type LedgerEntriesResponse struct {
 
 // LedgersResponse defines the response for getLedgers.
 type LedgersResponse struct {
-	Result interface{} `json:"result"`
+	Result *LedgersResult `json:"result"`
+}
+
+// LedgersResult contains the ledgers array and latest ledger sequence.
+type LedgersResult struct {
+	Ledgers      []interface{} `json:"ledgers"`       // Array of ledger objects
+	LatestLedger uint64        `json:"latestLedger"`  // Latest known ledger sequence
 }
 
 // NetworkResponse defines the response for getNetwork.
@@ -126,6 +136,14 @@ type SendTransactionResponse struct {
 // SimulateTransactionResponse defines the response for simulateTransaction.
 type SimulateTransactionResponse struct {
 	Result interface{} `json:"result"`
+}
+
+// Checkpoint stores the state of ledger processing for crash recovery.
+type Checkpoint struct {
+	LastProcessedLedger uint64    `json:"last_processed_ledger"`
+	Timestamp           time.Time `json:"timestamp"`
+	TotalProcessed      uint64    `json:"total_processed"`
+	PipelineName        string    `json:"pipeline_name"`
 }
 
 // RPCRequest is a generic JSON-RPC request structure.
@@ -268,22 +286,18 @@ func (s *SorobanSourceAdapter) sendRPCRequest(ctx context.Context, req interface
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", s.config.AuthHeader)
 
-	// Optionally log the request details (enable/disable debug logging as needed).
-	reqDump, _ := httputil.DumpRequestOut(httpReq, true)
-	log.Printf("Sending RPC request:\n%s", string(reqDump))
-
 	httpResp, err := s.client.Do(httpReq)
 	if err != nil {
 		return errors.Wrap(err, "failed to send request")
 	}
 	defer httpResp.Body.Close()
 
-	log.Printf("Received response: Status: %s, Length: %d", httpResp.Status, httpResp.ContentLength)
 	if httpResp.StatusCode != http.StatusOK {
 		body, _ := httputil.DumpResponse(httpResp, true)
 		return fmt.Errorf("unexpected status code %d: %s", httpResp.StatusCode, string(body))
 	}
 
+	// Decode response
 	if err := json.NewDecoder(httpResp.Body).Decode(resp); err != nil {
 		return errors.Wrap(err, "failed to decode response")
 	}
@@ -357,10 +371,25 @@ func (s *SorobanSourceAdapter) GetLedgerEntries(ctx context.Context, ledger uint
 }
 
 // GetLedgers calls the getLedgers RPC method.
+// Range semantics: [from, to) - from is inclusive, to is exclusive
+// Example: GetLedgers(100, 110) fetches ledgers 100, 101, ..., 109 (10 ledgers)
 func (s *SorobanSourceAdapter) GetLedgers(ctx context.Context, from uint64, to uint64) (*LedgersResponse, error) {
+	// Validate range
+	if to < from {
+		return nil, fmt.Errorf("invalid range: to (%d) must be >= from (%d)", to, from)
+	}
+
+	// Calculate limit as the number of ledgers in the range [from, to)
+	limit := to - from
+	if limit == 0 {
+		limit = 1 // At minimum, fetch the 'from' ledger
+	}
+
 	params := map[string]interface{}{
-		"from": from,
-		"to":   to,
+		"startLedger": from,
+		"pagination": map[string]interface{}{
+			"limit": limit,
+		},
 	}
 	var resp LedgersResponse
 	if err := s.CallRPC(ctx, "getLedgers", params, &resp); err != nil {
@@ -527,6 +556,8 @@ func (s *SorobanSourceAdapter) Run(ctx context.Context) error {
 				return fmt.Errorf("failed to get events: %w", err)
 			}
 			log.Printf("Received getEvents response: %+v", eventsResp)
+		case "getLedgers":
+			return s.runGetLedgersLoop(ctx)
 		default:
 			log.Printf("Unrecognized rpc_method: %s", method)
 		}
@@ -536,6 +567,379 @@ func (s *SorobanSourceAdapter) Run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// =============================================================
+// getLedgers Loop Implementation
+// =============================================================
+
+// =============================================================
+// Checkpointing Functions
+// =============================================================
+
+// getCheckpointPath returns the path to the checkpoint file
+func (s *SorobanSourceAdapter) getCheckpointPath() string {
+	// Get checkpoint_dir from config, default to /tmp/checkpoints/soroban-source
+	dir := "/tmp/checkpoints/soroban-source"
+	if checkpointDir, ok := s.config.Extra["checkpoint_dir"].(string); ok {
+		dir = checkpointDir
+	}
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Printf("WARNING: Failed to create checkpoint directory: %v, using /tmp", err)
+		dir = "/tmp"
+	}
+
+	return filepath.Join(dir, "ledgers.json")
+}
+
+// saveCheckpoint saves the current processing state to disk
+func (s *SorobanSourceAdapter) saveCheckpoint(ledger, totalProcessed uint64) error {
+	checkpoint := &Checkpoint{
+		LastProcessedLedger: ledger,
+		Timestamp:           time.Now(),
+		TotalProcessed:      totalProcessed,
+		PipelineName:        "soroban-pipeline",
+	}
+
+	path := s.getCheckpointPath()
+	tmpPath := path + ".tmp"
+
+	// Marshal to JSON with indentation
+	data, err := json.MarshalIndent(checkpoint, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal checkpoint: %w", err)
+	}
+
+	// Write to temp file
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write checkpoint: %w", err)
+	}
+
+	// Atomic rename
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("failed to rename checkpoint: %w", err)
+	}
+
+	log.Printf("Saved checkpoint: ledger %d (total: %d)", ledger, totalProcessed)
+	return nil
+}
+
+// loadCheckpoint loads the processing state from disk
+func (s *SorobanSourceAdapter) loadCheckpoint() (*Checkpoint, error) {
+	path := s.getCheckpointPath()
+
+	// Check if file exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil, nil // No checkpoint, not an error
+	}
+
+	// Read file
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read checkpoint: %w", err)
+	}
+
+	// Unmarshal JSON
+	var checkpoint Checkpoint
+	if err := json.Unmarshal(data, &checkpoint); err != nil {
+		log.Printf("WARNING: Failed to unmarshal checkpoint (corrupted?): %v", err)
+		return nil, nil // Corrupted checkpoint, start fresh
+	}
+
+	log.Printf("Loaded checkpoint: ledger %d (saved at %v)", checkpoint.LastProcessedLedger, checkpoint.Timestamp)
+	return &checkpoint, nil
+}
+
+// decodeLedgerXDR decodes a ledger response map into xdr.LedgerCloseMeta.
+//
+// This function handles the RPC-specific decoding of raw JSON responses. It is NOT
+// subject to the CLAUDE.md guideline about using SDK helper methods, which applies
+// to downstream transaction processors, not RPC response decoding.
+//
+// The process:
+// 1. Extract base64-encoded XDR from RPC JSON response
+// 2. Base64 decode the string
+// 3. Use Stellar SDK's xdr.SafeUnmarshal to deserialize into xdr.LedgerCloseMeta
+//
+// Downstream processors SHOULD use SDK helper methods (tx.GetTransactionEvents(), etc.)
+// when processing the resulting LedgerCloseMeta. See docs/stellar-go-sdk-helper-methods.md
+func decodeLedgerXDR(ledgerMap map[string]interface{}) (*xdr.LedgerCloseMeta, error) {
+	// Extract metadataXdr field from RPC response
+	metadataXdrStr, ok := ledgerMap["metadataXdr"].(string)
+	if !ok {
+		return nil, fmt.Errorf("metadataXdr field not found or not a string")
+	}
+
+	// Base64 decode
+	xdrBytes, err := base64.StdEncoding.DecodeString(metadataXdrStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to base64 decode metadataXdr: %w", err)
+	}
+
+	// XDR unmarshal using Stellar SDK function
+	var ledgerCloseMeta xdr.LedgerCloseMeta
+	if err := xdr.SafeUnmarshal(xdrBytes, &ledgerCloseMeta); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal XDR: %w", err)
+	}
+
+	return &ledgerCloseMeta, nil
+}
+
+// runGetLedgersLoop processes ledgers sequentially from start_ledger to end_ledger.
+func (s *SorobanSourceAdapter) runGetLedgersLoop(ctx context.Context) error {
+	// Try to load checkpoint
+	checkpoint, err := s.loadCheckpoint()
+	if err != nil {
+		log.Printf("WARNING: Failed to load checkpoint: %v", err)
+	}
+
+	// Set starting ledger and total processed count
+	currentLedger := s.config.StartLedger
+	totalProcessed := uint64(0)
+
+	// Resume from checkpoint if available
+	if checkpoint != nil && checkpoint.LastProcessedLedger > 0 {
+		log.Printf("Resuming from checkpoint: ledger %d", checkpoint.LastProcessedLedger)
+		currentLedger = checkpoint.LastProcessedLedger + 1
+		totalProcessed = checkpoint.TotalProcessed
+	}
+
+	// Detect streaming mode
+	streamingMode := s.isStreamingMode()
+	endLedger := s.getEndLedger()
+	batchSize := uint64(s.config.BatchSize)
+
+	if batchSize == 0 {
+		batchSize = 100 // Default batch size
+	}
+
+	// Get checkpoint interval from config
+	checkpointInterval := uint64(100) // Default: save every 100 ledgers
+	if interval, ok := s.config.Extra["checkpoint_interval"].(int); ok {
+		checkpointInterval = uint64(interval)
+	} else if intervalFloat, ok := s.config.Extra["checkpoint_interval"].(float64); ok {
+		checkpointInterval = uint64(intervalFloat)
+	}
+
+	// Validate poll_interval for streaming mode
+	if streamingMode && s.config.PollInterval < 1*time.Second {
+		log.Printf("WARNING: poll_interval too low (%v) for streaming mode, setting to 5s", s.config.PollInterval)
+		s.config.PollInterval = 5 * time.Second
+	}
+
+	// Log mode
+	if streamingMode {
+		log.Printf("Running in STREAMING mode (no end_ledger)")
+		log.Printf("Starting from ledger %d (batch size: %d, poll interval: %v)", currentLedger, batchSize, s.config.PollInterval)
+	} else {
+		log.Printf("Running in BATCH mode (end_ledger: %d)", endLedger)
+		log.Printf("Processing ledgers from %d to %d (batch size: %d)", currentLedger, endLedger, batchSize)
+	}
+
+	for {
+		// In batch mode, check if we've reached the end
+		if !streamingMode && currentLedger >= endLedger {
+			log.Printf("Reached end_ledger %d, stopping", endLedger)
+			break
+		}
+		// Calculate batch end
+		batchEnd := currentLedger + batchSize
+		if !streamingMode && batchEnd > endLedger {
+			batchEnd = endLedger
+		}
+
+		log.Printf("Fetching ledgers %d to %d", currentLedger, batchEnd)
+
+		// Fetch ledgers from RPC
+		ledgersResp, err := s.GetLedgers(ctx, currentLedger, batchEnd)
+		if err != nil {
+			log.Printf("ERROR: Failed to fetch ledgers %d-%d: %v", currentLedger, batchEnd, err)
+			return fmt.Errorf("getLedgers RPC call failed: %w", err)
+		}
+
+		// Check for valid response
+		if ledgersResp == nil || ledgersResp.Result == nil || len(ledgersResp.Result.Ledgers) == 0 {
+			if streamingMode {
+				// In streaming mode, no ledgers means we're caught up
+				// Try to fetch latest ledger to show better info
+				latest, err := s.GetLatestLedger(ctx)
+				if err == nil && latest > 0 {
+					log.Printf("Caught up: current=%d, latest=%d, waiting %v...", currentLedger, latest, s.config.PollInterval)
+				} else {
+					log.Printf("Caught up to latest ledger (currently at %d), waiting %v...", currentLedger, s.config.PollInterval)
+				}
+
+				// Wait with context cancellation support
+				select {
+				case <-time.After(s.config.PollInterval):
+					continue
+				case <-ctx.Done():
+					log.Printf("Context cancelled during wait, saving checkpoint and exiting...")
+					if err := s.saveCheckpoint(currentLedger, totalProcessed); err != nil {
+						log.Printf("WARNING: Failed to save checkpoint: %v", err)
+					}
+					return ctx.Err()
+				}
+			} else {
+				// In batch mode, empty response is unexpected
+				log.Printf("WARNING: No ledgers returned for range %d-%d", currentLedger, batchEnd)
+				continue
+			}
+		}
+
+		// Extract and process ledgers
+		ledgers := ledgersResp.Result.Ledgers
+
+		// Track actually processed ledgers
+		var lastProcessedLedger uint64
+		processedCount := uint64(0)
+
+		// Decode and send each ledger to processors
+		for _, ledger := range ledgers {
+			// Convert to map for XDR extraction
+			ledgerMap, ok := ledger.(map[string]interface{})
+			if !ok {
+				log.Printf("WARNING: Ledger is not a map, skipping: %T", ledger)
+				continue
+			}
+
+			// Extract ledger sequence for tracking
+			var ledgerSeq uint64
+			if seqFloat, ok := ledgerMap["sequence"].(float64); ok {
+				ledgerSeq = uint64(seqFloat)
+			} else if seqInt, ok := ledgerMap["sequence"].(int); ok {
+				ledgerSeq = uint64(seqInt)
+			} else {
+				log.Printf("WARNING: Could not extract ledger sequence from map, skipping")
+				continue
+			}
+
+			// Decode XDR
+			ledgerCloseMeta, err := decodeLedgerXDR(ledgerMap)
+			if err != nil {
+				log.Printf("ERROR: Failed to decode ledger XDR for sequence %d: %v", ledgerSeq, err)
+				continue
+			}
+
+			// Send decoded XDR to processors
+			msg := cdpProcessor.Message{Payload: *ledgerCloseMeta}
+
+			for _, proc := range s.processors {
+				if err := proc.Process(ctx, msg); err != nil {
+					log.Printf("Processor %T failed for ledger %d: %v", proc, ledgerSeq, err)
+					// Continue processing other ledgers
+				}
+			}
+
+			// Track successful processing
+			lastProcessedLedger = ledgerSeq
+			processedCount++
+		}
+
+		totalProcessed += processedCount
+
+		log.Printf("Processed %d ledgers from batch %d-%d (total: %d)", processedCount, currentLedger, batchEnd, totalProcessed)
+
+		// Advance to next ledger based on what was actually processed
+		if processedCount > 0 {
+			// Resume from the ledger after the last one we successfully processed
+			currentLedger = lastProcessedLedger + 1
+		} else {
+			// No ledgers processed - in streaming mode this means caught up, in batch mode skip the range
+			if !streamingMode {
+				log.Printf("WARNING: No ledgers processed in range %d-%d, advancing past range", currentLedger, batchEnd)
+			}
+			currentLedger = batchEnd
+		}
+
+		// Save checkpoint logic
+		shouldSaveCheckpoint := false
+		if streamingMode && processedCount > 0 {
+			// In streaming mode, save checkpoint after every batch that processed ledgers
+			shouldSaveCheckpoint = true
+		} else if totalProcessed%checkpointInterval == 0 {
+			// In batch mode, save based on interval
+			shouldSaveCheckpoint = true
+		}
+
+		if shouldSaveCheckpoint {
+			// Save the last actually processed ledger, not the next one to process
+			checkpointLedger := lastProcessedLedger
+			if processedCount == 0 {
+				// If nothing processed this iteration, use currentLedger - 1
+				// (This can happen in batch mode when reaching checkpoint interval)
+				if currentLedger > 0 {
+					checkpointLedger = currentLedger - 1
+				}
+			}
+			if err := s.saveCheckpoint(checkpointLedger, totalProcessed); err != nil {
+				log.Printf("WARNING: Failed to save checkpoint: %v", err)
+			}
+		}
+
+		// Check for cancellation
+		select {
+		case <-ctx.Done():
+			log.Printf("Context cancelled, stopping at ledger %d", currentLedger)
+			return ctx.Err()
+		default:
+		}
+
+		// Rate limiting
+		if s.config.PollInterval > 0 {
+			time.Sleep(s.config.PollInterval)
+		}
+	}
+
+	log.Printf("Completed processing ledgers %d to %d (total: %d)", s.config.StartLedger, endLedger, totalProcessed)
+
+	// Save final checkpoint with the last actually processed ledger
+	finalCheckpointLedger := currentLedger
+	if currentLedger > 0 {
+		finalCheckpointLedger = currentLedger - 1
+	}
+	if err := s.saveCheckpoint(finalCheckpointLedger, totalProcessed); err != nil {
+		log.Printf("WARNING: Failed to save final checkpoint: %v", err)
+	}
+
+	return nil
+}
+
+// isStreamingMode returns true if streaming mode is enabled (no end_ledger specified)
+func (s *SorobanSourceAdapter) isStreamingMode() bool {
+	// Check if end_ledger exists in config
+	_, hasEndLedger := s.config.Extra["end_ledger"]
+	return !hasEndLedger
+}
+
+// getEndLedger returns the end ledger from config, or fetches the latest ledger if not specified.
+func (s *SorobanSourceAdapter) getEndLedger() uint64 {
+	// If streaming mode, return 0
+	if s.isStreamingMode() {
+		return 0
+	}
+
+	// Check if end_ledger specified in config
+	if rawEnd, ok := s.config.Extra["end_ledger"]; ok {
+		switch v := rawEnd.(type) {
+		case int:
+			return uint64(v)
+		case float64:
+			return uint64(v)
+		}
+	}
+
+	// If no end_ledger specified, fetch latest
+	latest, err := s.GetLatestLedger(context.Background())
+	if err != nil {
+		log.Printf("Failed to get latest ledger: %v, using start + 10000", err)
+		return s.config.StartLedger + 10000
+	}
+
+	log.Printf("No end_ledger specified, using latest: %d", latest)
+	return latest
 }
 
 // Subscribe adds a processor to the adapter's processor chain.
