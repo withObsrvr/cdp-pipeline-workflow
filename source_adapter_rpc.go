@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -372,11 +371,18 @@ func (s *SorobanSourceAdapter) GetLedgerEntries(ctx context.Context, ledger uint
 }
 
 // GetLedgers calls the getLedgers RPC method.
+// Range semantics: [from, to) - from is inclusive, to is exclusive
+// Example: GetLedgers(100, 110) fetches ledgers 100, 101, ..., 109 (10 ledgers)
 func (s *SorobanSourceAdapter) GetLedgers(ctx context.Context, from uint64, to uint64) (*LedgersResponse, error) {
-	// Calculate limit as the number of ledgers in the range
+	// Validate range
+	if to < from {
+		return nil, fmt.Errorf("invalid range: to (%d) must be >= from (%d)", to, from)
+	}
+
+	// Calculate limit as the number of ledgers in the range [from, to)
 	limit := to - from
-	if limit <= 0 {
-		limit = 1
+	if limit == 0 {
+		limit = 1 // At minimum, fetch the 'from' ledger
 	}
 
 	params := map[string]interface{}{
@@ -607,7 +613,7 @@ func (s *SorobanSourceAdapter) saveCheckpoint(ledger, totalProcessed uint64) err
 	}
 
 	// Write to temp file
-	if err := ioutil.WriteFile(tmpPath, data, 0644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write checkpoint: %w", err)
 	}
 
@@ -630,7 +636,7 @@ func (s *SorobanSourceAdapter) loadCheckpoint() (*Checkpoint, error) {
 	}
 
 	// Read file
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read checkpoint: %w", err)
 	}
@@ -767,12 +773,16 @@ func (s *SorobanSourceAdapter) runGetLedgersLoop(ctx context.Context) error {
 			} else {
 				// In batch mode, empty response is unexpected
 				log.Printf("WARNING: No ledgers returned for range %d-%d", currentLedger, batchEnd)
-				break
+				continue
 			}
 		}
 
 		// Extract and process ledgers
 		ledgers := ledgersResp.Result.Ledgers
+
+		// Track actually processed ledgers
+		var lastProcessedLedger uint64
+		processedCount := uint64(0)
 
 		// Decode and send each ledger to processors
 		for _, ledger := range ledgers {
@@ -783,10 +793,21 @@ func (s *SorobanSourceAdapter) runGetLedgersLoop(ctx context.Context) error {
 				continue
 			}
 
+			// Extract ledger sequence for tracking
+			var ledgerSeq uint64
+			if seqFloat, ok := ledgerMap["sequence"].(float64); ok {
+				ledgerSeq = uint64(seqFloat)
+			} else if seqInt, ok := ledgerMap["sequence"].(int); ok {
+				ledgerSeq = uint64(seqInt)
+			} else {
+				log.Printf("WARNING: Could not extract ledger sequence from map, skipping")
+				continue
+			}
+
 			// Decode XDR
 			ledgerCloseMeta, err := decodeLedgerXDR(ledgerMap)
 			if err != nil {
-				log.Printf("ERROR: Failed to decode ledger XDR: %v", err)
+				log.Printf("ERROR: Failed to decode ledger XDR for sequence %d: %v", ledgerSeq, err)
 				continue
 			}
 
@@ -795,20 +816,31 @@ func (s *SorobanSourceAdapter) runGetLedgersLoop(ctx context.Context) error {
 
 			for _, proc := range s.processors {
 				if err := proc.Process(ctx, msg); err != nil {
-					log.Printf("Processor %T failed: %v", proc, err)
+					log.Printf("Processor %T failed for ledger %d: %v", proc, ledgerSeq, err)
 					// Continue processing other ledgers
 				}
 			}
+
+			// Track successful processing
+			lastProcessedLedger = ledgerSeq
+			processedCount++
 		}
 
-		// Update counters
-		processedCount := uint64(len(ledgers))
 		totalProcessed += processedCount
 
 		log.Printf("Processed %d ledgers from batch %d-%d (total: %d)", processedCount, currentLedger, batchEnd, totalProcessed)
 
-		// Advance to next batch
-		currentLedger = batchEnd
+		// Advance to next ledger based on what was actually processed
+		if processedCount > 0 {
+			// Resume from the ledger after the last one we successfully processed
+			currentLedger = lastProcessedLedger + 1
+		} else {
+			// No ledgers processed - in streaming mode this means caught up, in batch mode skip the range
+			if !streamingMode {
+				log.Printf("WARNING: No ledgers processed in range %d-%d, advancing past range", currentLedger, batchEnd)
+			}
+			currentLedger = batchEnd
+		}
 
 		// Save checkpoint logic
 		shouldSaveCheckpoint := false
@@ -821,7 +853,16 @@ func (s *SorobanSourceAdapter) runGetLedgersLoop(ctx context.Context) error {
 		}
 
 		if shouldSaveCheckpoint {
-			if err := s.saveCheckpoint(currentLedger, totalProcessed); err != nil {
+			// Save the last actually processed ledger, not the next one to process
+			checkpointLedger := lastProcessedLedger
+			if processedCount == 0 {
+				// If nothing processed this iteration, use currentLedger - 1
+				// (This can happen in batch mode when reaching checkpoint interval)
+				if currentLedger > 0 {
+					checkpointLedger = currentLedger - 1
+				}
+			}
+			if err := s.saveCheckpoint(checkpointLedger, totalProcessed); err != nil {
 				log.Printf("WARNING: Failed to save checkpoint: %v", err)
 			}
 		}
@@ -842,8 +883,12 @@ func (s *SorobanSourceAdapter) runGetLedgersLoop(ctx context.Context) error {
 
 	log.Printf("Completed processing ledgers %d to %d (total: %d)", s.config.StartLedger, endLedger, totalProcessed)
 
-	// Save final checkpoint
-	if err := s.saveCheckpoint(currentLedger, totalProcessed); err != nil {
+	// Save final checkpoint with the last actually processed ledger
+	finalCheckpointLedger := currentLedger
+	if currentLedger > 0 {
+		finalCheckpointLedger = currentLedger - 1
+	}
+	if err := s.saveCheckpoint(finalCheckpointLedger, totalProcessed); err != nil {
 		log.Printf("WARNING: Failed to save final checkpoint: %v", err)
 	}
 
