@@ -1,0 +1,73 @@
+# USDC Transfer Events Pipeline
+# Monitors all transfer events from the USDC Stellar Asset Contract on mainnet
+
+pipelines:
+  USDCTransfersPipeline:
+    source:
+      type: RPCSourceAdapter
+      config:
+        # Stellar mainnet RPC
+        rpc_url: "https://rpc-mainnet.stellar.org"
+        auth_header: ""  # Public endpoint, no auth needed
+
+        # Start from a recent ledger (update this to a recent mainnet ledger)
+        start_ledger: 2000000
+        # No end_ledger = continuous streaming
+
+        # Check for new events every 5 seconds
+        poll_interval: 5
+
+        # Batch configuration
+        batch_size: 100
+
+        # Use getEvents method
+        rpc_method: "getEvents"
+
+        # Filter for USDC transfer events
+        filters:
+          - type: "contract"
+            contractIds:
+              # USDC Stellar Asset Contract (mainnet)
+              - "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75"
+            topics:
+              # Transfer event signature: transfer(from: Address, to: Address, amount: i128)
+              # Base64 encoded "transfer"
+              - ["AAAADwAAAAh0cmFuc2Zlcg==", "*", "*", "*"]
+
+        # Pagination settings
+        pagination:
+          limit: 5000  # Max events per request
+
+        # Get events as JSON (easier to process)
+        xdrFormat: "json"
+
+    processors:
+      # Process raw RPC events
+      - type: GetEventsRPC
+        config: {}
+
+    consumers:
+      # Save to PostgreSQL for analytics
+      - type: SaveToPostgreSQL
+        config:
+          host: "localhost"
+          port: 5432
+          database: "stellar_usdc"
+          username: "postgres"
+          password: "your_password"
+          sslmode: "disable"
+          max_open_conns: 10
+          max_idle_conns: 5
+
+      # Optional: Also stream to ZeroMQ for real-time processing
+      # - type: SaveToZeroMQ
+      #   config:
+      #     address: "tcp://127.0.0.1:5555"
+
+      # Optional: Cache in Redis for quick lookups
+      # - type: SaveToRedis
+      #   config:
+      #     redis_address: "localhost:6379"
+      #     redis_password: ""
+      #     redis_db: 0
+      #     key_prefix: "usdc:transfer:"

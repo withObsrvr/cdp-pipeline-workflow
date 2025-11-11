@@ -1,0 +1,78 @@
+# RPC Source Adapter - Batch Mode Example
+#
+# This configuration runs the RPC source adapter in batch mode, processing
+# a specific range of ledgers and then stopping.
+#
+# Key Features:
+# - Defined start and end ledger = batch mode (processes range then exits)
+# - Checkpointing enabled for crash recovery
+# - Checkpoint saves at configurable intervals
+# - Perfect for historical data backfills
+#
+# Use Case: Historical data backfills, reprocessing specific ledger ranges
+
+pipelines:
+  BackfillPipeline:
+    source:
+      type: SorobanSourceAdapter
+      config:
+        # RPC endpoint
+        rpc_url: "https://rpc-testnet.nodeswithobsrvr.co"
+        auth_header: "Api-Key YOUR_API_KEY"
+
+        # Ledger range (batch mode)
+        start_ledger: 1000000
+        end_ledger: 2000000  # Presence of end_ledger = batch mode
+
+        # Batch processing
+        batch_size: 100  # Larger batches for historical backfills
+
+        # Rate limiting (optional)
+        poll_interval: 0  # No delay between batches (batch mode)
+
+        # RPC method
+        rpc_method: "getLedgers"
+
+        # Checkpointing (for crash recovery)
+        checkpoint_dir: "/data/checkpoints/backfill"
+        checkpoint_interval: 1000  # Save checkpoint every 1000 ledgers
+
+    # Add processors as needed
+    processors: []
+
+    # Add consumers as needed
+    consumers: []
+
+# How It Works:
+# 1. Starts processing from start_ledger (1000000)
+# 2. Fetches ledgers in batches of batch_size (100)
+# 3. Saves checkpoint every checkpoint_interval ledgers (1000)
+# 4. Stops when reaching end_ledger (2000000)
+# 5. Exits with log: "Completed processing ledgers X to Y"
+
+# Crash Recovery:
+# If the pipeline crashes during processing:
+# - Load the last saved checkpoint
+# - Resume from the next ledger after the checkpoint
+# - Continue until reaching end_ledger
+# - No duplicate processing
+
+# Example Checkpoint Saves (checkpoint_interval=1000):
+# - Ledger 1001000 (after 1000 ledgers processed)
+# - Ledger 1002000 (after 2000 ledgers processed)
+# - Ledger 1003000 (after 3000 ledgers processed)
+# - ...
+# - Ledger 2000000 (final checkpoint on completion)
+
+# Expected Behavior:
+# - Processes exactly 1,000,000 ledgers
+# - Log: "Running in BATCH mode (end_ledger: 2000000)"
+# - Log: "Reached end_ledger 2000000, stopping"
+# - Log: "Completed processing ledgers 1000000 to 2000000"
+# - Pipeline exits when complete
+
+# Tips for Large Backfills:
+# - Use larger batch_size (100-500) for faster processing
+# - Set checkpoint_interval to 1000-10000 to reduce disk I/O
+# - Use dedicated checkpoint_dir for each backfill job
+# - Monitor disk space in checkpoint directory

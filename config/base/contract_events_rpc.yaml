@@ -1,0 +1,114 @@
+# Contract Events RPC Pipeline Configuration
+# This pipeline fetches Soroban contract events from Stellar RPC and processes them
+
+pipelines:
+  ContractEventsPipeline:
+    source:
+      type: RPCSourceAdapter
+      config:
+        # RPC endpoint (choose one):
+        # rpc_url: "https://rpc-mainnet.stellar.org"              # Mainnet
+        # rpc_url: "https://soroban-testnet.stellar.org"        # Testnet
+        # rpc_url: "https://rpc-testnet.nodeswithobsrvr.co"     # OBSRVR Testnet
+        rpc_url: "https://rpc.lightsail.network"
+
+        # Authentication (set your API key if using private RPC)
+        auth_header: ""                                          # Leave empty for public endpoints
+        # auth_header: "Api-Key YOUR_API_KEY"                   # For OBSRVR nodes
+        # auth_header: "Bearer YOUR_JWT_TOKEN"                  # For other providers
+
+        # Ledger range
+        start_ledger: 1454282                                   # Starting ledger sequence
+        #end_ledger: 1001000                                    # Optional: end ledger (exclusive)
+
+        # Polling configuration
+        poll_interval: 10                                        # Check for new events every 10 seconds
+        batch_size: 100                                          # Events per request
+
+        # RPC method
+        rpc_method: "getEvents"
+
+        # Event filters
+        filters:
+          # Example 1: Filter by specific contract
+          - type: "contract"
+            contractIds:
+              #- "CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"  # Replace with your contract ID
+            topics:
+              - ["*", "*", "*", "*"]                            # Match all topics (4 wildcards)
+
+          # Example 2: Filter by specific event topic (transfer events)
+          # - type: "contract"
+          #   contractIds:
+          #     - "YOUR_CONTRACT_ID"
+          #   topics:
+          #     - ["AAAADwAAAAh0cmFuc2Zlcg==", "*", "*", "*"]  # Transfer event signature
+
+          # Example 3: Multiple contracts
+          # - type: "contract"
+          #   contractIds:
+          #     - "CONTRACT_ID_1"
+          #     - "CONTRACT_ID_2"
+          #     - "CONTRACT_ID_3"
+          #   topics:
+          #     - ["*"]
+
+        # Pagination
+        pagination:
+          limit: 1000                                            # Max events per response
+          # cursor: ""                                           # Optional: resume from cursor
+
+        # XDR format
+        xdrFormat: "json"                                        # Use "json" for unpacked JSON or "xdr" for base64 XDR
+
+    processors:
+      # Process the raw RPC events
+      - type: GetEventsRPC
+        config: {}
+
+      # Optional: Add more processors here
+      # - type: ContractEvent
+      #   config:
+      #     network_passphrase: "Public Global Stellar Network ; September 2015"  # Mainnet
+      #     # network_passphrase: "Test SDF Network ; September 2015"             # Testnet
+
+    consumers:
+      # Choose your output destination:
+
+      # Option 1: Save to PostgreSQL
+      # - type: SaveToPostgreSQL
+      #   config:
+      #     host: "localhost"
+      #     port: 5432
+      #     database: "stellar_events"
+      #     username: "postgres"
+      #     password: "your_password"
+      #     sslmode: "disable"
+      #     max_open_conns: 10
+      #     max_idle_conns: 5
+
+      # Option 2: Save to MongoDB
+      # - type: SaveToMongoDB
+      #   config:
+      #     uri: "mongodb://localhost:27017"
+      #     database: "stellar"
+      #     collection: "contract_events"
+      #     connect_timeout: 10
+
+      # Option 3: Save to DuckDB
+      # - type: SaveToDuckDB
+      #   config:
+      #     db_path: "data/contract_events.duckdb"
+
+      # Option 4: Stream to ZeroMQ
+      - type: SaveToZeroMQ
+        config:
+          address: "tcp://127.0.0.1:5555"
+
+      # Option 5: Save to Redis
+      # - type: SaveToRedis
+      #   config:
+      #     redis_address: "localhost:6379"
+      #     redis_password: ""
+      #     redis_db: 0
+      #     key_prefix: "stellar:events:"
