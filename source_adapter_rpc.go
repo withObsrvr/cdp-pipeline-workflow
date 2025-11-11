@@ -652,9 +652,21 @@ func (s *SorobanSourceAdapter) loadCheckpoint() (*Checkpoint, error) {
 	return &checkpoint, nil
 }
 
-// decodeLedgerXDR decodes a ledger response map into xdr.LedgerCloseMeta
+// decodeLedgerXDR decodes a ledger response map into xdr.LedgerCloseMeta.
+//
+// This function handles the RPC-specific decoding of raw JSON responses. It is NOT
+// subject to the CLAUDE.md guideline about using SDK helper methods, which applies
+// to downstream transaction processors, not RPC response decoding.
+//
+// The process:
+// 1. Extract base64-encoded XDR from RPC JSON response
+// 2. Base64 decode the string
+// 3. Use Stellar SDK's xdr.SafeUnmarshal to deserialize into xdr.LedgerCloseMeta
+//
+// Downstream processors SHOULD use SDK helper methods (tx.GetTransactionEvents(), etc.)
+// when processing the resulting LedgerCloseMeta. See docs/stellar-go-sdk-helper-methods.md
 func decodeLedgerXDR(ledgerMap map[string]interface{}) (*xdr.LedgerCloseMeta, error) {
-	// Extract metadataXdr field
+	// Extract metadataXdr field from RPC response
 	metadataXdrStr, ok := ledgerMap["metadataXdr"].(string)
 	if !ok {
 		return nil, fmt.Errorf("metadataXdr field not found or not a string")
@@ -666,7 +678,7 @@ func decodeLedgerXDR(ledgerMap map[string]interface{}) (*xdr.LedgerCloseMeta, er
 		return nil, fmt.Errorf("failed to base64 decode metadataXdr: %w", err)
 	}
 
-	// XDR unmarshal
+	// XDR unmarshal using Stellar SDK function
 	var ledgerCloseMeta xdr.LedgerCloseMeta
 	if err := xdr.SafeUnmarshal(xdrBytes, &ledgerCloseMeta); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal XDR: %w", err)
