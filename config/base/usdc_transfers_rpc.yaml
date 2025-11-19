@@ -31,7 +31,7 @@ pipelines:
               - "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75"
             topics:
               # Transfer event signature: transfer(from: Address, to: Address, amount: i128)
-              # Base64 encoded "transfer"
+              # XDR-encoded topic filter (base64 format)
               - ["AAAADwAAAAh0cmFuc2Zlcg==", "*", "*", "*"]
 
         # Pagination settings

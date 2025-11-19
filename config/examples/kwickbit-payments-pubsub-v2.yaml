@@ -1,0 +1,103 @@
+# Kwickbit Payments to Google Pub/Sub V2 Format Example
+#
+# This configuration processes Kwickbit payment events and publishes them to
+# Google Pub/Sub using the V2 message format that matches downstream service expectations.
+#
+# V2 Message Format:
+# {
+#   "chainIdentifier": "StellarMainnet" | "StellarTestnet",
+#   "payload": {
+#     "paymentId": "0x...",
+#     "merchantAddress": "G...",
+#     "amount": "1000000",
+#     "royaltyFee": "50000",
+#     "payerAddress": "G..."
+#   },
+#   "details": {
+#     "hash": "abc123...",
+#     "block": 12345,
+#     "to": "G...",
+#     "from": "G..."
+#   }
+# }
+
+pipelines:
+  KwickbitPaymentsPubSubV2:
+    source:
+      type: SorobanSourceAdapter
+      config:
+        # RPC endpoint
+        rpc_url: "https://rpc-testnet.nodeswithobsrvr.co"
+        auth_header: "Api-Key YOUR_API_KEY"
+
+        # Start from recent ledger
+        start_ledger: 1281900
+        # No end_ledger = streaming mode
+
+        # Batch configuration
+        batch_size: 10
+        poll_interval: 5
+
+        # RPC method
+        rpc_method: "getLedgers"
+
+        # Checkpointing
+        checkpoint_dir: "/tmp/checkpoints/kwickbit-pubsub"
+        checkpoint_interval: 100
+
+    processors:
+      # Extract contract events from ledgers
+      - type: ContractEvent
+        config:
+          # Filter for Kwickbit payment contract
+          contract_id: "YOUR_KWICKBIT_CONTRACT_ID"
+
+      # Extract structured payment data from events
+      - type: EventPaymentExtractor
+        config:
+          # Extract payment events from Kwickbit contract
+          payment_contract_id: "YOUR_KWICKBIT_CONTRACT_ID"
+
+    consumers:
+      # Publish to Google Pub/Sub in V2 format
+      - type: PublishToGooglePubSubV2
+        config:
+          # Google Cloud Project ID
+          project_id: "your-gcp-project-id"
+
+          # Pub/Sub topic name
+          topic_id: "payments"
+
+          # Chain identifier (StellarMainnet or StellarTestnet)
+          chain_identifier: "StellarTestnet"
+
+          # Authentication (choose one):
+
+          # Option 1: Credentials file path
+          credentials_file: "/path/to/service-account-key.json"
+
+          # Option 2: Credentials JSON string
+          # credentials_json: '{"type": "service_account", ...}'
+
+          # Option 3: Use environment variables
+          # Set GCLOUD_PUBSUB_PUBLISHER_SERVICE_ACCOUNT_KEY or
+          # GOOGLE_APPLICATION_CREDENTIALS environment variable
+
+# Environment Variables:
+# - PUBSUB_PROJECT_ID: Override project_id config
+# - PUBSUB_EMULATOR_HOST: Use local Pub/Sub emulator (e.g., "localhost:8085")
+# - CHAIN_IDENTIFIER: Override chain_identifier (StellarMainnet or StellarTestnet)
+# - GCLOUD_PUBSUB_PUBLISHER_SERVICE_ACCOUNT_KEY: JSON credentials string
+# - GOOGLE_APPLICATION_CREDENTIALS: Path to credentials file
+
+# Example using Pub/Sub Emulator (for local testing):
+# export PUBSUB_EMULATOR_HOST="localhost:8085"
+# export PUBSUB_PROJECT_ID="local-dev-project"
+# ./cdp-pipeline-workflow -config config/examples/kwickbit-payments-pubsub-v2.yaml
+
+# Message Attributes Published:
+# - event_type: "payment"
+# - chain_identifier: "StellarMainnet" or "StellarTestnet"
+# - block_height: "12345"
+# - payment_id: "0x..."
+# - message_version: "v2"

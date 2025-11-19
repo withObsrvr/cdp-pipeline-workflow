@@ -347,6 +347,8 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveEventPaymentToPostgreSQL(consumerConfig.Config)
 	case "PublishToGooglePubSub":
 		return consumer.NewPublishToGooglePubSub(consumerConfig.Config)
+	case "PublishToGooglePubSubV2":
+		return consumer.NewPublishToGooglePubSubV2(consumerConfig.Config)
 	case "SaveToClickHouse":
 		return consumer.NewSaveToClickHouse(consumerConfig.Config)
 	case "SaveToMarketAnalytics":

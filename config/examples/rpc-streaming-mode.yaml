@@ -28,7 +28,7 @@ pipelines:
         batch_size: 10  # Fetch 10 ledgers per batch
 
         # Polling configuration
-        poll_interval: 5  # Poll every 5 seconds when caught up (minimum 1s)
+        poll_interval: 5  # REQUIRED: Poll every 5 seconds when caught up (minimum 1s)
 
         # RPC method
         rpc_method: "getLedgers"
