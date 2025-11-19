@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"sync"
+	"sync/atomic"
 
 	"cloud.google.com/go/pubsub"
 	"github.com/withObsrvr/cdp-pipeline-workflow/processor"
@@ -20,6 +20,17 @@ type ChainIdentifier string
 const (
 	ChainIdentifierStellarMainnet ChainIdentifier = "StellarMainnet"
 	ChainIdentifierStellarTestnet ChainIdentifier = "StellarTestnet"
+)
+
+const (
+	// Pub/Sub message attributes
+	EventTypePayment   = "payment"
+	MessageVersionV2   = "v2"
+	AttributeEventType = "event_type"
+	AttributeChainID   = "chain_identifier"
+	AttributeBlockHeight = "block_height"
+	AttributePaymentID = "payment_id"
+	AttributeMessageVersion = "message_version"
 )
 
 // PubSubPayloadV2 represents the payment data payload in the new format
@@ -63,15 +74,13 @@ type PublishToGooglePubSubV2 struct {
 	client *pubsub.Client
 	topic  *pubsub.Topic
 	stats  PublishToGooglePubSubV2Stats
-	mu     sync.RWMutex
-	ctx    context.Context
 }
 
-// PublishToGooglePubSubV2Stats tracks publishing statistics
+// PublishToGooglePubSubV2Stats tracks publishing statistics using atomic operations
 type PublishToGooglePubSubV2Stats struct {
-	TotalProcessed      uint64
-	SuccessfulPublishes uint64
-	FailedPublishes     uint64
+	TotalProcessed      atomic.Uint64
+	SuccessfulPublishes atomic.Uint64
+	FailedPublishes     atomic.Uint64
 }
 
 // NewPublishToGooglePubSubV2 creates a new Google Pub/Sub publisher consumer with V2 message format
@@ -82,7 +91,6 @@ func NewPublishToGooglePubSubV2(config map[string]interface{}) (*PublishToGoogle
 		ChainIdentifier: ChainIdentifier(getStringConfig(config, "chain_identifier", string(ChainIdentifierStellarTestnet))),
 		CredentialsJSON: getStringConfig(config, "credentials_json", ""),
 		CredentialsFile: getStringConfig(config, "credentials_file", ""),
-		ctx:             context.Background(),
 	}
 
 	// Support environment variables
@@ -137,7 +145,10 @@ func NewPublishToGooglePubSubV2(config map[string]interface{}) (*PublishToGoogle
 		log.Printf("PublishToGooglePubSubV2: WARNING - No credentials provided, using default application credentials")
 	}
 
-	client, err := pubsub.NewClient(consumer.ctx, consumer.ProjectID, clientOptions...)
+	// Use background context for initialization
+	ctx := context.Background()
+
+	client, err := pubsub.NewClient(ctx, consumer.ProjectID, clientOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Pub/Sub client: %w", err)
 	}
@@ -146,14 +157,14 @@ func NewPublishToGooglePubSubV2(config map[string]interface{}) (*PublishToGoogle
 
 	// Get or create topic
 	topic := client.Topic(consumer.TopicID)
-	exists, err := topic.Exists(consumer.ctx)
+	exists, err := topic.Exists(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check if topic exists: %w", err)
 	}
 
 	if !exists {
 		log.Printf("PublishToGooglePubSubV2: Topic %s does not exist, attempting to create it", consumer.TopicID)
-		topic, err = client.CreateTopic(consumer.ctx, consumer.TopicID)
+		topic, err = client.CreateTopic(ctx, consumer.TopicID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create topic: %w", err)
 		}
@@ -177,9 +188,7 @@ func (c *PublishToGooglePubSubV2) Process(ctx context.Context, msg processor.Mes
 		return fmt.Errorf("expected *processor.EventPayment payload, got %T", msg.Payload)
 	}
 
-	c.mu.Lock()
-	c.stats.TotalProcessed++
-	c.mu.Unlock()
+	c.stats.TotalProcessed.Add(1)
 
 	// Build V2 message structure
 	v2Message := PubSubMessageV2{
@@ -202,9 +211,7 @@ func (c *PublishToGooglePubSubV2) Process(ctx context.Context, msg processor.Mes
 	// Convert V2 message to JSON
 	jsonData, err := json.Marshal(v2Message)
 	if err != nil {
-		c.mu.Lock()
-		c.stats.FailedPublishes++
-		c.mu.Unlock()
+		c.stats.FailedPublishes.Add(1)
 		return fmt.Errorf("failed to marshal V2 message to JSON: %w", err)
 	}
 
@@ -212,26 +219,22 @@ func (c *PublishToGooglePubSubV2) Process(ctx context.Context, msg processor.Mes
 	result := c.topic.Publish(ctx, &pubsub.Message{
 		Data: jsonData,
 		Attributes: map[string]string{
-			"event_type":       "payment",
-			"chain_identifier": string(c.ChainIdentifier),
-			"block_height":     fmt.Sprintf("%d", eventPayment.BlockHeight),
-			"payment_id":       eventPayment.PaymentID,
-			"message_version":  "v2",
+			AttributeEventType:      EventTypePayment,
+			AttributeChainID:        string(c.ChainIdentifier),
+			AttributeBlockHeight:    fmt.Sprintf("%d", eventPayment.BlockHeight),
+			AttributePaymentID:      eventPayment.PaymentID,
+			AttributeMessageVersion: MessageVersionV2,
 		},
 	})
 
 	// Block until the result is returned and a message ID is assigned
 	messageID, err := result.Get(ctx)
 	if err != nil {
-		c.mu.Lock()
-		c.stats.FailedPublishes++
-		c.mu.Unlock()
+		c.stats.FailedPublishes.Add(1)
 		return fmt.Errorf("failed to publish to Pub/Sub: %w", err)
 	}
 
-	c.mu.Lock()
-	c.stats.SuccessfulPublishes++
-	c.mu.Unlock()
+	c.stats.SuccessfulPublishes.Add(1)
 
 	log.Printf("PublishToGooglePubSubV2: Published payment_id=%s, chain=%s, block=%d, messageID=%s",
 		eventPayment.PaymentID, c.ChainIdentifier, eventPayment.BlockHeight, messageID)
@@ -245,19 +248,16 @@ func (c *PublishToGooglePubSubV2) Subscribe(processor processor.Processor) {
 }
 
 // GetStats returns current publishing statistics
+// Note: With atomic operations, we can return stats without locking
 func (c *PublishToGooglePubSubV2) GetStats() PublishToGooglePubSubV2Stats {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
 	return c.stats
 }
 
 // Close closes the Pub/Sub client and topic, printing statistics
 func (c *PublishToGooglePubSubV2) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
+	// Read stats (atomic operations are thread-safe)
 	log.Printf("PublishToGooglePubSubV2 Stats: Processed %d events, Published %d successfully, Failed %d",
-		c.stats.TotalProcessed, c.stats.SuccessfulPublishes, c.stats.FailedPublishes)
+		c.stats.TotalProcessed.Load(), c.stats.SuccessfulPublishes.Load(), c.stats.FailedPublishes.Load())
 
 	// Stop the topic (flush any pending messages)
 	if c.topic != nil {
