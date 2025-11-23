@@ -69,3 +69,6 @@ docs/rpc-adapter-streaming-checkpointing.md
 PR_REVIEW_FIXES.md
 PR_REVIEW_RESPONSE.md
 PR_REVIEW_SUMMARY.md
+config/base/pipeline_bronze_mainnet.yaml
+config/base/pipeline_bronze_testnet.yaml
+docs/shape-up-usage-metrics.md
