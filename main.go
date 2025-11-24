@@ -314,8 +314,8 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.ProcessorPassthrough(processorConfig.Config), nil
 	case "LedgerToJSON":
 		return processor.ProcessorLedgerToJSON(processorConfig.Config), nil
-	case "BronzeLedgerReader":
-		return processor.NewBronzeLedgerReaderProcessor(processorConfig.Config), nil
+	case "SilverLedgerReader":
+		return processor.NewSilverLedgerReaderProcessor(processorConfig.Config), nil
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}
@@ -397,8 +397,8 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveToLedgerParquet(consumerConfig.Config)
 	case "SaveToDuckLake":
 		return consumer.NewSaveToDuckLake(consumerConfig.Config)
-	case "BronzeCopier":
-		return consumer.NewBronzeCopierConsumer(consumerConfig.Config)
+	case "SilverIngester":
+		return consumer.NewSilverIngesterConsumer(consumerConfig.Config)
 	case "DebugLogger":
 		return consumer.NewDebugLogger(consumerConfig.Config)
 	case "BufferedPostgreSQL":

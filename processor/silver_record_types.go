@@ -5,12 +5,12 @@ import (
 	"time"
 )
 
-// Bronze record types that implement BronzeRowGetter for DuckDB Appender API
-// Each type corresponds to one of the 19 Bronze tables
+// Silver record types that implement SilverRowGetter for DuckDB Appender API
+// Each type corresponds to one of the 19 Silver tables
 // IMPORTANT: Field order and count MUST match the table schemas in consumer/bronze_tables.go
 
-// BronzeLedgerRecord represents a row in ledgers_row_v2 (24 columns)
-type BronzeLedgerRecord struct {
+// SilverLedgerRecord represents a row in ledgers_row_v2 (24 columns)
+type SilverLedgerRecord struct {
 	Sequence             uint32
 	LedgerHash           string
 	PreviousLedgerHash   string
@@ -37,7 +37,7 @@ type BronzeLedgerRecord struct {
 	EvictedKeysCount     *uint32
 }
 
-func (r *BronzeLedgerRecord) GetBronzeRow() []driver.Value {
+func (r *SilverLedgerRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.Sequence,
 		r.LedgerHash,
@@ -66,8 +66,8 @@ func (r *BronzeLedgerRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeTransactionRecord represents a row in transactions_row_v2 (46 columns)
-type BronzeTransactionRecord struct {
+// SilverTransactionRecord represents a row in transactions_row_v2 (46 columns)
+type SilverTransactionRecord struct {
 	LedgerSequence               uint32
 	TransactionHash              string
 	SourceAccount                string
@@ -116,7 +116,7 @@ type BronzeTransactionRecord struct {
 	ExtraSigners                 *string
 }
 
-func (r *BronzeTransactionRecord) GetBronzeRow() []driver.Value {
+func (r *SilverTransactionRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.LedgerSequence,
 		r.TransactionHash,
@@ -167,8 +167,8 @@ func (r *BronzeTransactionRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeOperationRecord represents a row in operations_row_v2 (58 columns)
-type BronzeOperationRecord struct {
+// SilverOperationRecord represents a row in operations_row_v2 (58 columns)
+type SilverOperationRecord struct {
 	TransactionHash                string
 	OperationIndex                 int32
 	LedgerSequence                 uint32
@@ -229,7 +229,7 @@ type BronzeOperationRecord struct {
 	DataValue                      *string
 }
 
-func (r *BronzeOperationRecord) GetBronzeRow() []driver.Value {
+func (r *SilverOperationRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.TransactionHash,
 		r.OperationIndex,
@@ -292,8 +292,8 @@ func (r *BronzeOperationRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeEffectRecord represents a row in effects_row_v1 (20 columns)
-type BronzeEffectRecord struct {
+// SilverEffectRecord represents a row in effects_row_v1 (20 columns)
+type SilverEffectRecord struct {
 	LedgerSequence   uint32
 	TransactionHash  string
 	OperationIndex   int32
@@ -316,7 +316,7 @@ type BronzeEffectRecord struct {
 	LedgerRange      *uint32
 }
 
-func (r *BronzeEffectRecord) GetBronzeRow() []driver.Value {
+func (r *SilverEffectRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.LedgerSequence,
 		r.TransactionHash,
@@ -341,8 +341,8 @@ func (r *BronzeEffectRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeTradeRecord represents a row in trades_row_v1 (17 columns)
-type BronzeTradeRecord struct {
+// SilverTradeRecord represents a row in trades_row_v1 (17 columns)
+type SilverTradeRecord struct {
 	LedgerSequence     uint32
 	TransactionHash    string
 	OperationIndex     int32
@@ -362,7 +362,7 @@ type BronzeTradeRecord struct {
 	LedgerRange        *uint32
 }
 
-func (r *BronzeTradeRecord) GetBronzeRow() []driver.Value {
+func (r *SilverTradeRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.LedgerSequence,
 		r.TransactionHash,
@@ -384,8 +384,8 @@ func (r *BronzeTradeRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeNativeBalanceRecord represents a row in native_balances_snapshot_v1 (11 columns)
-type BronzeNativeBalanceRecord struct {
+// SilverNativeBalanceRecord represents a row in native_balances_snapshot_v1 (11 columns)
+type SilverNativeBalanceRecord struct {
 	AccountID          string
 	Balance            int64
 	BuyingLiabilities  int64
@@ -399,7 +399,7 @@ type BronzeNativeBalanceRecord struct {
 	LedgerRange        *uint32
 }
 
-func (r *BronzeNativeBalanceRecord) GetBronzeRow() []driver.Value {
+func (r *SilverNativeBalanceRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.AccountID,
 		r.Balance,
@@ -415,8 +415,8 @@ func (r *BronzeNativeBalanceRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeAccountRecord represents a row in accounts_snapshot_v1 (24 columns)
-type BronzeAccountRecord struct {
+// SilverAccountRecord represents a row in accounts_snapshot_v1 (24 columns)
+type SilverAccountRecord struct {
 	AccountID          string    // account_id
 	LedgerSequence     uint32    // ledger_sequence
 	ClosedAt           time.Time // closed_at
@@ -442,7 +442,7 @@ type BronzeAccountRecord struct {
 	LedgerRange        uint32    // ledger_range
 }
 
-func (r *BronzeAccountRecord) GetBronzeRow() []driver.Value {
+func (r *SilverAccountRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.AccountID,
 		r.LedgerSequence,
@@ -470,8 +470,8 @@ func (r *BronzeAccountRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeTrustlineRecord represents a row in trustlines_snapshot_v1 (14 columns)
-type BronzeTrustlineRecord struct {
+// SilverTrustlineRecord represents a row in trustlines_snapshot_v1 (14 columns)
+type SilverTrustlineRecord struct {
 	AccountID                       string    // account_id
 	AssetCode                       string    // asset_code
 	AssetIssuer                     string    // asset_issuer
@@ -488,7 +488,7 @@ type BronzeTrustlineRecord struct {
 	LedgerRange                     uint32    // ledger_range
 }
 
-func (r *BronzeTrustlineRecord) GetBronzeRow() []driver.Value {
+func (r *SilverTrustlineRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.AccountID,
 		r.AssetCode,
@@ -507,8 +507,8 @@ func (r *BronzeTrustlineRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeOfferRecord represents a row in offers_snapshot_v1 (16 columns)
-type BronzeOfferRecord struct {
+// SilverOfferRecord represents a row in offers_snapshot_v1 (16 columns)
+type SilverOfferRecord struct {
 	OfferID            int64     // offer_id
 	SellerAccount      string    // seller_account
 	LedgerSequence     uint32    // ledger_sequence
@@ -526,7 +526,7 @@ type BronzeOfferRecord struct {
 	LedgerRange        uint32    // ledger_range
 }
 
-func (r *BronzeOfferRecord) GetBronzeRow() []driver.Value {
+func (r *SilverOfferRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.OfferID,
 		r.SellerAccount,
@@ -546,8 +546,8 @@ func (r *BronzeOfferRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeClaimableBalanceRecord represents a row in claimable_balances_snapshot_v1 (12 columns)
-type BronzeClaimableBalanceRecord struct {
+// SilverClaimableBalanceRecord represents a row in claimable_balances_snapshot_v1 (12 columns)
+type SilverClaimableBalanceRecord struct {
 	BalanceID      string    // balance_id
 	Sponsor        string    // sponsor
 	LedgerSequence uint32    // ledger_sequence
@@ -562,7 +562,7 @@ type BronzeClaimableBalanceRecord struct {
 	LedgerRange    uint32    // ledger_range
 }
 
-func (r *BronzeClaimableBalanceRecord) GetBronzeRow() []driver.Value {
+func (r *SilverClaimableBalanceRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.BalanceID,
 		r.Sponsor,
@@ -579,8 +579,8 @@ func (r *BronzeClaimableBalanceRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeLiquidityPoolRecord represents a row in liquidity_pools_snapshot_v1 (18 columns)
-type BronzeLiquidityPoolRecord struct {
+// SilverLiquidityPoolRecord represents a row in liquidity_pools_snapshot_v1 (18 columns)
+type SilverLiquidityPoolRecord struct {
 	LiquidityPoolID string    // liquidity_pool_id
 	LedgerSequence  uint32    // ledger_sequence
 	ClosedAt        time.Time // closed_at
@@ -600,7 +600,7 @@ type BronzeLiquidityPoolRecord struct {
 	LedgerRange     uint32    // ledger_range
 }
 
-func (r *BronzeLiquidityPoolRecord) GetBronzeRow() []driver.Value {
+func (r *SilverLiquidityPoolRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.LiquidityPoolID,
 		r.LedgerSequence,
@@ -622,8 +622,8 @@ func (r *BronzeLiquidityPoolRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeContractEventRecord represents a row in contract_events_stream_v1 (16 columns)
-type BronzeContractEventRecord struct {
+// SilverContractEventRecord represents a row in contract_events_stream_v1 (16 columns)
+type SilverContractEventRecord struct {
 	EventID                    string    // event_id
 	ContractID                 *string   // contract_id
 	LedgerSequence             uint32    // ledger_sequence
@@ -642,7 +642,7 @@ type BronzeContractEventRecord struct {
 	LedgerRange                uint32    // ledger_range
 }
 
-func (r *BronzeContractEventRecord) GetBronzeRow() []driver.Value {
+func (r *SilverContractEventRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.EventID,
 		ptrToValue(r.ContractID),
@@ -663,8 +663,8 @@ func (r *BronzeContractEventRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeContractDataRecord represents a row in contract_data_snapshot_v1 (17 columns)
-type BronzeContractDataRecord struct {
+// SilverContractDataRecord represents a row in contract_data_snapshot_v1 (17 columns)
+type SilverContractDataRecord struct {
 	ContractID         string    // contract_id
 	LedgerSequence     uint32    // ledger_sequence
 	LedgerKeyHash      string    // ledger_key_hash
@@ -684,7 +684,7 @@ type BronzeContractDataRecord struct {
 	LedgerRange        uint32    // ledger_range
 }
 
-func (r *BronzeContractDataRecord) GetBronzeRow() []driver.Value {
+func (r *SilverContractDataRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.ContractID,
 		r.LedgerSequence,
@@ -706,8 +706,8 @@ func (r *BronzeContractDataRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeContractCodeRecord represents a row in contract_code_snapshot_v1 (22 columns)
-type BronzeContractCodeRecord struct {
+// SilverContractCodeRecord represents a row in contract_code_snapshot_v1 (22 columns)
+type SilverContractCodeRecord struct {
 	ContractCodeHash   string    // contract_code_hash
 	LedgerKeyHash      string    // ledger_key_hash
 	ContractCodeExtV   int32     // contract_code_ext_v
@@ -730,7 +730,7 @@ type BronzeContractCodeRecord struct {
 	LedgerRange        uint32    // ledger_range
 }
 
-func (r *BronzeContractCodeRecord) GetBronzeRow() []driver.Value {
+func (r *SilverContractCodeRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.ContractCodeHash,
 		r.LedgerKeyHash,
@@ -755,8 +755,8 @@ func (r *BronzeContractCodeRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeConfigSettingRecord represents a row in config_settings_snapshot_v1 (22 columns)
-type BronzeConfigSettingRecord struct {
+// SilverConfigSettingRecord represents a row in config_settings_snapshot_v1 (22 columns)
+type SilverConfigSettingRecord struct {
 	ConfigSettingID                   int32     // config_setting_id
 	LedgerSequence                    uint32    // ledger_sequence
 	LastModifiedLedger                int32     // last_modified_ledger
@@ -780,7 +780,7 @@ type BronzeConfigSettingRecord struct {
 	LedgerRange                       uint32    // ledger_range
 }
 
-func (r *BronzeConfigSettingRecord) GetBronzeRow() []driver.Value {
+func (r *SilverConfigSettingRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.ConfigSettingID,
 		r.LedgerSequence,
@@ -806,8 +806,8 @@ func (r *BronzeConfigSettingRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeTTLRecord represents a row in ttl_snapshot_v1 (10 columns)
-type BronzeTTLRecord struct {
+// SilverTTLRecord represents a row in ttl_snapshot_v1 (10 columns)
+type SilverTTLRecord struct {
 	KeyHash            string    // key_hash
 	LedgerSequence     uint32    // ledger_sequence
 	LiveUntilLedgerSeq int64     // live_until_ledger_seq (BIGINT)
@@ -820,7 +820,7 @@ type BronzeTTLRecord struct {
 	LedgerRange        uint32    // ledger_range
 }
 
-func (r *BronzeTTLRecord) GetBronzeRow() []driver.Value {
+func (r *SilverTTLRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.KeyHash,
 		r.LedgerSequence,
@@ -835,8 +835,8 @@ func (r *BronzeTTLRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeEvictedKeyRecord represents a row in evicted_keys_state_v1 (8 columns)
-type BronzeEvictedKeyRecord struct {
+// SilverEvictedKeyRecord represents a row in evicted_keys_state_v1 (8 columns)
+type SilverEvictedKeyRecord struct {
 	KeyHash        string    // key_hash
 	LedgerSequence uint32    // ledger_sequence
 	ContractID     string    // contract_id
@@ -847,7 +847,7 @@ type BronzeEvictedKeyRecord struct {
 	CreatedAt      time.Time // created_at
 }
 
-func (r *BronzeEvictedKeyRecord) GetBronzeRow() []driver.Value {
+func (r *SilverEvictedKeyRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.KeyHash,
 		r.LedgerSequence,
@@ -860,8 +860,8 @@ func (r *BronzeEvictedKeyRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeRestoredKeyRecord represents a row in restored_keys_state_v1 (9 columns)
-type BronzeRestoredKeyRecord struct {
+// SilverRestoredKeyRecord represents a row in restored_keys_state_v1 (9 columns)
+type SilverRestoredKeyRecord struct {
 	KeyHash            string    // key_hash
 	LedgerSequence     uint32    // ledger_sequence
 	ContractID         string    // contract_id
@@ -873,7 +873,7 @@ type BronzeRestoredKeyRecord struct {
 	CreatedAt          time.Time // created_at
 }
 
-func (r *BronzeRestoredKeyRecord) GetBronzeRow() []driver.Value {
+func (r *SilverRestoredKeyRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.KeyHash,
 		r.LedgerSequence,
@@ -887,8 +887,8 @@ func (r *BronzeRestoredKeyRecord) GetBronzeRow() []driver.Value {
 	}
 }
 
-// BronzeAccountSignerRecord represents a row in account_signers_snapshot_v1 (9 columns)
-type BronzeAccountSignerRecord struct {
+// SilverAccountSignerRecord represents a row in account_signers_snapshot_v1 (9 columns)
+type SilverAccountSignerRecord struct {
 	AccountID      string    // account_id
 	Signer         string    // signer
 	LedgerSequence uint32    // ledger_sequence
@@ -900,7 +900,7 @@ type BronzeAccountSignerRecord struct {
 	CreatedAt      time.Time // created_at
 }
 
-func (r *BronzeAccountSignerRecord) GetBronzeRow() []driver.Value {
+func (r *SilverAccountSignerRecord) GetSilverRow() []driver.Value {
 	return []driver.Value{
 		r.AccountID,
 		r.Signer,

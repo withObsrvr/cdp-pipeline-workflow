@@ -6,8 +6,8 @@ import (
 	"log"
 )
 
-// Bronze table names - all 19 Hubble-compatible tables
-var BronzeTableNames = []string{
+// Silver table names - all 19 Hubble-compatible tables
+var SilverTableNames = []string{
 	"ledgers_row_v2",
 	"transactions_row_v2",
 	"operations_row_v2",
@@ -37,8 +37,8 @@ var MetadataTableNames = []string{
 	"_meta_changes",
 }
 
-// CreateBronzeTables creates all 19 Bronze tables in the specified catalog/schema
-func CreateBronzeTables(db *sql.DB, catalogName, schemaName string) error {
+// CreateSilverTables creates all 19 Silver tables in the specified catalog/schema
+func CreateSilverTables(db *sql.DB, catalogName, schemaName string) error {
 	// Create each table
 	tableFuncs := []func(*sql.DB, string, string) error{
 		createLedgersTable,
@@ -68,7 +68,7 @@ func CreateBronzeTables(db *sql.DB, catalogName, schemaName string) error {
 		}
 	}
 
-	log.Printf("BronzeCopier: All 19 Bronze tables created in %s.%s", catalogName, schemaName)
+	log.Printf("SilverCopier: All 19 Silver tables created in %s.%s", catalogName, schemaName)
 	return nil
 }
 
@@ -93,7 +93,7 @@ func CreateMetadataTables(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(datasetsSQL); err != nil {
 		return fmt.Errorf("failed to create _meta_datasets table: %w", err)
 	}
-	log.Printf("BronzeCopier: Metadata table ready: %s.%s._meta_datasets", catalogName, schemaName)
+	log.Printf("SilverCopier: Metadata table ready: %s.%s._meta_datasets", catalogName, schemaName)
 
 	// 2. _meta_lineage (Processing Provenance)
 	lineageSQL := fmt.Sprintf(`
@@ -115,7 +115,7 @@ func CreateMetadataTables(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(lineageSQL); err != nil {
 		return fmt.Errorf("failed to create _meta_lineage table: %w", err)
 	}
-	log.Printf("BronzeCopier: Metadata table ready: %s.%s._meta_lineage", catalogName, schemaName)
+	log.Printf("SilverCopier: Metadata table ready: %s.%s._meta_lineage", catalogName, schemaName)
 
 	// 3. _meta_quality (Data Quality Tracking)
 	qualitySQL := fmt.Sprintf(`
@@ -136,7 +136,7 @@ func CreateMetadataTables(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(qualitySQL); err != nil {
 		return fmt.Errorf("failed to create _meta_quality table: %w", err)
 	}
-	log.Printf("BronzeCopier: Metadata table ready: %s.%s._meta_quality", catalogName, schemaName)
+	log.Printf("SilverCopier: Metadata table ready: %s.%s._meta_quality", catalogName, schemaName)
 
 	// 4. _meta_changes (Schema Evolution Log)
 	changesSQL := fmt.Sprintf(`
@@ -155,9 +155,9 @@ func CreateMetadataTables(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(changesSQL); err != nil {
 		return fmt.Errorf("failed to create _meta_changes table: %w", err)
 	}
-	log.Printf("BronzeCopier: Metadata table ready: %s.%s._meta_changes", catalogName, schemaName)
+	log.Printf("SilverCopier: Metadata table ready: %s.%s._meta_changes", catalogName, schemaName)
 
-	log.Printf("BronzeCopier: All 4 metadata tables created in %s.%s", catalogName, schemaName)
+	log.Printf("SilverCopier: All 4 metadata tables created in %s.%s", catalogName, schemaName)
 	return nil
 }
 
@@ -206,7 +206,7 @@ func createLedgersTable(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create ledgers_row_v2 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.ledgers_row_v2", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.ledgers_row_v2", catalogName, schemaName)
 	return nil
 }
 
@@ -282,7 +282,7 @@ func createTransactionsTable(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create transactions_row_v2 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.transactions_row_v2", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.transactions_row_v2", catalogName, schemaName)
 	return nil
 }
 
@@ -378,7 +378,7 @@ func createOperationsTable(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create operations_row_v2 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.operations_row_v2", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.operations_row_v2", catalogName, schemaName)
 	return nil
 }
 
@@ -428,7 +428,7 @@ func createEffectsTable(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create effects_row_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.effects_row_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.effects_row_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -471,7 +471,7 @@ func createTradesTable(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create trades_row_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.trades_row_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.trades_row_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -497,7 +497,7 @@ func createNativeBalancesTable(db *sql.DB, catalogName, schemaName string) error
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create native_balances_snapshot_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.native_balances_snapshot_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.native_balances_snapshot_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -550,7 +550,7 @@ func createAccountsTable(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create accounts_snapshot_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.accounts_snapshot_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.accounts_snapshot_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -586,7 +586,7 @@ func createTrustlinesTable(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create trustlines_snapshot_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.trustlines_snapshot_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.trustlines_snapshot_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -627,7 +627,7 @@ func createOffersTable(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create offers_snapshot_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.offers_snapshot_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.offers_snapshot_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -663,7 +663,7 @@ func createClaimableBalancesTable(db *sql.DB, catalogName, schemaName string) er
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create claimable_balances_snapshot_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.claimable_balances_snapshot_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.claimable_balances_snapshot_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -708,7 +708,7 @@ func createLiquidityPoolsTable(db *sql.DB, catalogName, schemaName string) error
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create liquidity_pools_snapshot_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.liquidity_pools_snapshot_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.liquidity_pools_snapshot_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -748,7 +748,7 @@ func createContractEventsTable(db *sql.DB, catalogName, schemaName string) error
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create contract_events_stream_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.contract_events_stream_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.contract_events_stream_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -793,7 +793,7 @@ func createContractDataTable(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create contract_data_snapshot_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.contract_data_snapshot_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.contract_data_snapshot_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -839,7 +839,7 @@ func createContractCodeTable(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create contract_code_snapshot_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.contract_code_snapshot_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.contract_code_snapshot_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -888,7 +888,7 @@ func createConfigSettingsTable(db *sql.DB, catalogName, schemaName string) error
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create config_settings_snapshot_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.config_settings_snapshot_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.config_settings_snapshot_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -920,7 +920,7 @@ func createTTLTable(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create ttl_snapshot_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.ttl_snapshot_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.ttl_snapshot_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -948,7 +948,7 @@ func createEvictedKeysTable(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create evicted_keys_state_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.evicted_keys_state_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.evicted_keys_state_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -977,7 +977,7 @@ func createRestoredKeysTable(db *sql.DB, catalogName, schemaName string) error {
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create restored_keys_state_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.restored_keys_state_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.restored_keys_state_v1", catalogName, schemaName)
 	return nil
 }
 
@@ -1008,6 +1008,6 @@ func createAccountSignersTable(db *sql.DB, catalogName, schemaName string) error
 	if _, err := db.Exec(createSQL); err != nil {
 		return fmt.Errorf("failed to create account_signers_snapshot_v1 table: %w", err)
 	}
-	log.Printf("BronzeCopier: Table ready: %s.%s.account_signers_snapshot_v1", catalogName, schemaName)
+	log.Printf("SilverCopier: Table ready: %s.%s.account_signers_snapshot_v1", catalogName, schemaName)
 	return nil
 }

@@ -24,26 +24,26 @@ const (
 	// (like ducklake-ingestion-obsrvr-v2, NOT total records)
 	DefaultBatchSize             = 100
 	DefaultCommitIntervalSeconds = 30
-	DefaultBronzeVersion         = "v1"
+	DefaultSilverVersion         = "v1"
 
 	// Processor version for lineage tracking
-	BronzeCopierVersion = "1.0.0"
+	SilverIngesterVersion = "1.0.0"
 )
 
-// BronzeCopierConsumer writes Bronze layer data to DuckLake using the high-performance Appender API
+// SilverIngesterConsumer writes Silver layer data to DuckLake using the high-performance Appender API
 // This consumer implements the processor.Processor interface and supports:
 // - Version-isolated catalogs (obsrvr_{network}_bronze_{version})
 // - Per-table buffering with time-based flush
 // - DuckDB Appender API (534x faster than SQL INSERT)
-// - 19 Hubble-compatible Bronze tables + 4 metadata tables
-type BronzeCopierConsumer struct {
+// - 19 Hubble-compatible Silver tables + 4 metadata tables
+type SilverIngesterConsumer struct {
 	// Bronze version for isolation
-	BronzeVersion string
+	SilverVersion string
 
 	// DuckLake connection settings
 	CatalogPath string
 	DataPath    string
-	CatalogName string // auto-generated: obsrvr_{schema}_{bronze_version}
+	CatalogName string // auto-generated: obsrvr_{schema}_{silver_version}
 	SchemaName  string // "mainnet" or "testnet"
 
 	// AWS credentials for S3 data path
@@ -69,24 +69,24 @@ type BronzeCopierConsumer struct {
 	lastCommit time.Time
 
 	// Statistics (atomic for thread safety)
-	stats BronzeCopierStats
+	stats SilverIngesterStats
 
 	// Metadata settings
 	EnableMetadata bool
 }
 
-// BronzeCopierStats tracks processing statistics using atomic operations
-type BronzeCopierStats struct {
+// SilverIngesterStats tracks processing statistics using atomic operations
+type SilverIngesterStats struct {
 	TotalProcessed atomic.Uint64
 	TotalFlushed   atomic.Uint64
 	FlushCount     atomic.Uint64
 	FailedFlushes  atomic.Uint64
 }
 
-// NewBronzeCopierConsumer creates a new Bronze Copier consumer
-func NewBronzeCopierConsumer(config map[string]interface{}) (*BronzeCopierConsumer, error) {
-	consumer := &BronzeCopierConsumer{
-		BronzeVersion:      getStringConfig(config, "bronze_version", DefaultBronzeVersion),
+// NewSilverIngesterConsumer creates a new Bronze Copier consumer
+func NewSilverIngesterConsumer(config map[string]interface{}) (*SilverIngesterConsumer, error) {
+	consumer := &SilverIngesterConsumer{
+		SilverVersion:      getStringConfig(config, "silver_version", DefaultSilverVersion),
 		CatalogPath:        getStringConfig(config, "catalog_path", ""),
 		DataPath:           getStringConfig(config, "data_path", ""),
 		SchemaName:         getStringConfig(config, "schema_name", "mainnet"),
@@ -95,7 +95,7 @@ func NewBronzeCopierConsumer(config map[string]interface{}) (*BronzeCopierConsum
 		AWSRegion:          getStringConfig(config, "aws_region", "us-east-1"),
 		BatchSize:          getIntConfig(config, "batch_size", DefaultBatchSize),
 		CommitInterval:     time.Duration(getIntConfig(config, "commit_interval_seconds", DefaultCommitIntervalSeconds)) * time.Second,
-		EnableMetadata:     getBoolConfigBronze(config, "enable_metadata", true),
+		EnableMetadata:     getBoolConfigSilver(config, "enable_metadata", true),
 		buffers:            make(map[string][]interface{}),
 		appenders:          make(map[string]*duckdb.Appender),
 		lastCommit:         time.Now(),
@@ -120,13 +120,13 @@ func NewBronzeCopierConsumer(config map[string]interface{}) (*BronzeCopierConsum
 		return nil, fmt.Errorf("data_path is required")
 	}
 
-	// Generate catalog name: obsrvr_{schema}_{bronze_version}
-	consumer.CatalogName = fmt.Sprintf("obsrvr_%s_bronze_%s", consumer.SchemaName, consumer.BronzeVersion)
+	// Generate catalog name: obsrvr_{schema}_{silver_version}
+	consumer.CatalogName = fmt.Sprintf("obsrvr_%s_silver_%s", consumer.SchemaName, consumer.SilverVersion)
 
-	log.Printf("BronzeCopier: Initializing consumer")
-	log.Printf("BronzeCopier: Catalog=%s, Schema=%s, Version=%s",
-		consumer.CatalogName, consumer.SchemaName, consumer.BronzeVersion)
-	log.Printf("BronzeCopier: BatchSize=%d, CommitInterval=%s",
+	log.Printf("SilverIngester: Initializing consumer")
+	log.Printf("SilverIngester: Catalog=%s, Schema=%s, Version=%s",
+		consumer.CatalogName, consumer.SchemaName, consumer.SilverVersion)
+	log.Printf("SilverIngester: BatchSize=%d, CommitInterval=%s",
 		consumer.BatchSize, consumer.CommitInterval)
 
 	// Initialize DuckDB connection
@@ -144,38 +144,38 @@ func NewBronzeCopierConsumer(config map[string]interface{}) (*BronzeCopierConsum
 		return nil, fmt.Errorf("failed to initialize appenders: %w", err)
 	}
 
-	log.Printf("BronzeCopier: Initialized successfully")
+	log.Printf("SilverIngester: Initialized successfully")
 	return consumer, nil
 }
 
 // initializeDatabase establishes the DuckDB connection using shared connector pattern
 // This pattern is required for the Appender API to work with DuckLake catalogs
-func (c *BronzeCopierConsumer) initializeDatabase() error {
+func (c *SilverIngesterConsumer) initializeDatabase() error {
 	// Step 1: Create shared connector (required for Appender API)
 	connector, err := duckdb.NewConnector("", nil)
 	if err != nil {
 		return fmt.Errorf("failed to create DuckDB connector: %w", err)
 	}
 	c.connector = connector
-	log.Printf("BronzeCopier: DuckDB connector created")
+	log.Printf("SilverIngester: DuckDB connector created")
 
 	// Step 2: Open sql.DB with shared connector
 	c.db = sql.OpenDB(connector)
-	log.Printf("BronzeCopier: sql.DB opened with shared connector")
+	log.Printf("SilverIngester: sql.DB opened with shared connector")
 
 	// Install and load DuckLake extension
 	if _, err := c.db.Exec("INSTALL ducklake"); err != nil {
-		log.Printf("BronzeCopier: DuckLake extension may already be installed: %v", err)
+		log.Printf("SilverIngester: DuckLake extension may already be installed: %v", err)
 	}
 	if _, err := c.db.Exec("LOAD ducklake"); err != nil {
 		return fmt.Errorf("failed to load DuckLake extension: %w", err)
 	}
-	log.Printf("BronzeCopier: DuckLake extension loaded")
+	log.Printf("SilverIngester: DuckLake extension loaded")
 
 	// Configure AWS credentials for S3 access if provided
 	if c.AWSAccessKeyID != "" && c.AWSSecretAccessKey != "" {
 		credSQL := fmt.Sprintf(`
-			CREATE SECRET IF NOT EXISTS bronze_s3_secret (
+			CREATE SECRET IF NOT EXISTS silver_s3_secret (
 				TYPE S3,
 				KEY_ID '%s',
 				SECRET '%s',
@@ -185,7 +185,7 @@ func (c *BronzeCopierConsumer) initializeDatabase() error {
 		if _, err := c.db.Exec(credSQL); err != nil {
 			return fmt.Errorf("failed to create S3 secret: %w", err)
 		}
-		log.Printf("BronzeCopier: S3 credentials configured for region %s", c.AWSRegion)
+		log.Printf("SilverIngester: S3 credentials configured for region %s", c.AWSRegion)
 	}
 
 	// Attach DuckLake catalog
@@ -198,22 +198,22 @@ func (c *BronzeCopierConsumer) initializeDatabase() error {
 	if _, err := c.db.Exec(attachSQL); err != nil {
 		return fmt.Errorf("failed to attach DuckLake catalog: %w", err)
 	}
-	log.Printf("BronzeCopier: Attached catalog %s with data path %s", c.CatalogName, c.DataPath)
+	log.Printf("SilverIngester: Attached catalog %s with data path %s", c.CatalogName, c.DataPath)
 
 	// Create schema if not exists
 	schemaSQL := fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s.%s", c.CatalogName, c.SchemaName)
 	if _, err := c.db.Exec(schemaSQL); err != nil {
 		return fmt.Errorf("failed to create schema: %w", err)
 	}
-	log.Printf("BronzeCopier: Schema %s.%s ready", c.CatalogName, c.SchemaName)
+	log.Printf("SilverIngester: Schema %s.%s ready", c.CatalogName, c.SchemaName)
 
 	return nil
 }
 
-// createTables creates all Bronze and metadata tables
-func (c *BronzeCopierConsumer) createTables() error {
-	// Create all 19 Bronze tables
-	if err := CreateBronzeTables(c.db, c.CatalogName, c.SchemaName); err != nil {
+// createTables creates all Silver and metadata tables
+func (c *SilverIngesterConsumer) createTables() error {
+	// Create all 19 Silver tables
+	if err := CreateSilverTables(c.db, c.CatalogName, c.SchemaName); err != nil {
 		return err
 	}
 
@@ -227,8 +227,8 @@ func (c *BronzeCopierConsumer) createTables() error {
 	return nil
 }
 
-// initializeAppenders creates Appenders for all Bronze tables using native DuckDB connection
-func (c *BronzeCopierConsumer) initializeAppenders() error {
+// initializeAppenders creates Appenders for all Silver tables using native DuckDB connection
+func (c *SilverIngesterConsumer) initializeAppenders() error {
 	// Get native DuckDB connection from shared connector
 	// This is required for Appender API - sql.Conn doesn't work
 	conn, err := c.connector.Connect(context.Background())
@@ -236,31 +236,31 @@ func (c *BronzeCopierConsumer) initializeAppenders() error {
 		return fmt.Errorf("failed to get native DuckDB connection: %w", err)
 	}
 	c.duckConn = conn.(*duckdb.Conn)
-	log.Printf("BronzeCopier: Native DuckDB connection created")
+	log.Printf("SilverIngester: Native DuckDB connection created")
 
 	// Set schema context before creating appenders
 	useSQL := fmt.Sprintf("USE %s.%s", c.CatalogName, c.SchemaName)
 	if _, err := c.duckConn.ExecContext(context.Background(), useSQL, nil); err != nil {
 		return fmt.Errorf("failed to set schema context: %w", err)
 	}
-	log.Printf("BronzeCopier: Using %s.%s", c.CatalogName, c.SchemaName)
+	log.Printf("SilverIngester: Using %s.%s", c.CatalogName, c.SchemaName)
 
-	// Create appenders for all Bronze tables
-	for _, tableName := range BronzeTableNames {
+	// Create appenders for all Silver tables
+	for _, tableName := range SilverTableNames {
 		appender, err := duckdb.NewAppenderFromConn(c.duckConn, "", tableName)
 		if err != nil {
 			return fmt.Errorf("failed to create appender for %s: %w", tableName, err)
 		}
 		c.appenders[tableName] = appender
-		log.Printf("BronzeCopier: Appender ready for %s", tableName)
+		log.Printf("SilverIngester: Appender ready for %s", tableName)
 	}
 
-	log.Printf("BronzeCopier: All %d appenders initialized", len(c.appenders))
+	log.Printf("SilverIngester: All %d appenders initialized", len(c.appenders))
 	return nil
 }
 
 // Process handles incoming messages and routes them to the appropriate table buffer
-func (c *BronzeCopierConsumer) Process(ctx context.Context, msg processor.Message) error {
+func (c *SilverIngesterConsumer) Process(ctx context.Context, msg processor.Message) error {
 	c.stats.TotalProcessed.Add(1)
 
 	// Get table type from message metadata
@@ -291,7 +291,7 @@ func (c *BronzeCopierConsumer) Process(ctx context.Context, msg processor.Messag
 }
 
 // getBufferSize returns the total number of records across all buffers (must be called with lock held)
-func (c *BronzeCopierConsumer) getBufferSize() int {
+func (c *SilverIngesterConsumer) getBufferSize() int {
 	total := 0
 	for _, records := range c.buffers {
 		total += len(records)
@@ -300,7 +300,7 @@ func (c *BronzeCopierConsumer) getBufferSize() int {
 }
 
 // flush writes all buffered records to DuckLake using the Appender API
-func (c *BronzeCopierConsumer) flush(ctx context.Context) error {
+func (c *SilverIngesterConsumer) flush(ctx context.Context) error {
 	c.buffersMu.Lock()
 	defer c.buffersMu.Unlock()
 
@@ -386,45 +386,45 @@ func (c *BronzeCopierConsumer) flush(ctx context.Context) error {
 
 // appendRecord appends a single record to the appender based on table type
 // This method handles the mapping from Go structs to Appender.AppendRow() calls
-func (c *BronzeCopierConsumer) appendRecord(appender *duckdb.Appender, tableType string, record interface{}) error {
-	// Records must implement BronzeRowGetter to provide their row values
+func (c *SilverIngesterConsumer) appendRecord(appender *duckdb.Appender, tableType string, record interface{}) error {
+	// Records must implement SilverRowGetter to provide their row values
 	// The BronzeLedgerReaderProcessor (Cycle 2) will emit records that implement this interface
-	if rowGetter, ok := record.(BronzeRowGetter); ok {
-		values := rowGetter.GetBronzeRow()
+	if rowGetter, ok := record.(SilverRowGetter); ok {
+		values := rowGetter.GetSilverRow()
 		// Convert []driver.Value to variadic args
 		return appender.AppendRow(values...)
 	}
-	return fmt.Errorf("record type %T does not implement BronzeRowGetter for table %s", record, tableType)
+	return fmt.Errorf("record type %T does not implement SilverRowGetter for table %s", record, tableType)
 }
 
-// BronzeRowGetter interface for records that can provide their row values
+// SilverRowGetter interface for records that can provide their row values
 // Records emitted by BronzeLedgerReaderProcessor must implement this interface
 // Returns []driver.Value for compatibility with DuckDB Appender API
-type BronzeRowGetter interface {
-	GetBronzeRow() []driver.Value
+type SilverRowGetter interface {
+	GetSilverRow() []driver.Value
 }
 
 // Subscribe is not implemented for consumers (they are end of pipeline)
-func (c *BronzeCopierConsumer) Subscribe(p processor.Processor) {
-	log.Printf("BronzeCopier: Subscribe called but consumers don't support subscriptions")
+func (c *SilverIngesterConsumer) Subscribe(p processor.Processor) {
+	log.Printf("SilverIngester: Subscribe called but consumers don't support subscriptions")
 }
 
 // GetStats returns current processing statistics
-func (c *BronzeCopierConsumer) GetStats() BronzeCopierStats {
+func (c *SilverIngesterConsumer) GetStats() SilverIngesterStats {
 	return c.stats
 }
 
 // Close flushes remaining data and closes the connection
-func (c *BronzeCopierConsumer) Close() error {
-	log.Printf("BronzeCopier: Closing consumer...")
+func (c *SilverIngesterConsumer) Close() error {
+	log.Printf("SilverIngester: Closing consumer...")
 
 	// Final flush
 	if err := c.flush(context.Background()); err != nil {
-		log.Printf("BronzeCopier: Warning - final flush failed: %v", err)
+		log.Printf("SilverIngester: Warning - final flush failed: %v", err)
 	}
 
 	// Log statistics
-	log.Printf("BronzeCopier Stats: Processed=%d, Flushed=%d, FlushCount=%d, Failed=%d",
+	log.Printf("SilverIngester Stats: Processed=%d, Flushed=%d, FlushCount=%d, Failed=%d",
 		c.stats.TotalProcessed.Load(),
 		c.stats.TotalFlushed.Load(),
 		c.stats.FlushCount.Load(),
@@ -433,14 +433,14 @@ func (c *BronzeCopierConsumer) Close() error {
 	// Close appenders
 	for tableName, appender := range c.appenders {
 		if err := appender.Close(); err != nil {
-			log.Printf("BronzeCopier: Warning - failed to close appender for %s: %v", tableName, err)
+			log.Printf("SilverIngester: Warning - failed to close appender for %s: %v", tableName, err)
 		}
 	}
 
 	// Close native DuckDB connection
 	if c.duckConn != nil {
 		if err := c.duckConn.Close(); err != nil {
-			log.Printf("BronzeCopier: Warning - failed to close native connection: %v", err)
+			log.Printf("SilverIngester: Warning - failed to close native connection: %v", err)
 		}
 	}
 
@@ -454,24 +454,24 @@ func (c *BronzeCopierConsumer) Close() error {
 	// Close connector
 	if c.connector != nil {
 		if err := c.connector.Close(); err != nil {
-			log.Printf("BronzeCopier: Warning - failed to close connector: %v", err)
+			log.Printf("SilverIngester: Warning - failed to close connector: %v", err)
 		}
 	}
 
-	log.Printf("BronzeCopier: Closed successfully")
+	log.Printf("SilverIngester: Closed successfully")
 	return nil
 }
 
 // Note: getStringConfig, getIntConfig are defined in consumer_save_event_payment_to_postgresql.go
 
-// getBoolConfigBronze retrieves a bool value from config with a default fallback
+// getBoolConfigSilver retrieves a bool value from config with a default fallback
 // Using a different name to avoid redeclaration since getBoolConfig may be defined elsewhere
-func getBoolConfigBronze(config map[string]interface{}, key string, defaultValue bool) bool {
+func getBoolConfigSilver(config map[string]interface{}, key string, defaultValue bool) bool {
 	if val, ok := config[key].(bool); ok {
 		return val
 	}
 	return defaultValue
 }
 
-// Ensure BronzeCopierConsumer implements Processor interface
-var _ processor.Processor = (*BronzeCopierConsumer)(nil)
+// Ensure SilverIngesterConsumer implements Processor interface
+var _ processor.Processor = (*SilverIngesterConsumer)(nil)
