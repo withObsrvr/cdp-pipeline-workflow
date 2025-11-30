@@ -245,8 +245,20 @@ func (p *BronzeExtractorsProcessor) extractTransactions(lcm *xdr.LedgerCloseMeta
 			eventsCount += int32(len(txEvents.TransactionEvents))
 			record.SorobanContractEventsCount = &eventsCount
 
-			// Extract resource consumption (no SDK helper available yet for this field)
-			// We know this is a Soroban transaction since GetTransactionEvents succeeded
+			// IMPORTANT: Direct UnsafeMeta access below is intentional and documented
+			//
+			// Reason: We need TotalNonRefundableResourceFeeCharged from transaction execution metadata.
+			// This is different from ResourceFee in the envelope (budgeted vs actual consumption).
+			//
+			// SDK Status: No helper method exists as of 2025-01 for accessing actual resource consumption
+			// from metadata. The tx.Envelope.V1.Tx.Ext.GetSorobanData().ResourceFee gives budgeted
+			// resources, not actual consumption from SorobanMeta.Ext.V1.TotalNonRefundableResourceFeeCharged.
+			//
+			// Safety: We only access V3 metadata after GetTransactionEvents() succeeded, confirming
+			// this is a Soroban transaction. This minimizes protocol version assumptions.
+			//
+			// TODO: When Stellar SDK adds a helper method for actual resource consumption (e.g.,
+			// tx.GetSorobanResourceConsumption()), replace this direct access with the SDK helper.
 			if tx.UnsafeMeta.V == 3 && tx.UnsafeMeta.V3.SorobanMeta != nil {
 				sorobanMeta := tx.UnsafeMeta.V3.SorobanMeta
 				if sorobanMeta.Ext.V == 1 {

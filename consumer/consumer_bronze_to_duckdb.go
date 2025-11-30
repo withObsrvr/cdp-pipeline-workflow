@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -125,8 +126,30 @@ func (c *BronzeToDuckDB) getOrCreateAppender(tableName string) (*duckdb.Appender
 	return appender, nil
 }
 
+// validTableName checks if a table name is safe for use in SQL statements
+// Returns an error if the name contains invalid characters or exceeds length limits
+var validTableNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+
+func validTableName(tableName string) error {
+	if tableName == "" {
+		return fmt.Errorf("table name cannot be empty")
+	}
+	if len(tableName) > 64 {
+		return fmt.Errorf("table name exceeds maximum length of 64 characters: %s", tableName)
+	}
+	if !validTableNameRegex.MatchString(tableName) {
+		return fmt.Errorf("table name contains invalid characters (only alphanumeric and underscores allowed): %s", tableName)
+	}
+	return nil
+}
+
 // ensureTable creates the table if it doesn't exist
 func (c *BronzeToDuckDB) ensureTable(tableName string) error {
+	// Validate table name to prevent SQL injection
+	if err := validTableName(tableName); err != nil {
+		return fmt.Errorf("invalid table name: %w", err)
+	}
+
 	// Check if table exists
 	var exists bool
 	checkSQL := "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = ?)"
@@ -227,8 +250,12 @@ func (c *BronzeToDuckDB) flush(ctx context.Context) error {
 		recordsByTable[tableName] = append(recordsByTable[tableName], record)
 	}
 
-	// Process each table group
+	// Track successfully flushed tables to know which records to remove from buffer
+	successfullyFlushedTables := make(map[string]bool)
 	totalRecords := 0
+	var flushErrors []error
+
+	// Process each table group
 	for tableName, records := range recordsByTable {
 		if len(records) == 0 {
 			continue
@@ -238,33 +265,62 @@ func (c *BronzeToDuckDB) flush(ctx context.Context) error {
 		appender, err := c.getOrCreateAppender(tableName)
 		if err != nil {
 			c.logger.Error("Failed to get appender", "table", tableName, "error", err)
+			flushErrors = append(flushErrors, fmt.Errorf("table %s: get appender: %w", tableName, err))
 			continue
 		}
 
 		// Append each record
+		appendFailed := false
 		for _, record := range records {
 			bronzeRow := record["__bronze_row__"].([]driver.Value)
 			if err := appender.AppendRow(bronzeRow...); err != nil {
 				c.logger.Error("Failed to append row", "table", tableName, "error", err)
-				continue
+				flushErrors = append(flushErrors, fmt.Errorf("table %s: append row: %w", tableName, err))
+				appendFailed = true
+				break // Stop processing this table if any row fails
 			}
+		}
+
+		if appendFailed {
+			continue
 		}
 
 		// Flush appender
 		if err := appender.Flush(); err != nil {
 			c.logger.Error("Failed to flush appender", "table", tableName, "error", err)
+			flushErrors = append(flushErrors, fmt.Errorf("table %s: flush: %w", tableName, err))
 			continue
 		}
 
+		// Mark this table as successfully flushed
+		successfullyFlushedTables[tableName] = true
 		totalRecords += len(records)
 		c.logger.Info("Flushed data to DuckDB", "table", tableName, "records", len(records))
 	}
 
-	// Clear buffer
-	c.buffer = c.buffer[:0]
+	// Only clear successfully flushed records from buffer
+	if len(successfullyFlushedTables) > 0 {
+		newBuffer := make([]map[string]interface{}, 0)
+		for _, record := range c.buffer {
+			tableName := record["__table_name__"].(string)
+			if !successfullyFlushedTables[tableName] {
+				// Keep failed records in buffer for retry
+				newBuffer = append(newBuffer, record)
+			}
+		}
+		c.buffer = newBuffer
+		c.logger.Info("Retained failed records in buffer", "failed_records", len(newBuffer))
+	}
+
 	c.lastFlush = time.Now()
 
-	c.logger.Info("Completed flush cycle", "total_records", totalRecords, "tables", len(recordsByTable))
+	c.logger.Info("Completed flush cycle", "total_records", totalRecords, "tables", len(recordsByTable), "errors", len(flushErrors))
+
+	// Return error if any flush operations failed
+	if len(flushErrors) > 0 {
+		return fmt.Errorf("flush encountered %d errors (first: %v)", len(flushErrors), flushErrors[0])
+	}
+
 	return nil
 }
 
