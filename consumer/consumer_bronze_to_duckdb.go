@@ -129,8 +129,8 @@ func (c *BronzeToDuckDB) getOrCreateAppender(tableName string) (*duckdb.Appender
 func (c *BronzeToDuckDB) ensureTable(tableName string) error {
 	// Check if table exists
 	var exists bool
-	checkSQL := fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = '%s')", tableName)
-	if err := c.db.QueryRow(checkSQL).Scan(&exists); err != nil {
+	checkSQL := "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = ?)"
+	if err := c.db.QueryRow(checkSQL, tableName).Scan(&exists); err != nil {
 		return fmt.Errorf("failed to check if table exists: %w", err)
 	}
 

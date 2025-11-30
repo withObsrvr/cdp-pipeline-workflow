@@ -339,7 +339,9 @@ func (a *BronzeSourceAdapter) discoverPartitions() ([]string, error) {
 
 	endLedger := a.config.EndLedger
 	if endLedger == 0 {
-		endLedger = a.config.StartLedger + partitionSize - 1
+		// Unbounded: use a large upper bound to discover all available partitions
+		// The code handles missing partitions gracefully by skipping them
+		endLedger = 100_000_000
 	}
 
 	// Try standard partition alignment (0-based)

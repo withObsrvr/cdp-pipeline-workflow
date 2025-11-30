@@ -234,17 +234,25 @@ func (p *BronzeExtractorsProcessor) extractTransactions(lcm *xdr.LedgerCloseMeta
 		}
 
 		// Extract Soroban resources if present
-		if tx.UnsafeMeta.V == 3 {
-			if tx.UnsafeMeta.V3.SorobanMeta != nil {
+		// Use SDK helper method to detect Soroban transactions and count events
+		txEvents, err := tx.GetTransactionEvents()
+		if err == nil {
+			// Count all events from operations and transaction-level events
+			eventsCount := int32(0)
+			for _, opEvents := range txEvents.OperationEvents {
+				eventsCount += int32(len(opEvents))
+			}
+			eventsCount += int32(len(txEvents.TransactionEvents))
+			record.SorobanContractEventsCount = &eventsCount
+
+			// Extract resource consumption (no SDK helper available yet for this field)
+			// We know this is a Soroban transaction since GetTransactionEvents succeeded
+			if tx.UnsafeMeta.V == 3 && tx.UnsafeMeta.V3.SorobanMeta != nil {
 				sorobanMeta := tx.UnsafeMeta.V3.SorobanMeta
-
-				// Extract resource consumption
-				instructions := int64(sorobanMeta.Ext.V1.TotalNonRefundableResourceFeeCharged)
-				record.SorobanResourcesInstructions = &instructions
-
-				// Events count
-				eventsCount := int32(len(sorobanMeta.Events))
-				record.SorobanContractEventsCount = &eventsCount
+				if sorobanMeta.Ext.V == 1 {
+					instructions := int64(sorobanMeta.Ext.V1.TotalNonRefundableResourceFeeCharged)
+					record.SorobanResourcesInstructions = &instructions
+				}
 			}
 		}
 
