@@ -43,6 +43,28 @@ const (
 	ProcessorTypeTrustline        ProcessorType = "trustline"
 	ProcessorTypeEffects          ProcessorType = "effects"
 	ProcessorTypeOperation        ProcessorType = "operation"
+
+	// Bronze Layer Tables (Hubble-compatible schema)
+	// These correspond to the 19 Bronze tables from BronzeExtractorsProcessor
+	ProcessorTypeBronzeLedger              ProcessorType = "ledgers_row_v2"
+	ProcessorTypeBronzeTransaction         ProcessorType = "transactions_row_v2"
+	ProcessorTypeBronzeOperation           ProcessorType = "operations_row_v2"
+	ProcessorTypeBronzeEffect              ProcessorType = "effects_row_v1"
+	ProcessorTypeBronzeTrade               ProcessorType = "trades_row_v1"
+	ProcessorTypeBronzeNativeBalance       ProcessorType = "native_balances_snapshot_v1"
+	ProcessorTypeBronzeAccount             ProcessorType = "accounts_snapshot_v1"
+	ProcessorTypeBronzeTrustline           ProcessorType = "trustlines_snapshot_v1"
+	ProcessorTypeBronzeOffer               ProcessorType = "offers_snapshot_v1"
+	ProcessorTypeBronzeClaimableBalance    ProcessorType = "claimable_balances_snapshot_v1"
+	ProcessorTypeBronzeLiquidityPool       ProcessorType = "liquidity_pools_snapshot_v1"
+	ProcessorTypeBronzeContractEvent       ProcessorType = "contract_events_stream_v1"
+	ProcessorTypeBronzeContractData        ProcessorType = "contract_data_snapshot_v1"
+	ProcessorTypeBronzeContractCode        ProcessorType = "contract_code_snapshot_v1"
+	ProcessorTypeBronzeConfigSetting       ProcessorType = "config_settings_snapshot_v1"
+	ProcessorTypeBronzeTTL                 ProcessorType = "ttl_snapshot_v1"
+	ProcessorTypeBronzeEvictedKey          ProcessorType = "evicted_keys_state_v1"
+	ProcessorTypeBronzeRestoredKey         ProcessorType = "restored_keys_state_v1"
+	ProcessorTypeBronzeAccountSigner       ProcessorType = "account_signers_snapshot_v1"
 )
 
 // ProcessorMetadata is a standard metadata structure that should be
@@ -98,7 +120,27 @@ func (pt ProcessorType) IsValid() bool {
 		ProcessorTypeClaimableBalance,
 		ProcessorTypeTrustline,
 		ProcessorTypeEffects,
-		ProcessorTypeOperation:
+		ProcessorTypeOperation,
+		// Bronze layer tables
+		ProcessorTypeBronzeLedger,
+		ProcessorTypeBronzeTransaction,
+		ProcessorTypeBronzeOperation,
+		ProcessorTypeBronzeEffect,
+		ProcessorTypeBronzeTrade,
+		ProcessorTypeBronzeNativeBalance,
+		ProcessorTypeBronzeAccount,
+		ProcessorTypeBronzeTrustline,
+		ProcessorTypeBronzeOffer,
+		ProcessorTypeBronzeClaimableBalance,
+		ProcessorTypeBronzeLiquidityPool,
+		ProcessorTypeBronzeContractEvent,
+		ProcessorTypeBronzeContractData,
+		ProcessorTypeBronzeContractCode,
+		ProcessorTypeBronzeConfigSetting,
+		ProcessorTypeBronzeTTL,
+		ProcessorTypeBronzeEvictedKey,
+		ProcessorTypeBronzeRestoredKey,
+		ProcessorTypeBronzeAccountSigner:
 		return true
 	default:
 		return false
