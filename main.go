@@ -193,6 +193,10 @@ func createSourceAdapter(sourceConfig SourceConfig, checkpointDir string) (Sourc
 		return NewS3BufferedStorageSourceAdapter(sourceConfig.Config)
 	case "RPCSourceAdapter":
 		return NewRPCSourceAdapter(sourceConfig.Config)
+	case "BronzeSourceAdapter":
+		return NewBronzeSourceAdapter(sourceConfig.Config)
+	case "DuckLakeSourceAdapter":
+		return NewDuckLakeSourceAdapter(sourceConfig.Config)
 	// Add more source types as needed
 	default:
 		return nil, fmt.Errorf("unsupported source type: %s", sourceConfig.Type)
@@ -314,8 +318,11 @@ func createProcessor(processorConfig processor.ProcessorConfig) (processor.Proce
 		return processor.ProcessorPassthrough(processorConfig.Config), nil
 	case "LedgerToJSON":
 		return processor.ProcessorLedgerToJSON(processorConfig.Config), nil
-	case "SilverLedgerReader":
-		return processor.NewSilverLedgerReaderProcessor(processorConfig.Config), nil
+	case "BronzeExtractors":
+		return processor.NewBronzeExtractorsProcessor(processorConfig.Config), nil
+	case "SilverLedgerReader": // Deprecated: use BronzeExtractors instead
+		log.Println("WARNING: SilverLedgerReader is deprecated, use BronzeExtractors instead")
+		return processor.NewBronzeExtractorsProcessor(processorConfig.Config), nil
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}
@@ -397,8 +404,12 @@ func createConsumer(consumerConfig consumer.ConsumerConfig) (processor.Processor
 		return consumer.NewSaveToLedgerParquet(consumerConfig.Config)
 	case "SaveToDuckLake":
 		return consumer.NewSaveToDuckLake(consumerConfig.Config)
+	case "SaveToDuckLakeEnhanced":
+		return consumer.NewSaveToDuckLakeEnhanced(consumerConfig.Config)
 	case "SilverIngester":
 		return consumer.NewSilverIngesterConsumer(consumerConfig.Config)
+	case "BronzeToDuckDB":
+		return consumer.NewBronzeToDuckDB(consumerConfig.Config)
 	case "DebugLogger":
 		return consumer.NewDebugLogger(consumerConfig.Config)
 	case "BufferedPostgreSQL":

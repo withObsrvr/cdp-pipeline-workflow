@@ -1,0 +1,170 @@
+# Bronze Layer Unified Architecture Example
+# This configuration demonstrates the hot/cold tier pattern with Bronze layer data:
+#   - BronzeExtractors: Transforms raw XDR ledgers into 19 Bronze tables
+#   - SaveToDuckLakeEnhanced: Cold tier (analytics) with 2000-record batches
+#   - SaveToPostgreSQLBronze: Hot tier (operational) with 200-record batches
+#
+# Data Flow:
+#   Landing → BronzeExtractors → [DuckLake (cold) + PostgreSQL (hot)]
+#
+# Batch Sizes:
+#   - PostgreSQL (hot): 200 records (real-time queries, 30-day retention)
+#   - DuckLake (cold):  2000 records (analytics, long-term storage)
+
+source:
+  type: "CaptiveCoreInboundAdapter"
+  config:
+    captive_core_toml: "/path/to/captive-core.toml"
+    network_passphrase: "Test SDF Network ; September 2015"
+    history_archive_urls:
+      - "https://history.stellar.org/prd/core-live/core_live_001"
+    checkpoint_frequency: 64
+    start_ledger: 1000
+    end_ledger: 2000
+
+processors:
+  # Bronze Extractors: Transform XDR ledgers into 19 Bronze tables
+  - type: "BronzeExtractors"
+    config:
+      network_passphrase: "Test SDF Network ; September 2015"
+      # This processor extracts and broadcasts all 19 Bronze tables:
+      # - ledgers_row_v2
+      # - transactions_row_v2
+      # - operations_row_v2
+      # - native_balances_snapshot_v1
+      # - effects_row_v1
+      # - trades_row_v1
+      # - accounts_snapshot_v1
+      # - trustlines_snapshot_v1
+      # - offers_snapshot_v1
+      # - claimable_balances_snapshot_v1
+      # - liquidity_pools_snapshot_v1
+      # - contract_events_stream_v1
+      # - contract_data_snapshot_v1
+      # - contract_code_snapshot_v1
+      # - config_settings_snapshot_v1
+      # - ttl_snapshot_v1
+      # - evicted_keys_state_v1
+      # - restored_keys_state_v1
+      # - account_signers_snapshot_v1
+
+consumers:
+  # COLD TIER: DuckLake (Analytics, Long-term Storage)
+  - type: "SaveToDuckLakeEnhanced"
+    config:
+      # Database connection
+      db_path: "/data/bronze_cold.duckdb"
+
+      # Table to write (each consumer handles one table)
+      table_name: "ledgers_row_v2"
+
+      # Large batches for analytics workload
+      batch_size: 2000
+      flush_interval_seconds: 60
+
+      # Checkpoint for crash recovery
+      enable_checkpoint: true
+      checkpoint_dir: "/data/checkpoints/cold"
+
+      # Production audit features
+      enable_pas: true
+      pas_backup_dir: "/data/pas/cold"
+      enable_manifest: true
+      manifest_dir: "/data/manifests/cold"
+      enable_quality_checks: true
+
+      # Schema definition (Hubble-compatible)
+      schema:
+        columns:
+          - name: sequence
+            type: UBIGINT
+          - name: ledger_hash
+            type: VARCHAR
+          - name: previous_ledger_hash
+            type: VARCHAR
+          - name: closed_at
+            type: TIMESTAMP
+          - name: protocol_version
+            type: UINTEGER
+          - name: total_coins
+            type: BIGINT
+          - name: fee_pool
+            type: BIGINT
+          - name: base_fee
+            type: UINTEGER
+          - name: base_reserve
+            type: UINTEGER
+          - name: max_tx_set_size
+            type: UINTEGER
+          - name: successful_tx_count
+            type: UINTEGER
+          - name: failed_tx_count
+            type: UINTEGER
+          # ... remaining 12 columns ...
+
+  # HOT TIER: PostgreSQL (Real-time Queries, 30-day Retention)
+  - type: "SaveToPostgreSQLBronze"
+    config:
+      # Database connection
+      host: "localhost"
+      port: 5432
+      database: "bronze_hot"
+      username: "postgres"
+      password: "password"
+      sslmode: "disable"
+
+      # Connection pool
+      max_open_conns: 25
+      max_idle_conns: 5
+
+      # Small batches for real-time queries
+      batch_size: 200  # Hot tier: fast writes, immediate queries
+
+      # Partitioning and retention
+      enable_partitioning: true   # Daily partitions by closed_at/created_at
+      enable_retention: true       # Auto-drop partitions > 30 days
+      retention_days: 30           # Keep only last 30 days in hot tier
+      retention_interval: 24       # Check retention every 24 hours
+
+      # This consumer automatically:
+      # 1. Creates daily partitions for all Bronze tables
+      # 2. Uses COPY protocol for high-performance bulk insert
+      # 3. Drops partitions older than 30 days
+      # 4. Supports all 19 Bronze tables (ledgers, transactions, operations, etc.)
+
+# COMPARISON: Hot vs Cold Tier
+#
+# Hot Tier (PostgreSQL):
+#   - Batch size: 200 records
+#   - Latency: < 1 second (real-time queries)
+#   - Retention: 30 days
+#   - Use case: Operational dashboards, alerting, recent data queries
+#   - Cost: Higher (compute + storage)
+#
+# Cold Tier (DuckLake):
+#   - Batch size: 2000 records
+#   - Latency: seconds to minutes (analytics queries)
+#   - Retention: Unlimited
+#   - Use case: Historical analysis, ML training, compliance audits
+#   - Cost: Lower (object storage)
+#
+# Both tiers receive identical Bronze data from BronzeExtractors processor,
+# ensuring consistency between operational and analytical workloads.
+
+# DEPLOYMENT NOTES:
+#
+# 1. Start with hot tier only for MVP:
+#    - Comment out SaveToDuckLakeEnhanced consumer
+#    - Get real-time queries working first
+#
+# 2. Add cold tier when ready for analytics:
+#    - Uncomment SaveToDuckLakeEnhanced consumer
+#    - Backfill historical data if needed
+#
+# 3. Monitor batch flush times:
+#    - Hot tier: should flush every 1-2 seconds (200 records)
+#    - Cold tier: should flush every 10-30 seconds (2000 records)
+#
+# 4. Adjust batch sizes based on workload:
+#    - High volume (>100 ledgers/sec): increase cold tier to 5000
+#    - Low volume (<10 ledgers/sec): decrease hot tier to 100

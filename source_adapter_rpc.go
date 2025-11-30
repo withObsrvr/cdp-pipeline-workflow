@@ -16,6 +16,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stellar/go/xdr"
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
+	"github.com/withobsrvr/flowctl/pkg/console/heartbeat"
 )
 
 // =============================================================
@@ -99,8 +100,8 @@ type LedgersResponse struct {
 
 // LedgersResult contains the ledgers array and latest ledger sequence.
 type LedgersResult struct {
-	Ledgers      []interface{} `json:"ledgers"`       // Array of ledger objects
-	LatestLedger uint64        `json:"latestLedger"`  // Latest known ledger sequence
+	Ledgers      []interface{} `json:"ledgers"`      // Array of ledger objects
+	LatestLedger uint64        `json:"latestLedger"` // Latest known ledger sequence
 }
 
 // NetworkResponse defines the response for getNetwork.
@@ -176,11 +177,12 @@ type GetEventsRequestParams struct {
 
 // SorobanSourceAdapter ingests events/queries data from the Stellar-RPC endpoint.
 type SorobanSourceAdapter struct {
-	config     SorobanConfig
-	processors []cdpProcessor.Processor
-	client     *http.Client
-	lastLedger uint64
-	stats      EventStats
+	config          SorobanConfig
+	processors      []cdpProcessor.Processor
+	client          *http.Client
+	lastLedger      uint64
+	stats           EventStats
+	heartbeatClient *heartbeat.Client // Console heartbeat for billing tracking
 }
 
 // NewSorobanSourceAdapter creates a new RPC source adapter using a configuration format
@@ -249,6 +251,26 @@ func NewSorobanSourceAdapter(config map[string]interface{}) (SourceAdapter, erro
 		adapter.stats.LastLedger = latestLedger
 		adapter.stats.LastEventTime = time.Now()
 		log.Printf("Initialized SorobanSourceAdapter starting from latest ledger: %d", adapter.lastLedger)
+	}
+
+	// Initialize console heartbeat client if env vars are provided
+	if consoleURL := os.Getenv("OBSRVR_CONSOLE_URL"); consoleURL != "" {
+		pipelineID := os.Getenv("PIPELINE_ID")
+		sessionID := os.Getenv("OBSRVR_SESSION_ID")
+		webhookSecret := os.Getenv("OBSRVR_WEBHOOK_SECRET")
+
+		if pipelineID != "" && sessionID != "" && webhookSecret != "" {
+			adapter.heartbeatClient = heartbeat.NewClient(consoleURL, pipelineID, sessionID, webhookSecret)
+			log.Printf("Console heartbeat client initialized for pipeline %s, session %s", pipelineID, sessionID)
+
+			// Start background heartbeat loop (5 minutes)
+			go adapter.heartbeatClient.StartHeartbeatLoop(context.Background(), 5*time.Minute)
+		} else {
+			log.Printf("Console heartbeat disabled (missing env vars: PIPELINE_ID=%v, SESSION_ID=%v, SECRET=%v)",
+				pipelineID != "", sessionID != "", webhookSecret != "")
+		}
+	} else {
+		log.Printf("Console heartbeat disabled (OBSRVR_CONSOLE_URL not set)")
 	}
 
 	return adapter, nil
@@ -839,6 +861,11 @@ func (s *SorobanSourceAdapter) runGetLedgersLoop(ctx context.Context) error {
 		}
 
 		totalProcessed += processedCount
+
+		// Update console heartbeat with current ledger count
+		if s.heartbeatClient != nil {
+			s.heartbeatClient.SetLedgerCount(int64(totalProcessed))
+		}
 
 		log.Printf("Processed %d ledgers from batch %d-%d (total: %d)", processedCount, currentLedger, batchEnd, totalProcessed)
 

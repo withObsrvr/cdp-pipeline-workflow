@@ -39,6 +39,10 @@ func CreateSourceAdapterFunc(sourceConfig SourceConfig) (SourceAdapter, error) {
 		return NewS3BufferedStorageSourceAdapter(sourceConfig.Config)
 	case "RPCSourceAdapter":
 		return NewRPCSourceAdapter(sourceConfig.Config)
+	case "BronzeSourceAdapter":
+		return NewBronzeSourceAdapter(sourceConfig.Config)
+	case "DuckLakeSourceAdapter":
+		return NewDuckLakeSourceAdapter(sourceConfig.Config)
 	// Add more source types as needed
 	default:
 		return nil, fmt.Errorf("unsupported source type: %s", sourceConfig.Type)
@@ -137,6 +141,13 @@ func CreateProcessorFunc(processorConfig processor.ProcessorConfig) (processor.P
 		return processor.ProcessorParticipantExtractor(processorConfig.Config), nil
 	case "StellarEffects":
 		return processor.ProcessorStellarEffects(processorConfig.Config), nil
+	case "BronzeExtractors":
+		return processor.NewBronzeExtractorsProcessor(processorConfig.Config), nil
+	case "SilverLedgerReader": // Deprecated: use BronzeExtractors instead
+		log.Println("WARNING: SilverLedgerReader is deprecated, use BronzeExtractors instead")
+		return processor.NewBronzeExtractorsProcessor(processorConfig.Config), nil
+	case "BronzeToContractInvocation":
+		return processor.NewBronzeToContractInvocationProcessor(processorConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported processor type: %s", processorConfig.Type)
 	}
@@ -154,6 +165,8 @@ func CreateConsumerFunc(consumerConfig consumer.ConsumerConfig) (processor.Proce
 		return consumer.NewSaveToGCS(consumerConfig.Config)
 	case "SaveToDuckDB":
 		return consumer.NewSaveToDuckDB(consumerConfig.Config)
+	case "SaveToDuckLakeEnhanced":
+		return consumer.NewSaveToDuckLakeEnhanced(consumerConfig.Config)
 	case "SaveContractToDuckDB":
 		return consumer.NewSaveContractToDuckDB(consumerConfig.Config)
 	case "SaveToTimescaleDB":
@@ -166,6 +179,8 @@ func CreateConsumerFunc(consumerConfig consumer.ConsumerConfig) (processor.Proce
 		return consumer.NewSaveToWebSocket(consumerConfig.Config)
 	case "SaveToPostgreSQL":
 		return consumer.NewSaveToPostgreSQL(consumerConfig.Config)
+	case "SaveToPostgreSQLBronze":
+		return consumer.NewSaveToPostgreSQLBronze(consumerConfig.Config)
 	case "SaveToClickHouse":
 		return consumer.NewSaveToClickHouse(consumerConfig.Config)
 	case "SaveToMarketAnalytics":
@@ -214,6 +229,10 @@ func CreateConsumerFunc(consumerConfig consumer.ConsumerConfig) (processor.Proce
 		return consumer.NewLogDebug(consumerConfig.Config)
 	case "WalletBackendPostgreSQL":
 		return consumer.ConsumerWalletBackendPostgreSQL(consumerConfig.Config)
+	case "SilverIngester":
+		return consumer.NewSilverIngesterConsumer(consumerConfig.Config)
+	case "BronzeToDuckDB":
+		return consumer.NewBronzeToDuckDB(consumerConfig.Config)
 	default:
 		return nil, fmt.Errorf("unsupported consumer type: %s", consumerConfig.Type)
 	}

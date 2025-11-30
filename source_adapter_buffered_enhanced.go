@@ -18,6 +18,7 @@ import (
 	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/checkpoint"
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
 	"github.com/withObsrvr/cdp-pipeline-workflow/utils"
+	"github.com/withobsrvr/flowctl/pkg/console/heartbeat"
 )
 
 // BufferedStorageSourceAdapterEnhanced supports time-based configuration for GCS
@@ -34,6 +35,7 @@ type BufferedStorageSourceAdapterEnhanced struct {
 	currentLedger   atomic.Uint32 // Thread-safe current ledger tracking
 	totalProcessed  atomic.Uint64
 	totalErrors     atomic.Uint64
+	heartbeatClient *heartbeat.Client // Console heartbeat for billing tracking
 }
 
 // BufferedStorageConfigEnhanced includes both legacy and time-based fields
@@ -83,6 +85,9 @@ func NewBufferedStorageSourceAdapterEnhancedWithCheckpoint(config map[string]int
 			log.Printf("[INFO] Checkpoint manager enabled for pipeline %s/%s", teamSlug, pipelineID)
 		}
 	}
+
+	// Initialize console heartbeat client
+	adapter.heartbeatClient = initializeHeartbeatClient()
 
 	return adapter, nil
 }
@@ -339,6 +344,11 @@ func (adapter *BufferedStorageSourceAdapterEnhanced) processLedgerRange(ctx cont
 			if adapter.checkpointMgr != nil {
 				adapter.currentLedger.Store(ledgerSeq)
 				adapter.totalProcessed.Add(1)
+
+				// Update console heartbeat
+				if adapter.heartbeatClient != nil {
+					adapter.heartbeatClient.SetLedgerCount(int64(adapter.totalProcessed.Load()))
+				}
 			}
 
 			if err := adapter.processLedger(ctx, lcm); err != nil {
@@ -471,6 +481,11 @@ func (adapter *BufferedStorageSourceAdapterEnhanced) processLedgerRangeForContin
 			if adapter.checkpointMgr != nil {
 				adapter.currentLedger.Store(ledgerSeq)
 				adapter.totalProcessed.Add(1)
+
+				// Update console heartbeat
+				if adapter.heartbeatClient != nil {
+					adapter.heartbeatClient.SetLedgerCount(int64(adapter.totalProcessed.Load()))
+				}
 			}
 
 			if err := adapter.processLedger(ctx, lcm); err != nil {

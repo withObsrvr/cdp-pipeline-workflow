@@ -85,8 +85,15 @@ func (r *DuckLakeSchemaRegistry) GetSchema(processorType processor.ProcessorType
 func (r *DuckLakeSchemaRegistry) DetectProcessorType(msg processor.Message) processor.ProcessorType {
 	// Check metadata first (preferred method)
 	if msg.Metadata != nil {
+		// Check for processor_type (standard metadata)
 		if pType, ok := msg.Metadata["processor_type"].(string); ok {
 			return processor.ProcessorType(pType)
+		}
+
+		// Check for table_type (used by BronzeExtractorsProcessor)
+		// Bronze tables use table names as processor types
+		if tableType, ok := msg.Metadata["table_type"].(string); ok {
+			return processor.ProcessorType(tableType)
 		}
 	}
 
@@ -189,14 +196,35 @@ func (r *DuckLakeSchemaRegistry) HasSchema(processorType processor.ProcessorType
 // registerAllSchemas registers all known processor schemas.
 // This is called during initialization to populate the registry.
 func (r *DuckLakeSchemaRegistry) registerAllSchemas() {
+	// Silver layer schemas
 	r.registerContractInvocationSchema()
 	r.registerContractEventSchema()
-	// Additional schemas will be registered in future phases:
+
+	// Bronze layer schemas (19 Hubble-compatible tables)
+	r.registerBronzeLedgerSchema()
+	r.registerBronzeTransactionSchema()
+	r.registerBronzeOperationSchema()
+	r.registerBronzeEffectSchema()
+	r.registerBronzeTradeSchema()
+	r.registerBronzeNativeBalanceSchema()
+	r.registerBronzeAccountSchema()
+	r.registerBronzeTrustlineSchema()
+	r.registerBronzeOfferSchema()
+	r.registerBronzeClaimableBalanceSchema()
+	r.registerBronzeLiquidityPoolSchema()
+	r.registerBronzeContractEventSchema()
+	r.registerBronzeContractDataSchema()
+	r.registerBronzeContractCodeSchema()
+	r.registerBronzeConfigSettingSchema()
+	r.registerBronzeTTLSchema()
+	r.registerBronzeEvictedKeySchema()
+	r.registerBronzeRestoredKeySchema()
+	r.registerBronzeAccountSignerSchema()
+
+	// Additional Silver layer schemas will be registered in future phases:
 	// r.registerPaymentSchema()
 	// r.registerAccountDataSchema()
 	// r.registerTradeSchema()
-	// r.registerLedgerSchema()
-	// r.registerTransactionSchema()
 }
 
 // registerSchema is a helper to register a schema definition

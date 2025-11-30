@@ -9,37 +9,37 @@ import (
 	"github.com/stellar/go/xdr"
 )
 
-// SilverLedgerReaderProcessor extracts all 19 Silver table data types from LedgerCloseMeta
-// This processor is designed to work with the SilverCopierConsumer which writes to DuckLake
-type SilverLedgerReaderProcessor struct {
+// BronzeExtractorsProcessor extracts all 19 Bronze table data types from LedgerCloseMeta
+// This processor is designed to work with the BronzeCopierConsumer which writes to DuckLake
+type BronzeExtractorsProcessor struct {
 	networkPassphrase string
 	subscribers       []Processor
 }
 
-// NewSilverLedgerReaderProcessor creates a new Silver ledger reader processor
-func NewSilverLedgerReaderProcessor(config map[string]interface{}) *SilverLedgerReaderProcessor {
+// NewBronzeExtractorsProcessor creates a new Bronze extractors processor
+func NewBronzeExtractorsProcessor(config map[string]interface{}) *BronzeExtractorsProcessor {
 	networkPassphrase := "Test SDF Network ; September 2015"
 	if np, ok := config["network_passphrase"].(string); ok {
 		networkPassphrase = np
 	}
 
-	return &SilverLedgerReaderProcessor{
+	return &BronzeExtractorsProcessor{
 		networkPassphrase: networkPassphrase,
 		subscribers:       make([]Processor, 0),
 	}
 }
 
 // Subscribe adds a subscriber to receive processed messages
-func (p *SilverLedgerReaderProcessor) Subscribe(processor Processor) {
+func (p *BronzeExtractorsProcessor) Subscribe(processor Processor) {
 	p.subscribers = append(p.subscribers, processor)
 }
 
-// Process extracts all Silver data types from LedgerCloseMeta and emits to subscribers
-func (p *SilverLedgerReaderProcessor) Process(ctx context.Context, msg Message) error {
+// Process extracts all Bronze data types from LedgerCloseMeta and emits to subscribers
+func (p *BronzeExtractorsProcessor) Process(ctx context.Context, msg Message) error {
 	// Expect LedgerCloseMeta payload
 	lcm, ok := msg.Payload.(xdr.LedgerCloseMeta)
 	if !ok {
-		return fmt.Errorf("SilverLedgerReader: expected xdr.LedgerCloseMeta, got %T", msg.Payload)
+		return fmt.Errorf("BronzeExtractor: expected xdr.LedgerCloseMeta, got %T", msg.Payload)
 	}
 
 	// Get ledger sequence and closed_at for all records
@@ -202,7 +202,7 @@ func (p *SilverLedgerReaderProcessor) Process(ctx context.Context, msg Message) 
 }
 
 // emit sends a message to all subscribers with table_type metadata
-func (p *SilverLedgerReaderProcessor) emit(ctx context.Context, tableType string, record interface{}) error {
+func (p *BronzeExtractorsProcessor) emit(ctx context.Context, tableType string, record interface{}) error {
 	msg := Message{
 		Payload: record,
 		Metadata: map[string]interface{}{
@@ -219,7 +219,7 @@ func (p *SilverLedgerReaderProcessor) emit(ctx context.Context, tableType string
 
 // Helper methods to get ledger info
 
-func (p *SilverLedgerReaderProcessor) getLedgerSequence(lcm *xdr.LedgerCloseMeta) uint32 {
+func (p *BronzeExtractorsProcessor) getLedgerSequence(lcm *xdr.LedgerCloseMeta) uint32 {
 	switch lcm.V {
 	case 0:
 		return uint32(lcm.MustV0().LedgerHeader.Header.LedgerSeq)
@@ -232,7 +232,7 @@ func (p *SilverLedgerReaderProcessor) getLedgerSequence(lcm *xdr.LedgerCloseMeta
 	}
 }
 
-func (p *SilverLedgerReaderProcessor) getClosedAt(lcm *xdr.LedgerCloseMeta) time.Time {
+func (p *BronzeExtractorsProcessor) getClosedAt(lcm *xdr.LedgerCloseMeta) time.Time {
 	switch lcm.V {
 	case 0:
 		return time.Unix(int64(lcm.MustV0().LedgerHeader.Header.ScpValue.CloseTime), 0)
@@ -245,7 +245,7 @@ func (p *SilverLedgerReaderProcessor) getClosedAt(lcm *xdr.LedgerCloseMeta) time
 	}
 }
 
-func (p *SilverLedgerReaderProcessor) getLedgerHeader(lcm *xdr.LedgerCloseMeta) xdr.LedgerHeaderHistoryEntry {
+func (p *BronzeExtractorsProcessor) getLedgerHeader(lcm *xdr.LedgerCloseMeta) xdr.LedgerHeaderHistoryEntry {
 	switch lcm.V {
 	case 0:
 		return lcm.MustV0().LedgerHeader
@@ -259,9 +259,9 @@ func (p *SilverLedgerReaderProcessor) getLedgerHeader(lcm *xdr.LedgerCloseMeta) 
 }
 
 // getTransactionReader creates an ingest.LedgerTransactionReader for the ledger
-func (p *SilverLedgerReaderProcessor) getTransactionReader(lcm *xdr.LedgerCloseMeta) (*ingest.LedgerTransactionReader, error) {
+func (p *BronzeExtractorsProcessor) getTransactionReader(lcm *xdr.LedgerCloseMeta) (*ingest.LedgerTransactionReader, error) {
 	return ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 }
 
-// Ensure SilverLedgerReaderProcessor implements Processor interface
-var _ Processor = (*SilverLedgerReaderProcessor)(nil)
+// Ensure BronzeExtractorsProcessor implements Processor interface
+var _ Processor = (*BronzeExtractorsProcessor)(nil)

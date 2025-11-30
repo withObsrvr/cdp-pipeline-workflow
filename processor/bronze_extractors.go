@@ -21,10 +21,10 @@ import (
 // ============================================
 
 // extractLedgerData extracts ledger data from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractLedgerData(lcm *xdr.LedgerCloseMeta, ledgerRange uint32) *SilverLedgerRecord {
+func (p *BronzeExtractorsProcessor) extractLedgerData(lcm *xdr.LedgerCloseMeta, ledgerRange uint32) *BronzeLedgerRecord {
 	header := p.getLedgerHeader(lcm)
 
-	record := &SilverLedgerRecord{
+	record := &BronzeLedgerRecord{
 		Sequence:           uint32(header.Header.LedgerSeq),
 		LedgerHash:         hex.EncodeToString(header.Hash[:]),
 		PreviousLedgerHash: hex.EncodeToString(header.Header.PreviousLedgerHash[:]),
@@ -147,12 +147,12 @@ func (p *SilverLedgerReaderProcessor) extractLedgerData(lcm *xdr.LedgerCloseMeta
 // ============================================
 
 // extractTransactions extracts transaction data from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractTransactions(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverTransactionRecord {
-	var transactions []*SilverTransactionRecord
+func (p *BronzeExtractorsProcessor) extractTransactions(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeTransactionRecord {
+	var transactions []*BronzeTransactionRecord
 
 	reader, err := p.getTransactionReader(lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create transaction reader: %v", err)
+		log.Printf("BronzeExtractor: Failed to create transaction reader: %v", err)
 		return transactions
 	}
 	defer reader.Close()
@@ -165,14 +165,14 @@ func (p *SilverLedgerReaderProcessor) extractTransactions(lcm *xdr.LedgerCloseMe
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading transaction in ledger %d: %v", ledgerSeq, err)
+			log.Printf("BronzeExtractor: Error reading transaction in ledger %d: %v", ledgerSeq, err)
 			continue
 		}
 
 		acctSeq := int64(tx.Envelope.SeqNum())
 		lr := ledgerRange
 		memoType := "none"
-		record := &SilverTransactionRecord{
+		record := &BronzeTransactionRecord{
 			LedgerSequence:        ledgerSeq,
 			TransactionHash:       hex.EncodeToString(tx.Result.TransactionHash[:]),
 			SourceAccount:         tx.Envelope.SourceAccount().ToAccountId().Address(),
@@ -269,12 +269,12 @@ func (p *SilverLedgerReaderProcessor) extractTransactions(lcm *xdr.LedgerCloseMe
 // ============================================
 
 // extractOperations extracts operation data from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractOperations(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverOperationRecord {
-	var operations []*SilverOperationRecord
+func (p *BronzeExtractorsProcessor) extractOperations(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeOperationRecord {
+	var operations []*BronzeOperationRecord
 
 	reader, err := p.getTransactionReader(lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create transaction reader for operations: %v", err)
+		log.Printf("BronzeExtractor: Failed to create transaction reader for operations: %v", err)
 		return operations
 	}
 	defer reader.Close()
@@ -287,7 +287,7 @@ func (p *SilverLedgerReaderProcessor) extractOperations(lcm *xdr.LedgerCloseMeta
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading transaction for operations: %v", err)
+			log.Printf("BronzeExtractor: Error reading transaction for operations: %v", err)
 			continue
 		}
 
@@ -296,7 +296,7 @@ func (p *SilverLedgerReaderProcessor) extractOperations(lcm *xdr.LedgerCloseMeta
 
 		for i, op := range tx.Envelope.Operations() {
 			lr := ledgerRange
-			record := &SilverOperationRecord{
+			record := &BronzeOperationRecord{
 				TransactionHash:       txHash,
 				OperationIndex:        int32(i),
 				LedgerSequence:        ledgerSeq,
@@ -315,7 +315,7 @@ func (p *SilverLedgerReaderProcessor) extractOperations(lcm *xdr.LedgerCloseMeta
 			}
 
 			// Extract operation-specific fields based on type
-			extractSilverOperationDetails(op, record)
+			extractBronzeOperationDetails(op, record)
 
 			operations = append(operations, record)
 		}
@@ -324,8 +324,8 @@ func (p *SilverLedgerReaderProcessor) extractOperations(lcm *xdr.LedgerCloseMeta
 	return operations
 }
 
-// extractSilverOperationDetails extracts operation-specific fields for Silver records
-func extractSilverOperationDetails(op xdr.Operation, record *SilverOperationRecord) {
+// extractBronzeOperationDetails extracts operation-specific fields for Bronze records
+func extractBronzeOperationDetails(op xdr.Operation, record *BronzeOperationRecord) {
 	switch op.Body.Type {
 	case xdr.OperationTypeCreateAccount:
 		if createAcct, ok := op.Body.GetCreateAccountOp(); ok {
@@ -402,12 +402,12 @@ func extractSilverOperationDetails(op xdr.Operation, record *SilverOperationReco
 
 // extractEffects extracts effect data from LedgerCloseMeta
 // Note: Effects require additional processing - this is a simplified version
-func (p *SilverLedgerReaderProcessor) extractEffects(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverEffectRecord {
-	var effects []*SilverEffectRecord
+func (p *BronzeExtractorsProcessor) extractEffects(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeEffectRecord {
+	var effects []*BronzeEffectRecord
 
 	reader, err := p.getTransactionReader(lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create transaction reader for effects: %v", err)
+		log.Printf("BronzeExtractor: Failed to create transaction reader for effects: %v", err)
 		return effects
 	}
 	defer reader.Close()
@@ -420,7 +420,7 @@ func (p *SilverLedgerReaderProcessor) extractEffects(lcm *xdr.LedgerCloseMeta, c
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading transaction for effects: %v", err)
+			log.Printf("BronzeExtractor: Error reading transaction for effects: %v", err)
 			continue
 		}
 
@@ -434,7 +434,7 @@ func (p *SilverLedgerReaderProcessor) extractEffects(lcm *xdr.LedgerCloseMeta, c
 				if state.Data.Type == xdr.LedgerEntryTypeAccount {
 					if account, ok := state.Data.GetAccount(); ok {
 						accountID := account.AccountId.Address()
-						record := &SilverEffectRecord{
+						record := &BronzeEffectRecord{
 							LedgerSequence:   ledgerSeq,
 							TransactionHash:  txHash,
 							OperationIndex:   0,
@@ -460,12 +460,12 @@ func (p *SilverLedgerReaderProcessor) extractEffects(lcm *xdr.LedgerCloseMeta, c
 // ============================================
 
 // extractTrades extracts trade data from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractTrades(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverTradeRecord {
-	var trades []*SilverTradeRecord
+func (p *BronzeExtractorsProcessor) extractTrades(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeTradeRecord {
+	var trades []*BronzeTradeRecord
 
 	reader, err := p.getTransactionReader(lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create transaction reader for trades: %v", err)
+		log.Printf("BronzeExtractor: Failed to create transaction reader for trades: %v", err)
 		return trades
 	}
 	defer reader.Close()
@@ -478,7 +478,7 @@ func (p *SilverLedgerReaderProcessor) extractTrades(lcm *xdr.LedgerCloseMeta, cl
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading transaction for trades: %v", err)
+			log.Printf("BronzeExtractor: Error reading transaction for trades: %v", err)
 			continue
 		}
 
@@ -499,8 +499,8 @@ func (p *SilverLedgerReaderProcessor) extractTrades(lcm *xdr.LedgerCloseMeta, cl
 }
 
 // extractTradesFromOpResult extracts trades from an operation result
-func extractTradesFromOpResult(opResult xdr.OperationResult, txHash string, ledgerSeq uint32, opIndex int32, closedAt time.Time, ledgerRange uint32) []*SilverTradeRecord {
-	var trades []*SilverTradeRecord
+func extractTradesFromOpResult(opResult xdr.OperationResult, txHash string, ledgerSeq uint32, opIndex int32, closedAt time.Time, ledgerRange uint32) []*BronzeTradeRecord {
+	var trades []*BronzeTradeRecord
 
 	tr, ok := opResult.GetTr()
 	if !ok {
@@ -538,7 +538,7 @@ func extractTradesFromOpResult(opResult xdr.OperationResult, txHash string, ledg
 
 	for tradeIndex, claim := range claimedOffers {
 		lr := ledgerRange
-		record := &SilverTradeRecord{
+		record := &BronzeTradeRecord{
 			LedgerSequence:  ledgerSeq,
 			TransactionHash: txHash,
 			OperationIndex:  opIndex,
@@ -647,17 +647,17 @@ func extractTradesFromOpResult(opResult xdr.OperationResult, txHash string, ledg
 // ============================================
 
 // extractNativeBalances extracts native XLM balance data from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractNativeBalances(lcm *xdr.LedgerCloseMeta, ledgerSeq uint32, ledgerRange uint32) []*SilverNativeBalanceRecord {
-	var balances []*SilverNativeBalanceRecord
+func (p *BronzeExtractorsProcessor) extractNativeBalances(lcm *xdr.LedgerCloseMeta, ledgerSeq uint32, ledgerRange uint32) []*BronzeNativeBalanceRecord {
+	var balances []*BronzeNativeBalanceRecord
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create change reader: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader: %v", err)
 		return balances
 	}
 	defer reader.Close()
 
-	accountMap := make(map[string]*SilverNativeBalanceRecord)
+	accountMap := make(map[string]*BronzeNativeBalanceRecord)
 
 	for {
 		change, err := reader.Read()
@@ -665,7 +665,7 @@ func (p *SilverLedgerReaderProcessor) extractNativeBalances(lcm *xdr.LedgerClose
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading change: %v", err)
+			log.Printf("BronzeExtractor: Error reading change: %v", err)
 			continue
 		}
 
@@ -687,7 +687,7 @@ func (p *SilverLedgerReaderProcessor) extractNativeBalances(lcm *xdr.LedgerClose
 		accountID := accountEntry.AccountId.Address()
 		seqNum := int64(accountEntry.SeqNum)
 		lr := ledgerRange
-		record := &SilverNativeBalanceRecord{
+		record := &BronzeNativeBalanceRecord{
 			AccountID:          accountID,
 			Balance:            int64(accountEntry.Balance),
 			BuyingLiabilities:  0,
@@ -726,17 +726,17 @@ func (p *SilverLedgerReaderProcessor) extractNativeBalances(lcm *xdr.LedgerClose
 // ============================================
 
 // extractAccounts extracts account data from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractAccounts(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverAccountRecord {
-	var accounts []*SilverAccountRecord
+func (p *BronzeExtractorsProcessor) extractAccounts(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeAccountRecord {
+	var accounts []*BronzeAccountRecord
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create change reader for accounts: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for accounts: %v", err)
 		return accounts
 	}
 	defer reader.Close()
 
-	accountMap := make(map[string]*SilverAccountRecord)
+	accountMap := make(map[string]*BronzeAccountRecord)
 	ledgerSeq := p.getLedgerSequence(lcm)
 
 	for {
@@ -745,7 +745,7 @@ func (p *SilverLedgerReaderProcessor) extractAccounts(lcm *xdr.LedgerCloseMeta, 
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading change for accounts: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for accounts: %v", err)
 			continue
 		}
 
@@ -767,7 +767,7 @@ func (p *SilverLedgerReaderProcessor) extractAccounts(lcm *xdr.LedgerCloseMeta, 
 		accountID := accountEntry.AccountId.Address()
 		flags := int32(accountEntry.Flags)
 
-		record := &SilverAccountRecord{
+		record := &BronzeAccountRecord{
 			AccountID:           accountID,
 			LedgerSequence:      ledgerSeq,
 			ClosedAt:            closedAt,
@@ -832,12 +832,12 @@ func (p *SilverLedgerReaderProcessor) extractAccounts(lcm *xdr.LedgerCloseMeta, 
 // ============================================
 
 // extractTrustlines extracts trustline data from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractTrustlines(lcm *xdr.LedgerCloseMeta, ledgerSeq uint32, ledgerRange uint32) []*SilverTrustlineRecord {
-	var trustlines []*SilverTrustlineRecord
+func (p *BronzeExtractorsProcessor) extractTrustlines(lcm *xdr.LedgerCloseMeta, ledgerSeq uint32, ledgerRange uint32) []*BronzeTrustlineRecord {
+	var trustlines []*BronzeTrustlineRecord
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create change reader for trustlines: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for trustlines: %v", err)
 		return trustlines
 	}
 	defer reader.Close()
@@ -850,7 +850,7 @@ func (p *SilverLedgerReaderProcessor) extractTrustlines(lcm *xdr.LedgerCloseMeta
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading change for trustlines: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for trustlines: %v", err)
 			continue
 		}
 
@@ -874,7 +874,7 @@ func (p *SilverLedgerReaderProcessor) extractTrustlines(lcm *xdr.LedgerCloseMeta
 
 		flags := int32(tlEntry.Flags)
 
-		record := &SilverTrustlineRecord{
+		record := &BronzeTrustlineRecord{
 			AccountID:                       tlEntry.AccountId.Address(),
 			AssetCode:                       assetCode,
 			AssetIssuer:                     assetIssuer,
@@ -908,12 +908,12 @@ func (p *SilverLedgerReaderProcessor) extractTrustlines(lcm *xdr.LedgerCloseMeta
 // ============================================
 
 // extractOffers extracts offer data from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractOffers(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverOfferRecord {
-	var offers []*SilverOfferRecord
+func (p *BronzeExtractorsProcessor) extractOffers(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeOfferRecord {
+	var offers []*BronzeOfferRecord
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create change reader for offers: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for offers: %v", err)
 		return offers
 	}
 	defer reader.Close()
@@ -926,7 +926,7 @@ func (p *SilverLedgerReaderProcessor) extractOffers(lcm *xdr.LedgerCloseMeta, cl
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading change for offers: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for offers: %v", err)
 			continue
 		}
 
@@ -957,7 +957,7 @@ func (p *SilverLedgerReaderProcessor) extractOffers(lcm *xdr.LedgerCloseMeta, cl
 			priceStr = strconv.FormatFloat(price, 'f', 7, 64)
 		}
 
-		record := &SilverOfferRecord{
+		record := &BronzeOfferRecord{
 			OfferID:            int64(offerEntry.OfferId),
 			SellerAccount:      offerEntry.SellerId.Address(),
 			LedgerSequence:     ledgerSeq,
@@ -986,12 +986,12 @@ func (p *SilverLedgerReaderProcessor) extractOffers(lcm *xdr.LedgerCloseMeta, cl
 // ============================================
 
 // extractClaimableBalances extracts claimable balance data from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractClaimableBalances(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverClaimableBalanceRecord {
-	var balances []*SilverClaimableBalanceRecord
+func (p *BronzeExtractorsProcessor) extractClaimableBalances(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeClaimableBalanceRecord {
+	var balances []*BronzeClaimableBalanceRecord
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create change reader for claimable balances: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for claimable balances: %v", err)
 		return balances
 	}
 	defer reader.Close()
@@ -1004,7 +1004,7 @@ func (p *SilverLedgerReaderProcessor) extractClaimableBalances(lcm *xdr.LedgerCl
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading change for claimable balances: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for claimable balances: %v", err)
 			continue
 		}
 
@@ -1041,7 +1041,7 @@ func (p *SilverLedgerReaderProcessor) extractClaimableBalances(lcm *xdr.LedgerCl
 			}
 		}
 
-		record := &SilverClaimableBalanceRecord{
+		record := &BronzeClaimableBalanceRecord{
 			BalanceID:      hex.EncodeToString(balanceIDBytes),
 			Sponsor:        sponsor,
 			LedgerSequence: ledgerSeq,
@@ -1067,12 +1067,12 @@ func (p *SilverLedgerReaderProcessor) extractClaimableBalances(lcm *xdr.LedgerCl
 // ============================================
 
 // extractLiquidityPools extracts liquidity pool data from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractLiquidityPools(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverLiquidityPoolRecord {
-	var pools []*SilverLiquidityPoolRecord
+func (p *BronzeExtractorsProcessor) extractLiquidityPools(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeLiquidityPoolRecord {
+	var pools []*BronzeLiquidityPoolRecord
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create change reader for liquidity pools: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for liquidity pools: %v", err)
 		return pools
 	}
 	defer reader.Close()
@@ -1085,7 +1085,7 @@ func (p *SilverLedgerReaderProcessor) extractLiquidityPools(lcm *xdr.LedgerClose
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading change for liquidity pools: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for liquidity pools: %v", err)
 			continue
 		}
 
@@ -1104,7 +1104,7 @@ func (p *SilverLedgerReaderProcessor) extractLiquidityPools(lcm *xdr.LedgerClose
 			continue
 		}
 
-		record := &SilverLiquidityPoolRecord{
+		record := &BronzeLiquidityPoolRecord{
 			LiquidityPoolID: hex.EncodeToString(lpEntry.LiquidityPoolId[:]),
 			LedgerSequence:  ledgerSeq,
 			ClosedAt:        closedAt,
@@ -1145,12 +1145,12 @@ func (p *SilverLedgerReaderProcessor) extractLiquidityPools(lcm *xdr.LedgerClose
 // ============================================
 
 // extractContractEvents extracts contract event data from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractContractEvents(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverContractEventRecord {
-	var events []*SilverContractEventRecord
+func (p *BronzeExtractorsProcessor) extractContractEvents(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeContractEventRecord {
+	var events []*BronzeContractEventRecord
 
 	reader, err := p.getTransactionReader(lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create transaction reader for contract events: %v", err)
+		log.Printf("BronzeExtractor: Failed to create transaction reader for contract events: %v", err)
 		return events
 	}
 	defer reader.Close()
@@ -1163,7 +1163,7 @@ func (p *SilverLedgerReaderProcessor) extractContractEvents(lcm *xdr.LedgerClose
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading transaction for contract events: %v", err)
+			log.Printf("BronzeExtractor: Error reading transaction for contract events: %v", err)
 			continue
 		}
 
@@ -1183,7 +1183,7 @@ func (p *SilverLedgerReaderProcessor) extractContractEvents(lcm *xdr.LedgerClose
 				// Create unique event ID
 				eventID := fmt.Sprintf("%s-%d-%d", txHash[:16], opIndex, eventIndex)
 
-				record := &SilverContractEventRecord{
+				record := &BronzeContractEventRecord{
 					EventID:                  eventID,
 					LedgerSequence:           ledgerSeq,
 					TransactionHash:          txHash,
@@ -1242,12 +1242,12 @@ func (p *SilverLedgerReaderProcessor) extractContractEvents(lcm *xdr.LedgerClose
 // ============================================
 
 // extractContractData extracts contract data entries from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractContractData(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverContractDataRecord {
-	var data []*SilverContractDataRecord
+func (p *BronzeExtractorsProcessor) extractContractData(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeContractDataRecord {
+	var data []*BronzeContractDataRecord
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create change reader for contract data: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for contract data: %v", err)
 		return data
 	}
 	defer reader.Close()
@@ -1260,7 +1260,7 @@ func (p *SilverLedgerReaderProcessor) extractContractData(lcm *xdr.LedgerCloseMe
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading change for contract data: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for contract data: %v", err)
 			continue
 		}
 
@@ -1312,7 +1312,7 @@ func (p *SilverLedgerReaderProcessor) extractContractData(lcm *xdr.LedgerCloseMe
 			contractDataXDR = base64.StdEncoding.EncodeToString(xdrBytes)
 		}
 
-		record := &SilverContractDataRecord{
+		record := &BronzeContractDataRecord{
 			ContractID:         contractID,
 			LedgerSequence:     ledgerSeq,
 			LedgerKeyHash:      keyHash,
@@ -1338,12 +1338,12 @@ func (p *SilverLedgerReaderProcessor) extractContractData(lcm *xdr.LedgerCloseMe
 // ============================================
 
 // extractContractCode extracts contract code entries from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractContractCode(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverContractCodeRecord {
-	var codes []*SilverContractCodeRecord
+func (p *BronzeExtractorsProcessor) extractContractCode(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeContractCodeRecord {
+	var codes []*BronzeContractCodeRecord
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create change reader for contract code: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for contract code: %v", err)
 		return codes
 	}
 	defer reader.Close()
@@ -1356,7 +1356,7 @@ func (p *SilverLedgerReaderProcessor) extractContractCode(lcm *xdr.LedgerCloseMe
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading change for contract code: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for contract code: %v", err)
 			continue
 		}
 
@@ -1393,7 +1393,7 @@ func (p *SilverLedgerReaderProcessor) extractContractCode(lcm *xdr.LedgerCloseMe
 			keyHash = hex.EncodeToString(hash[:])
 		}
 
-		record := &SilverContractCodeRecord{
+		record := &BronzeContractCodeRecord{
 			ContractCodeHash:   hex.EncodeToString(ccEntry.Hash[:]),
 			LedgerKeyHash:      keyHash,
 			ContractCodeExtV:   int32(ccEntry.Ext.V),
@@ -1417,12 +1417,12 @@ func (p *SilverLedgerReaderProcessor) extractContractCode(lcm *xdr.LedgerCloseMe
 // ============================================
 
 // extractConfigSettings extracts config setting entries from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractConfigSettings(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverConfigSettingRecord {
-	var settings []*SilverConfigSettingRecord
+func (p *BronzeExtractorsProcessor) extractConfigSettings(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeConfigSettingRecord {
+	var settings []*BronzeConfigSettingRecord
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create change reader for config settings: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for config settings: %v", err)
 		return settings
 	}
 	defer reader.Close()
@@ -1435,7 +1435,7 @@ func (p *SilverLedgerReaderProcessor) extractConfigSettings(lcm *xdr.LedgerClose
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading change for config settings: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for config settings: %v", err)
 			continue
 		}
 
@@ -1471,7 +1471,7 @@ func (p *SilverLedgerReaderProcessor) extractConfigSettings(lcm *xdr.LedgerClose
 			configXDR = base64.StdEncoding.EncodeToString(xdrBytes)
 		}
 
-		record := &SilverConfigSettingRecord{
+		record := &BronzeConfigSettingRecord{
 			ConfigSettingID:    int32(csEntry.ConfigSettingId),
 			LedgerSequence:     ledgerSeq,
 			LastModifiedLedger: int32(lastModified),
@@ -1493,12 +1493,12 @@ func (p *SilverLedgerReaderProcessor) extractConfigSettings(lcm *xdr.LedgerClose
 // ============================================
 
 // extractTTL extracts TTL entries from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractTTL(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverTTLRecord {
-	var ttls []*SilverTTLRecord
+func (p *BronzeExtractorsProcessor) extractTTL(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeTTLRecord {
+	var ttls []*BronzeTTLRecord
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create change reader for TTL: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for TTL: %v", err)
 		return ttls
 	}
 	defer reader.Close()
@@ -1511,7 +1511,7 @@ func (p *SilverLedgerReaderProcessor) extractTTL(lcm *xdr.LedgerCloseMeta, close
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading change for TTL: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for TTL: %v", err)
 			continue
 		}
 
@@ -1551,7 +1551,7 @@ func (p *SilverLedgerReaderProcessor) extractTTL(lcm *xdr.LedgerCloseMeta, close
 		ttlRemaining := liveUntil - int64(ledgerSeq)
 		expired := ttlRemaining <= 0
 
-		record := &SilverTTLRecord{
+		record := &BronzeTTLRecord{
 			KeyHash:            keyHash,
 			LedgerSequence:     ledgerSeq,
 			LiveUntilLedgerSeq: liveUntil,
@@ -1575,8 +1575,8 @@ func (p *SilverLedgerReaderProcessor) extractTTL(lcm *xdr.LedgerCloseMeta, close
 // ============================================
 
 // extractEvictedKeys extracts evicted key entries from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractEvictedKeys(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverEvictedKeyRecord {
-	var evictedKeys []*SilverEvictedKeyRecord
+func (p *BronzeExtractorsProcessor) extractEvictedKeys(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeEvictedKeyRecord {
+	var evictedKeys []*BronzeEvictedKeyRecord
 
 	ledgerSeq := p.getLedgerSequence(lcm)
 
@@ -1616,7 +1616,7 @@ func (p *SilverLedgerReaderProcessor) extractEvictedKeys(lcm *xdr.LedgerCloseMet
 			durability = "persistent" // Contract code is always persistent
 		}
 
-		record := &SilverEvictedKeyRecord{
+		record := &BronzeEvictedKeyRecord{
 			KeyHash:        keyHash,
 			LedgerSequence: ledgerSeq,
 			ContractID:     contractID,
@@ -1638,8 +1638,8 @@ func (p *SilverLedgerReaderProcessor) extractEvictedKeys(lcm *xdr.LedgerCloseMet
 // ============================================
 
 // extractRestoredKeys extracts restored key entries from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractRestoredKeys(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverRestoredKeyRecord {
-	var restoredKeys []*SilverRestoredKeyRecord
+func (p *BronzeExtractorsProcessor) extractRestoredKeys(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeRestoredKeyRecord {
+	var restoredKeys []*BronzeRestoredKeyRecord
 
 	// Note: Restored keys tracking requires analyzing RestoreFootprint operations
 	// This is a simplified stub - full implementation would parse tx meta
@@ -1652,12 +1652,12 @@ func (p *SilverLedgerReaderProcessor) extractRestoredKeys(lcm *xdr.LedgerCloseMe
 // ============================================
 
 // extractAccountSigners extracts account signer entries from LedgerCloseMeta
-func (p *SilverLedgerReaderProcessor) extractAccountSigners(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*SilverAccountSignerRecord {
-	var signers []*SilverAccountSignerRecord
+func (p *BronzeExtractorsProcessor) extractAccountSigners(lcm *xdr.LedgerCloseMeta, closedAt time.Time, ledgerRange uint32) []*BronzeAccountSignerRecord {
+	var signers []*BronzeAccountSignerRecord
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		log.Printf("SilverLedgerReader: Failed to create change reader for account signers: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for account signers: %v", err)
 		return signers
 	}
 	defer reader.Close()
@@ -1670,7 +1670,7 @@ func (p *SilverLedgerReaderProcessor) extractAccountSigners(lcm *xdr.LedgerClose
 			break
 		}
 		if err != nil {
-			log.Printf("SilverLedgerReader: Error reading change for account signers: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for account signers: %v", err)
 			continue
 		}
 
@@ -1702,7 +1702,7 @@ func (p *SilverLedgerReaderProcessor) extractAccountSigners(lcm *xdr.LedgerClose
 
 		// Extract all signers (including master key)
 		// Master key
-		record := &SilverAccountSignerRecord{
+		record := &BronzeAccountSignerRecord{
 			AccountID:      accountID,
 			Signer:         accountID, // Master key is the account itself
 			LedgerSequence: ledgerSeq,
@@ -1716,7 +1716,7 @@ func (p *SilverLedgerReaderProcessor) extractAccountSigners(lcm *xdr.LedgerClose
 
 		// Additional signers
 		for _, signer := range accountEntry.Signers {
-			record := &SilverAccountSignerRecord{
+			record := &BronzeAccountSignerRecord{
 				AccountID:      accountID,
 				Signer:         signer.Key.Address(),
 				LedgerSequence: ledgerSeq,
