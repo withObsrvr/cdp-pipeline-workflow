@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,8 +67,6 @@ type SaveToDuckLakeEnhanced struct {
 	lastLedger   uint32
 	checkpointer *checkpoint.Checkpointer
 }
-
-// contains checks if a string contains a substring (helper for error checking)
 
 // NewSaveToDuckLakeEnhanced creates a new DuckLake consumer
 func NewSaveToDuckLakeEnhanced(config map[string]interface{}) (processor.Processor, error) {
@@ -262,7 +261,18 @@ func (c *SaveToDuckLakeEnhanced) configureS3() {
 
 	// Use unnamed secret (like MinIO example) for better compatibility
 	// Drop any existing unnamed secret first
-	c.db.Exec("DROP SECRET IF EXISTS __default_s3")
+	if _, err := c.db.Exec("DROP SECRET IF EXISTS __default_s3"); err != nil {
+		c.logger.Warn("Failed to drop existing S3 secret", "error", err)
+	}
+
+	// Escape single quotes in credentials to prevent SQL injection
+	// Even though AWS credentials are base64-encoded, this protects against
+	// credentials from other sources that may contain special characters
+	escapedKeyID := strings.ReplaceAll(c.AWSAccessKeyID, "'", "''")
+	escapedSecret := strings.ReplaceAll(c.AWSSecretAccessKey, "'", "''")
+	escapedRegion := strings.ReplaceAll(region, "'", "''")
+	escapedEndpoint := strings.ReplaceAll(endpoint, "'", "''")
+	escapedURLStyle := strings.ReplaceAll(urlStyle, "'", "''")
 
 	createSecretSQL := fmt.Sprintf(`
 		CREATE SECRET (
@@ -273,7 +283,7 @@ func (c *SaveToDuckLakeEnhanced) configureS3() {
 			ENDPOINT '%s',
 			URL_STYLE '%s'
 		)
-	`, c.AWSAccessKeyID, c.AWSSecretAccessKey, region, endpoint, urlStyle)
+	`, escapedKeyID, escapedSecret, escapedRegion, escapedEndpoint, escapedURLStyle)
 
 	c.logger.Info("Creating S3 secret (unnamed, following MinIO pattern)",
 		"endpoint", endpoint,
@@ -283,16 +293,27 @@ func (c *SaveToDuckLakeEnhanced) configureS3() {
 	)
 
 	if _, err := c.db.Exec(createSecretSQL); err != nil {
-		c.logger.Error("Failed to create S3 secret", "error", err, "sql", createSecretSQL)
+		// SECURITY: Do not log SQL containing credentials
+		c.logger.Error("Failed to create S3 secret", "error", err)
 		c.logger.Warn("Falling back to SET-based S3 configuration")
 
-		// Fallback to SET-based configuration
-		c.db.Exec(fmt.Sprintf("SET s3_access_key_id='%s'", c.AWSAccessKeyID))
-		c.db.Exec(fmt.Sprintf("SET s3_secret_access_key='%s'", c.AWSSecretAccessKey))
-		c.db.Exec(fmt.Sprintf("SET s3_region='%s'", region))
+		// Fallback to SET-based configuration with escaped values
+		if _, err := c.db.Exec(fmt.Sprintf("SET s3_access_key_id='%s'", escapedKeyID)); err != nil {
+			c.logger.Error("Failed to set s3_access_key_id", "error", err)
+		}
+		if _, err := c.db.Exec(fmt.Sprintf("SET s3_secret_access_key='%s'", escapedSecret)); err != nil {
+			c.logger.Error("Failed to set s3_secret_access_key", "error", err)
+		}
+		if _, err := c.db.Exec(fmt.Sprintf("SET s3_region='%s'", escapedRegion)); err != nil {
+			c.logger.Error("Failed to set s3_region", "error", err)
+		}
 		if c.AWSEndpoint != "" {
-			c.db.Exec("SET s3_url_style='path'")
-			c.db.Exec(fmt.Sprintf("SET s3_endpoint='%s'", endpoint))
+			if _, err := c.db.Exec("SET s3_url_style='path'"); err != nil {
+				c.logger.Error("Failed to set s3_url_style", "error", err)
+			}
+			if _, err := c.db.Exec(fmt.Sprintf("SET s3_endpoint='%s'", escapedEndpoint)); err != nil {
+				c.logger.Error("Failed to set s3_endpoint", "error", err)
+			}
 		}
 		c.logger.Info("SET-based configuration applied")
 	} else {

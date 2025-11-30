@@ -15,6 +15,14 @@ import (
 	"github.com/withObsrvr/cdp-pipeline-workflow/processor"
 )
 
+// Default configuration constants for Bronze consumer
+const (
+	DefaultBronzeBatchSize       = 100
+	DefaultBronzeFlushInterval   = 10 * time.Second
+	BronzeCloseFlushTimeout      = 30 * time.Second
+	MaxTableNameLength           = 64
+)
+
 // BronzeToDuckDB is a simple consumer that writes Bronze records to DuckDB tables
 type BronzeToDuckDB struct {
 	// Configuration
@@ -39,8 +47,8 @@ type BronzeToDuckDB struct {
 func NewBronzeToDuckDB(config map[string]interface{}) (processor.Processor, error) {
 	c := &BronzeToDuckDB{
 		DBPath:        "bronze.duckdb",
-		BatchSize:     100,
-		FlushInterval: 10 * time.Second,
+		BatchSize:     DefaultBronzeBatchSize,
+		FlushInterval: DefaultBronzeFlushInterval,
 		appenders:     make(map[string]*duckdb.Appender),
 		logger:        logrus.WithField("consumer", "BronzeToDuckDB"),
 	}
@@ -134,8 +142,8 @@ func validTableName(tableName string) error {
 	if tableName == "" {
 		return fmt.Errorf("table name cannot be empty")
 	}
-	if len(tableName) > 64 {
-		return fmt.Errorf("table name exceeds maximum length of 64 characters: %s", tableName)
+	if len(tableName) > MaxTableNameLength {
+		return fmt.Errorf("table name exceeds maximum length of %d characters: %s", MaxTableNameLength, tableName)
 	}
 	if !validTableNameRegex.MatchString(tableName) {
 		return fmt.Errorf("table name contains invalid characters (only alphanumeric and underscores allowed): %s", tableName)
@@ -229,7 +237,8 @@ func (c *BronzeToDuckDB) Process(ctx context.Context, msg processor.Message) err
 
 	// Flush if batch size reached or flush interval exceeded
 	if len(c.buffer) >= c.BatchSize || time.Since(c.lastFlush) > c.FlushInterval {
-		if err := c.flush(context.Background()); err != nil {
+		// Propagate caller context for proper cancellation
+		if err := c.flush(ctx); err != nil {
 			return fmt.Errorf("failed to flush: %w", err)
 		}
 	}
@@ -246,7 +255,11 @@ func (c *BronzeToDuckDB) flush(ctx context.Context) error {
 	// Group records by table name
 	recordsByTable := make(map[string][]map[string]interface{})
 	for _, record := range c.buffer {
-		tableName := record["__table_name__"].(string)
+		tableName, ok := record["__table_name__"].(string)
+		if !ok {
+			c.logger.Error("Invalid table name type in buffer record", "record", record)
+			continue
+		}
 		recordsByTable[tableName] = append(recordsByTable[tableName], record)
 	}
 
@@ -272,7 +285,13 @@ func (c *BronzeToDuckDB) flush(ctx context.Context) error {
 		// Append each record
 		appendFailed := false
 		for _, record := range records {
-			bronzeRow := record["__bronze_row__"].([]driver.Value)
+			bronzeRow, ok := record["__bronze_row__"].([]driver.Value)
+			if !ok {
+				c.logger.Error("Invalid bronze row type in buffer record", "table", tableName)
+				flushErrors = append(flushErrors, fmt.Errorf("table %s: invalid bronze row type", tableName))
+				appendFailed = true
+				break
+			}
 			if err := appender.AppendRow(bronzeRow...); err != nil {
 				c.logger.Error("Failed to append row", "table", tableName, "error", err)
 				flushErrors = append(flushErrors, fmt.Errorf("table %s: append row: %w", tableName, err))
@@ -302,7 +321,13 @@ func (c *BronzeToDuckDB) flush(ctx context.Context) error {
 	if len(successfullyFlushedTables) > 0 {
 		newBuffer := make([]map[string]interface{}, 0)
 		for _, record := range c.buffer {
-			tableName := record["__table_name__"].(string)
+			tableName, ok := record["__table_name__"].(string)
+			if !ok {
+				// Keep records with invalid table names for manual inspection
+				c.logger.Warn("Record with invalid table name type retained in buffer")
+				newBuffer = append(newBuffer, record)
+				continue
+			}
 			if !successfullyFlushedTables[tableName] {
 				// Keep failed records in buffer for retry
 				newBuffer = append(newBuffer, record)
@@ -335,7 +360,7 @@ func (c *BronzeToDuckDB) Close() error {
 	defer c.mutex.Unlock()
 
 	// Flush remaining data
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), BronzeCloseFlushTimeout)
 	defer cancel()
 
 	if err := c.flush(ctx); err != nil {
