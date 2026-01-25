@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/stellar/go/ingest"
 	"github.com/stellar/go/strkey"
 	"github.com/stellar/go/xdr"
+	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/logging"
 )
 
 type FilteredContractInvocation struct {
@@ -57,7 +57,7 @@ func NewFilteredContractInvocationProcessor(config map[string]interface{}) (*Fil
 		for _, id := range contractIDs {
 			if strID, ok := id.(string); ok {
 				p.contractIDs[strID] = true
-				log.Printf("Added contract filter: %s", strID)
+				logging.Debug("Added contract filter: %s", strID)
 			}
 		}
 	}
@@ -67,7 +67,7 @@ func NewFilteredContractInvocationProcessor(config map[string]interface{}) (*Fil
 		for _, id := range accountIDs {
 			if strID, ok := id.(string); ok {
 				p.accountIDs[strID] = true
-				log.Printf("Added account filter: %s", strID)
+				logging.Debug("Added account filter: %s", strID)
 			}
 		}
 	}
@@ -86,7 +86,7 @@ func (p *FilteredContractInvocationProcessor) Process(ctx context.Context, msg M
 	}
 
 	sequence := ledgerCloseMeta.LedgerSequence()
-	log.Printf("Processing ledger %d for filtered contract invocations", sequence)
+	logging.Debug("Processing ledger %d for filtered contract invocations", sequence)
 
 	txReader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(p.networkPassphrase, ledgerCloseMeta)
 	if err != nil {
@@ -109,13 +109,13 @@ func (p *FilteredContractInvocationProcessor) Process(ctx context.Context, msg M
 			if op.Body.Type == xdr.OperationTypeInvokeHostFunction {
 				invocation, err := p.processContractInvocation(tx, opIndex, op, ledgerCloseMeta)
 				if err != nil {
-					log.Printf("Error processing contract invocation: %v", err)
+					logging.Debug("Error processing contract invocation: %v", err)
 					continue
 				}
 
 				if invocation != nil {
 					if err := p.forwardToProcessors(ctx, invocation); err != nil {
-						log.Printf("Error forwarding invocation: %v", err)
+						logging.Debug("Error forwarding invocation: %v", err)
 					}
 				}
 			}
@@ -146,16 +146,16 @@ func (p *FilteredContractInvocationProcessor) processContractInvocation(
 	}
 
 	// Debug logging for account filtering
-	log.Printf("Processing invocation from account: %s", invokingAccount)
-	log.Printf("Account filter list: %v", p.accountIDs)
+	logging.Debug("Processing invocation from account: %s", invokingAccount)
+	logging.Debug("Account filter list: %v", p.accountIDs)
 
 	// Early check for account filters
 	if len(p.accountIDs) > 0 {
 		if !p.accountIDs[invokingAccount] {
-			log.Printf("Filtering out invocation from non-matching account: %s", invokingAccount)
+			logging.Debug("Filtering out invocation from non-matching account: %s", invokingAccount)
 			return nil, nil
 		}
-		log.Printf("Account matched filter: %s", invokingAccount)
+		logging.Debug("Account matched filter: %s", invokingAccount)
 	}
 
 	invokeHostFunction := op.Body.MustInvokeHostFunctionOp()
@@ -171,16 +171,16 @@ func (p *FilteredContractInvocationProcessor) processContractInvocation(
 		}
 
 		// Debug logging for contract filtering
-		log.Printf("Processing contract: %s", contractID)
-		log.Printf("Contract filter list: %v", p.contractIDs)
+		logging.Debug("Processing contract: %s", contractID)
+		logging.Debug("Contract filter list: %v", p.contractIDs)
 
 		// Check contract filter if set
 		if len(p.contractIDs) > 0 {
 			if !p.contractIDs[contractID] {
-				log.Printf("Filtering out non-matching contract: %s", contractID)
+				logging.Debug("Filtering out non-matching contract: %s", contractID)
 				return nil, nil
 			}
-			log.Printf("Contract matched filter: %s", contractID)
+			logging.Debug("Contract matched filter: %s", contractID)
 		}
 	}
 
@@ -213,7 +213,7 @@ func (p *FilteredContractInvocationProcessor) processContractInvocation(
 
 		invocation.FunctionName = getFunctionName(contract.Args)
 		if invocation.FunctionName != "" {
-			log.Printf("Found function name: %s", invocation.FunctionName)
+			logging.Debug("Found function name: %s", invocation.FunctionName)
 		}
 	}
 

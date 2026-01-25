@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"sync"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/stellar/go/processors/contract"
 	"github.com/stellar/go/strkey"
 	"github.com/stellar/go/xdr"
+	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/logging"
 )
 
 // StellarContractEventProcessor uses the Stellar SDK's contract event processor
@@ -64,7 +64,7 @@ func NewStellarContractEventProcessor(config map[string]interface{}) (*StellarCo
 
 	// Optional: configure event type filtering
 	// event_types: [0, 2] would include only contract and diagnostic events
-	log.Printf("Config received: %+v", config)
+	logging.Debug("Config received: %+v", config)
 	if eventTypes, ok := config["event_types"].([]interface{}); ok {
 		processor.filterEventTypes = make([]int32, 0, len(eventTypes))
 		for _, et := range eventTypes {
@@ -73,12 +73,12 @@ func NewStellarContractEventProcessor(config map[string]interface{}) (*StellarCo
 			} else if etNum, ok := et.(int); ok {
 				processor.filterEventTypes = append(processor.filterEventTypes, int32(etNum))
 			} else {
-				log.Printf("Warning: unexpected type for event_type element: %T", et)
+				logging.Debug("Warning: unexpected type for event_type element: %T", et)
 			}
 		}
-		log.Printf("Configured to filter event types: %v", processor.filterEventTypes)
+		logging.Debug("Configured to filter event types: %v", processor.filterEventTypes)
 	} else {
-		log.Printf("No event_types filter configured (got type: %T)", config["event_types"])
+		logging.Debug("No event_types filter configured (got type: %T)", config["event_types"])
 	}
 
 	return processor, nil
@@ -92,7 +92,7 @@ func (p *StellarContractEventProcessor) Process(ctx context.Context, msg Message
 	}
 
 	sequence := ledgerCloseMeta.LedgerSequence()
-	log.Printf("Processing ledger %d for contract events using Stellar SDK", sequence)
+	logging.Debug("Processing ledger %d for contract events using Stellar SDK", sequence)
 
 	// Create transaction reader
 	txReader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(
@@ -135,7 +135,7 @@ func (p *StellarContractEventProcessor) Process(ctx context.Context, msg Message
 				}
 			}
 			if contractEventCount > 0 {
-				log.Printf("GetTransactionEvents found %d contract events in tx %s", 
+				logging.Debug("GetTransactionEvents found %d contract events in tx %s", 
 					contractEventCount, tx.Result.TransactionHash.HexString())
 			}
 		}
@@ -163,13 +163,13 @@ func (p *StellarContractEventProcessor) Process(ctx context.Context, msg Message
 			for _, e := range events {
 				eventTypes[e.Type]++
 			}
-			log.Printf("Transaction %s has %d events: %v", 
+			logging.Debug("Transaction %s has %d events: %v", 
 				tx.Result.TransactionHash.HexString(), len(events), eventTypes)
 			
 			// Log first few events to see their structure
 			for i, e := range events {
 				if i < 3 { // Only log first 3 events
-					log.Printf("  Event %d: Type=%d (%s), ContractId=%s", 
+					logging.Debug("  Event %d: Type=%d (%s), ContractId=%s", 
 						i, e.Type, e.TypeString, e.ContractId)
 				}
 			}
@@ -178,7 +178,7 @@ func (p *StellarContractEventProcessor) Process(ctx context.Context, msg Message
 		// Apply event type filtering if configured
 		filteredEvents := events
 		if len(p.filterEventTypes) > 0 {
-			log.Printf("Applying filter for event types: %v", p.filterEventTypes)
+			logging.Debug("Applying filter for event types: %v", p.filterEventTypes)
 			filteredEvents = make([]contract.ContractEventOutput, 0, len(events))
 			for _, event := range events {
 				for _, allowedType := range p.filterEventTypes {
@@ -188,7 +188,7 @@ func (p *StellarContractEventProcessor) Process(ctx context.Context, msg Message
 					}
 				}
 			}
-			log.Printf("Filtered %d events to %d events", len(events), len(filteredEvents))
+			logging.Debug("Filtered %d events to %d events", len(events), len(filteredEvents))
 			if len(filteredEvents) == 0 {
 				continue // Skip if no events match filter
 			}
@@ -223,7 +223,7 @@ func (p *StellarContractEventProcessor) Process(ctx context.Context, msg Message
 
 		// Forward to subscribers
 		if err := p.forwardToProcessors(ctx, &eventMsg); err != nil {
-			log.Printf("Error forwarding contract events: %v", err)
+			logging.Debug("Error forwarding contract events: %v", err)
 		}
 
 		// Log successful processing with event type
@@ -239,13 +239,13 @@ func (p *StellarContractEventProcessor) Process(ctx context.Context, msg Message
 			default:
 				eventTypeStr = fmt.Sprintf("unknown(%d)", event.Type)
 			}
-			log.Printf("Successfully processed %s event from contract %s in tx %s",
+			logging.Debug("Successfully processed %s event from contract %s in tx %s",
 				eventTypeStr, event.ContractId, event.TransactionHash)
 		}
 	}
 
 	if eventsInLedger > 0 {
-		log.Printf("Found %d events in ledger %d (Contract: %d, System: %d, Diagnostic: %d)",
+		logging.Debug("Found %d events in ledger %d (Contract: %d, System: %d, Diagnostic: %d)",
 			eventsInLedger, sequence,
 			contractEventsInLedger,
 			systemEventsInLedger,

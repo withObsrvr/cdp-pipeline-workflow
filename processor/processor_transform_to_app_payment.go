@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"strconv"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/stellar/go/ingest"
 	"github.com/stellar/go/ingest/ledger"
 	"github.com/stellar/go/xdr"
+	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/logging"
 )
 
 type TransformToAppPayment struct {
@@ -66,7 +66,7 @@ func (t *TransformToAppPayment) Subscribe(receiver Processor) {
 }
 
 func (t *TransformToAppPayment) Process(ctx context.Context, msg Message) error {
-	log.Printf("Processing message in TransformToAppPayment")
+	logging.Debug("Processing message in TransformToAppPayment")
 	ledgerCloseMeta, ok := msg.Payload.(xdr.LedgerCloseMeta)
 	if !ok {
 		return fmt.Errorf("expected LedgerCloseMeta, got %T", msg.Payload)
@@ -248,15 +248,15 @@ func (t *TransformToAppPayment) createAppPaymentFromAccountMerge(
 		return nil, fmt.Errorf("error getting operation changes: %w", err)
 	}
 
-	log.Printf("Processing account merge from %s to %s", sourceAccount.Address(), destination.Address())
-	log.Printf("Found %d changes for operation", len(changes))
+	logging.Debug("Processing account merge from %s to %s", sourceAccount.Address(), destination.Address())
+	logging.Debug("Found %d changes for operation", len(changes))
 
 	var sourceBalance xdr.Int64
 	var destBalanceDiff xdr.Int64
 
 	// Analyze all changes to find source and destination balances
 	for _, change := range changes {
-		log.Printf("Change type: %T = %v", change.Type, change.Type)
+		logging.Debug("Change type: %T = %v", change.Type, change.Type)
 
 		if change.Pre != nil && change.Pre.Data.Type == xdr.LedgerEntryTypeAccount {
 			preAccount := change.Pre.Data.MustAccount()
@@ -264,31 +264,31 @@ func (t *TransformToAppPayment) createAppPaymentFromAccountMerge(
 			// If this is the source account, record its balance
 			if preAccount.AccountId.Address() == sourceAccount.Address() {
 				sourceBalance = preAccount.Balance
-				log.Printf("Found source account balance: %s", amount.String(sourceBalance))
+				logging.Debug("Found source account balance: %s", amount.String(sourceBalance))
 			}
 
 			// If this is the destination account, calculate balance difference
 			if preAccount.AccountId.Address() == destination.Address() && change.Post != nil {
 				postAccount := change.Post.Data.MustAccount()
 				destBalanceDiff = postAccount.Balance - preAccount.Balance
-				log.Printf("Found destination balance change: %s", amount.String(destBalanceDiff))
+				logging.Debug("Found destination balance change: %s", amount.String(destBalanceDiff))
 			}
 		}
 	}
 
 	// Verify we found the necessary information
 	if sourceBalance == 0 {
-		log.Printf("Could not find source account balance")
+		logging.Debug("Could not find source account balance")
 		return nil, fmt.Errorf("could not find source account balance")
 	}
 
 	// Use the source balance as the transfer amount
 	amountTransferred := sourceBalance
 
-	log.Printf("Account merge details:")
-	log.Printf("  Source balance: %s", amount.String(sourceBalance))
-	log.Printf("  Destination balance change: %s", amount.String(destBalanceDiff))
-	log.Printf("  Transfer amount: %s", amount.String(amountTransferred))
+	logging.Debug("Account merge details:")
+	logging.Debug("  Source balance: %s", amount.String(sourceBalance))
+	logging.Debug("  Destination balance change: %s", amount.String(destBalanceDiff))
+	logging.Debug("  Transfer amount: %s", amount.String(amountTransferred))
 
 	return &AppPayment{
 		Timestamp:            fmt.Sprintf("%d", closeTime),
@@ -369,11 +369,11 @@ func (t *TransformToAppPayment) shouldProcessPayment(payment AppPayment) bool {
 		hasFilters = true
 		paymentAmount, err := strconv.ParseFloat(payment.Amount, 64)
 		if err != nil {
-			log.Printf("Warning: Could not parse payment amount %s: %v", payment.Amount, err)
+			logging.Debug("Warning: Could not parse payment amount %s: %v", payment.Amount, err)
 			return false
 		}
 		if paymentAmount < *t.minAmount {
-			log.Printf("Payment amount %f is below minimum %f", paymentAmount, *t.minAmount)
+			logging.Debug("Payment amount %f is below minimum %f", paymentAmount, *t.minAmount)
 			return false
 		}
 	}
@@ -382,7 +382,7 @@ func (t *TransformToAppPayment) shouldProcessPayment(payment AppPayment) bool {
 	if t.assetCode != nil {
 		hasFilters = true
 		if payment.AssetCode != *t.assetCode {
-			log.Printf("Payment asset code %s does not match filter %s", payment.AssetCode, *t.assetCode)
+			logging.Debug("Payment asset code %s does not match filter %s", payment.AssetCode, *t.assetCode)
 			return false
 		}
 	}
@@ -398,7 +398,7 @@ func (t *TransformToAppPayment) shouldProcessPayment(payment AppPayment) bool {
 			}
 		}
 		if !addressMatch {
-			log.Printf("Neither source %s nor destination %s match address filters",
+			logging.Debug("Neither source %s nor destination %s match address filters",
 				payment.SourceAccountId, payment.DestinationAccountId)
 			return false
 		}
@@ -408,7 +408,7 @@ func (t *TransformToAppPayment) shouldProcessPayment(payment AppPayment) bool {
 	if t.memoText != nil {
 		hasFilters = true
 		if payment.Memo != *t.memoText {
-			log.Printf("Payment memo %q does not match filter %q", payment.Memo, *t.memoText)
+			logging.Debug("Payment memo %q does not match filter %q", payment.Memo, *t.memoText)
 			return false
 		}
 	}
@@ -416,9 +416,9 @@ func (t *TransformToAppPayment) shouldProcessPayment(payment AppPayment) bool {
 	// If no filters were specified, return true
 	// If any filters were specified, we've already checked them all must match
 	if hasFilters {
-		log.Printf("Payment matched all specified filters")
+		logging.Debug("Payment matched all specified filters")
 	} else {
-		log.Printf("No filters specified, accepting all payments")
+		logging.Debug("No filters specified, accepting all payments")
 	}
 
 	return true
@@ -430,7 +430,7 @@ func (t *TransformToAppPayment) forwardAppPayment(ctx context.Context, payment A
 
 	// Check if payment meets filter criteria.
 	if !t.shouldProcessPayment(payment) {
-		log.Printf("Skipping payment that doesn't meet filter criteria: %+v", payment)
+		logging.Debug("Skipping payment that doesn't meet filter criteria: %+v", payment)
 		return nil
 	}
 
@@ -451,12 +451,12 @@ func (t *TransformToAppPayment) forwardAppPayment(ctx context.Context, payment A
 	elapsed := time.Since(startTime)
 	// Log the processing time if it exceeds 10ms (adjust threshold as needed)
 	if elapsed > 10*time.Millisecond {
-		log.Printf("forwardAppPayment took %s for payment: %+v", elapsed, payment)
+		logging.Debug("forwardAppPayment took %s for payment: %+v", elapsed, payment)
 	} else {
-		log.Printf("Processed payment in %s", elapsed)
+		logging.Debug("Processed payment in %s", elapsed)
 	}
 
-	log.Printf("Successfully forwarded payment: %+v", payment)
+	logging.Debug("Successfully forwarded payment: %+v", payment)
 	return nil
 }
 

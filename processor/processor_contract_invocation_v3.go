@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"sort"
 	"sync"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/stellar/go/ingest"
 	"github.com/stellar/go/strkey"
 	"github.com/stellar/go/xdr"
+	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/logging"
 )
 
 // ============================================================================
@@ -202,7 +202,7 @@ func (p *ContractInvocationProcessorV3) Process(ctx context.Context, msg Message
 	archiveMetadata, _ := msg.GetArchiveMetadata()
 
 	sequence := ledgerCloseMeta.LedgerSequence()
-	log.Printf("ContractInvocationV3: Processing ledger %d", sequence)
+	logging.Debug("ContractInvocationV3: Processing ledger %d", sequence)
 
 	txReader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(p.config.NetworkPassphrase, ledgerCloseMeta)
 	if err != nil {
@@ -226,14 +226,14 @@ func (p *ContractInvocationProcessorV3) Process(ctx context.Context, msg Message
 		// Process transaction and get comprehensive invocation data
 		invocations, err := p.processTransaction(tx, ledgerCloseMeta, archiveMetadata)
 		if err != nil {
-			log.Printf("Error processing transaction %s: %v", tx.Result.TransactionHash.HexString(), err)
+			logging.Debug("Error processing transaction %s: %v", tx.Result.TransactionHash.HexString(), err)
 			continue
 		}
 
 		// Forward each invocation as a single message
 		for _, invocation := range invocations {
 			if err := p.forwardInvocation(ctx, invocation); err != nil {
-				log.Printf("Error forwarding invocation: %v", err)
+				logging.Debug("Error forwarding invocation: %v", err)
 			}
 			invocationCount++
 		}
@@ -250,7 +250,7 @@ func (p *ContractInvocationProcessorV3) Process(ctx context.Context, msg Message
 	p.stats.LastProcessedTime = time.Now()
 	p.mu.Unlock()
 
-	log.Printf("ContractInvocationV3: Processed ledger %d - %d transactions, %d invocations", 
+	logging.Debug("ContractInvocationV3: Processed ledger %d - %d transactions, %d invocations", 
 		sequence, txCount, invocationCount)
 
 	return nil
@@ -312,7 +312,7 @@ func (p *ContractInvocationProcessorV3) processTransaction(
 		authTree := p.v2Processor.buildAuthorizationTree(invokeOp.Auth, txSubmitter)
 		callGraph, err := p.v2Processor.buildCallGraph(tx, opIndex, invokeOp, authTree)
 		if err != nil {
-			log.Printf("Error building call graph: %v", err)
+			logging.Debug("Error building call graph: %v", err)
 			continue
 		}
 
@@ -412,7 +412,7 @@ func (p *ContractInvocationProcessorV3) flattenCallGraph(
 	for _, call := range authCalls {
 		// Skip self-referential calls
 		if call.FromContract == call.ToContract {
-			log.Printf("V3: Skipping self-referential call: %s -> %s", call.FromContract, call.ToContract)
+			logging.Debug("V3: Skipping self-referential call: %s -> %s", call.FromContract, call.ToContract)
 			continue
 		}
 		key := fmt.Sprintf("%s->%s:%s", call.FromContract, call.ToContract, call.Function)
@@ -447,7 +447,7 @@ func (p *ContractInvocationProcessorV3) flattenCallGraph(
 	invocation.ContractCalls = finalCalls
 	
 	if len(finalCalls) > 0 {
-		log.Printf("V3: Total contract calls after merging: %d (auth: %d, diag: %d)", 
+		logging.Debug("V3: Total contract calls after merging: %d (auth: %d, diag: %d)", 
 			len(finalCalls), len(authCalls), len(diagCalls))
 	}
 }
@@ -521,7 +521,7 @@ func (p *ContractInvocationProcessorV3) extractStateChanges(tx ingest.LedgerTran
 	// Extract state changes from ledger changes in the transaction meta
 	txChanges, err := tx.GetChanges()
 	if err != nil {
-		log.Printf("Error getting transaction changes: %v", err)
+		logging.Debug("Error getting transaction changes: %v", err)
 		return changes
 	}
 
@@ -580,13 +580,13 @@ func (p *ContractInvocationProcessorV3) extractStateChangeFromContractData(
 	// Extract contract ID
 	contractIDBytes := contractData.Contract.ContractId
 	if contractIDBytes == nil {
-		log.Printf("Contract ID is nil in state change data")
+		logging.Debug("Contract ID is nil in state change data")
 		return nil
 	}
 
 	contractID, err := strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
 	if err != nil {
-		log.Printf("Error encoding contract ID: %v", err)
+		logging.Debug("Error encoding contract ID: %v", err)
 		return nil
 	}
 
@@ -815,7 +815,7 @@ func (p *ContractInvocationProcessorV3) extractCrossContractCallsFromDiagnosticE
 		return calls
 	}
 	
-	log.Printf("V3: Checking %d diagnostic events for cross-contract calls", len(diagnosticEvents))
+	logging.Debug("V3: Checking %d diagnostic events for cross-contract calls", len(diagnosticEvents))
 	
 	executionOrder := 0
 	currentDepth := 0
@@ -826,14 +826,14 @@ func (p *ContractInvocationProcessorV3) extractCrossContractCallsFromDiagnosticE
 	for i, diagEvent := range diagnosticEvents {
 		// Skip events with nil ContractId
 		if diagEvent.Event.ContractId == nil {
-			log.Printf("V3: Diagnostic event %d has nil ContractId, skipping", i)
+			logging.Debug("V3: Diagnostic event %d has nil ContractId, skipping", i)
 			continue
 		}
 		
 		// Get the contract that emitted this event
 		eventContractID, err := strkey.Encode(strkey.VersionByteContract, diagEvent.Event.ContractId[:])
 		if err != nil {
-			log.Printf("V3: Error encoding contract ID from diagnostic event %d: %v", i, err)
+			logging.Debug("V3: Error encoding contract ID from diagnostic event %d: %v", i, err)
 			continue
 		}
 		
@@ -896,7 +896,7 @@ func (p *ContractInvocationProcessorV3) extractCrossContractCallsFromDiagnosticE
 					calls = append(calls, call)
 					executionOrder++
 					
-					log.Printf("V3: Found cross-contract call from fn_call: %s -> %s (%s)", 
+					logging.Debug("V3: Found cross-contract call from fn_call: %s -> %s (%s)", 
 						eventContractID, nextContractID, functionName)
 				}
 			}
@@ -919,7 +919,7 @@ func (p *ContractInvocationProcessorV3) extractCrossContractCallsFromDiagnosticE
 	}
 	
 	if len(calls) > 0 {
-		log.Printf("V3: Extracted %d cross-contract calls from diagnostic events", len(calls))
+		logging.Debug("V3: Extracted %d cross-contract calls from diagnostic events", len(calls))
 	}
 	
 	return calls

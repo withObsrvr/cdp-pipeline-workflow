@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/stellar/go/strkey"
 	"github.com/stellar/go/xdr"
+	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/logging"
 )
 
 // RouterEvent represents the base structure for router events
@@ -191,20 +191,20 @@ func (p *SoroswapRouterProcessor) Process(ctx context.Context, msg Message) erro
 	// Add validation before forwarding the event
 	if routerEvent.TokenA == "" || routerEvent.TokenB == "" ||
 		routerEvent.AmountA == "" || routerEvent.AmountB == "" {
-		log.Printf("Warning: Incomplete event data detected: %+v", routerEvent)
+		logging.Debug("Warning: Incomplete event data detected: %+v", routerEvent)
 	}
 
 	// Add debug logging after data extraction
-	log.Printf("Extracted event data: %+v", routerEvent)
-	log.Printf("Router Event Details:")
-	log.Printf("  Type: %s", routerEvent.Type)
-	log.Printf("  Account: %s", routerEvent.Account)
-	log.Printf("  TokenA: %s", routerEvent.TokenA)
-	log.Printf("  TokenB: %s", routerEvent.TokenB)
-	log.Printf("  AmountA: %s", routerEvent.AmountA)
-	log.Printf("  AmountB: %s", routerEvent.AmountB)
-	log.Printf("  TxHash: %s", routerEvent.TxHash)
-	log.Printf("  ContractID: %s", routerEvent.ContractID)
+	logging.Debug("Extracted event data: %+v", routerEvent)
+	logging.Debug("Router Event Details:")
+	logging.Debug("  Type: %s", routerEvent.Type)
+	logging.Debug("  Account: %s", routerEvent.Account)
+	logging.Debug("  TokenA: %s", routerEvent.TokenA)
+	logging.Debug("  TokenB: %s", routerEvent.TokenB)
+	logging.Debug("  AmountA: %s", routerEvent.AmountA)
+	logging.Debug("  AmountB: %s", routerEvent.AmountB)
+	logging.Debug("  TxHash: %s", routerEvent.TxHash)
+	logging.Debug("  ContractID: %s", routerEvent.ContractID)
 
 	// Update stats
 	p.mu.Lock()
@@ -226,7 +226,7 @@ func (p *SoroswapRouterProcessor) Process(ctx context.Context, msg Message) erro
 		return fmt.Errorf("error marshaling router event: %w", err)
 	}
 
-	log.Printf("Processing %s event: %s (tokens: %s/%s, amounts: %s/%s)",
+	logging.Debug("Processing %s event: %s (tokens: %s/%s, amounts: %s/%s)",
 		eventType, routerEvent.ContractID, routerEvent.TokenA, routerEvent.TokenB,
 		routerEvent.AmountA, routerEvent.AmountB)
 
