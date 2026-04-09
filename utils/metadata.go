@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/stellar/go/support/datastore"
+	"github.com/stellar/go-stellar-sdk/support/datastore"
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
 )
 

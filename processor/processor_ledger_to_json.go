@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/stellar/go/ingest"
-	"github.com/stellar/go/strkey"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/ingest"
+	"github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // LedgerToJSONProcessor converts XDR LedgerCloseMeta to AWS-like JSON structure

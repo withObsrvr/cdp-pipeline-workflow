@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
 	"github.com/withobsrvr/flowctl/pkg/console/heartbeat"
 )

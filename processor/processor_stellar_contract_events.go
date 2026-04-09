@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stellar/go/ingest"
-	"github.com/stellar/go/processors/contract"
-	"github.com/stellar/go/strkey"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/ingest"
+	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/contract"
+	"github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/logging"
 )
 

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // Message encapsulates the payload to be processed.

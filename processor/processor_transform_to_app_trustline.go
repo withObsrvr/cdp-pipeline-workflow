@@ -8,8 +8,8 @@ import (
 	"strconv"
 
 	"github.com/pkg/errors"
-	"github.com/stellar/go/ingest"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/ingest"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/logging"
 )
 

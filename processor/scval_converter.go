@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/stellar/go/strkey"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // ConvertScValToJSON converts a Soroban ScVal to a JSON-serializable format
