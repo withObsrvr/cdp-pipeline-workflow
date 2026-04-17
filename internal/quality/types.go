@@ -4,11 +4,11 @@ import "time"
 
 // LedgerData represents a Stellar ledger record for quality checking
 type LedgerData struct {
-	Sequence            uint32
-	LedgerHash          string
-	PreviousLedgerHash  string
-	TransactionCount    uint32
-	ClosedAt            time.Time
+	Sequence           uint32
+	LedgerHash         string
+	PreviousLedgerHash string
+	TransactionCount   uint32
+	ClosedAt           time.Time
 }
 
 // TransactionData represents a Stellar transaction record for quality checking
@@ -44,6 +44,26 @@ type DataBuffers struct {
 	balances     []BalanceData
 }
 
+func NewDataBuffers() *DataBuffers {
+	return &DataBuffers{}
+}
+
+func (b *DataBuffers) Ledgers() []LedgerData {
+	return b.ledgers
+}
+
+func (b *DataBuffers) Transactions() []TransactionData {
+	return b.transactions
+}
+
+func (b *DataBuffers) Operations() []OperationData {
+	return b.operations
+}
+
+func (b *DataBuffers) Balances() []BalanceData {
+	return b.balances
+}
+
 // DuckLakeConfig represents DuckLake configuration for quality checks
 type DuckLakeConfig struct {
 	CatalogName string
@@ -68,4 +88,24 @@ type Ingester struct {
 	buffers *DataBuffers
 	config  *Config
 	db      DB
+}
+
+func NewIngester(config *Config, db DB) *Ingester {
+	return &Ingester{
+		buffers: NewDataBuffers(),
+		config:  config,
+		db:      db,
+	}
+}
+
+func (i *Ingester) Buffers() *DataBuffers {
+	return i.buffers
+}
+
+func (i *Ingester) Config() *Config {
+	return i.config
+}
+
+func (i *Ingester) DB() DB {
+	return i.db
 }

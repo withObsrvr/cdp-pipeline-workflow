@@ -13,13 +13,13 @@ import (
 
 	"github.com/stellar/go-stellar-sdk/amount"
 	"github.com/stellar/go-stellar-sdk/ingest"
-	claimablebalance "github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/claimable_balance"
-	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/utils"
 	"github.com/stellar/go-stellar-sdk/protocols/horizon/base"
 	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stellar/go-stellar-sdk/support/contractevents"
-	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/toid"
 	"github.com/stellar/go-stellar-sdk/xdr"
+	claimablebalance "github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/claimable_balance"
+	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/toid"
+	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/utils"
 )
 
 // OperationOutput is a representation of an operation that aligns with the BigQuery table history_operations
@@ -879,7 +879,11 @@ func extractOperationDetails(operation xdr.Operation, transaction ingest.LedgerT
 		op := operation.Body.MustCreateClaimableBalanceOp()
 		details["asset"] = op.Asset.StringCanonical()
 		details["amount"] = utils.ConvertStroopValueToReal(op.Amount)
-		details["claimants"] = claimablebalance.TransformClaimants(op.Claimants)
+		claimants, err := claimablebalance.TransformClaimants(op.Claimants)
+		if err != nil {
+			return details, err
+		}
+		details["claimants"] = claimants
 
 	case xdr.OperationTypeClaimClaimableBalance:
 		op := operation.Body.MustClaimClaimableBalanceOp()

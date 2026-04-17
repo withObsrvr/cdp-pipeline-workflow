@@ -8,7 +8,7 @@ import (
 	"github.com/stellar/go-stellar-sdk/amount"
 	"github.com/stellar/go-stellar-sdk/ingest"
 	"github.com/stellar/go-stellar-sdk/xdr"
-	asset "github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/asset"
+	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/asset"
 	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/utils"
 )
 
@@ -30,16 +30,19 @@ type ClaimableBalanceOutput struct {
 	LedgerSequence     uint32           `json:"ledger_sequence"`
 }
 
-func TransformClaimants(claimants []xdr.Claimant) []utils.Claimant {
-	var transformed []utils.Claimant
+func TransformClaimants(claimants []xdr.Claimant) ([]utils.Claimant, error) {
+	transformed := make([]utils.Claimant, 0, len(claimants))
 	for _, c := range claimants {
-		cv0 := c.MustV0()
+		cv0, ok := c.GetV0()
+		if !ok {
+			return nil, fmt.Errorf("unsupported claimant version for balance")
+		}
 		transformed = append(transformed, utils.Claimant{
 			Destination: cv0.Destination.Address(),
 			Predicate:   cv0.Predicate,
 		})
 	}
-	return transformed
+	return transformed, nil
 }
 
 // TransformClaimableBalance converts a claimable balance from the history archive ingestion system into a form suitable for BigQuery
@@ -62,7 +65,10 @@ func TransformClaimableBalance(ledgerChange ingest.Change, header xdr.LedgerHead
 	if err != nil {
 		return ClaimableBalanceOutput{}, err
 	}
-	outputClaimants := TransformClaimants(balanceEntry.Claimants)
+	outputClaimants, err := TransformClaimants(balanceEntry.Claimants)
+	if err != nil {
+		return ClaimableBalanceOutput{}, err
+	}
 	outputAmount := amount.String(balanceEntry.Amount)
 
 	outputLastModifiedLedger := uint32(ledgerEntry.LastModifiedLedgerSeq)

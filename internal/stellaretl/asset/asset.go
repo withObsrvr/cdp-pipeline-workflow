@@ -73,7 +73,7 @@ func TransformAsset(operation xdr.Operation, operationIndex int32, transactionIn
 
 	outputAsset, err := TransformSingleAsset(asset)
 	if err != nil {
-		return AssetOutput{}, fmt.Errorf("%s (id %d)", err.Error(), operationID)
+		return AssetOutput{}, fmt.Errorf("transform asset: %w (id %d)", err, operationID)
 	}
 
 	outputCloseTime, err := utils.GetCloseTime(lcm)
@@ -90,7 +90,7 @@ func TransformSingleAsset(asset xdr.Asset) (AssetOutput, error) {
 	var outputAssetType, outputAssetCode, outputAssetIssuer string
 	err := asset.Extract(&outputAssetType, &outputAssetCode, &outputAssetIssuer)
 	if err != nil {
-		return AssetOutput{}, fmt.Errorf("could not extract asset from this operation")
+		return AssetOutput{}, fmt.Errorf("could not extract asset from this operation: %w", err)
 	}
 
 	farmAssetID := utils.FarmHashAsset(outputAssetCode, outputAssetIssuer, outputAssetType)
