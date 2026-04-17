@@ -3,7 +3,7 @@ package state_change
 import (
 	"time"
 
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/xdr"
 )
 
 // StateChangeType represents the type of state change

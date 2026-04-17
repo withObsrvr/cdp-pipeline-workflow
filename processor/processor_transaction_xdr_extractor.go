@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/support/log"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/support/log"
+	"github.com/stellar/go/xdr"
 )
 
 // TransactionXDROutput represents the extracted XDR data from a transaction

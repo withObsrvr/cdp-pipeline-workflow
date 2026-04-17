@@ -15,7 +15,7 @@ import (
 
 	"cloud.google.com/go/storage"
 	duckdb "github.com/marcboeker/go-duckdb/v2"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/xdr"
 )
 
 // ParquetReader reads ledgers from Bronze layer parquet files.

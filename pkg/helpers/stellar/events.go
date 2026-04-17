@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/xdr"
 )
 
 // TokenEventType represents the type of token event

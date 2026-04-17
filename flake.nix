@@ -23,10 +23,6 @@
             rev = "v${version}";
             hash = "sha256-w/mELyRs4B9hJngi1MLed0fHRq/ldkkFV+SDkSxs3O8=";
           };
-
-          # Skip tests - test_art_fuzzer_persisted.test is flaky in some environments
-          doCheck = false;
-          doInstallCheck = false;
         });
 
         # System dependencies required for CGO
@@ -74,7 +70,7 @@
 
           # IMPORTANT: Update this hash after first build attempt
           # Run: nix build 2>&1 | grep "got:" | awk '{print $2}'
-          vendorHash = "sha256-RvfaTxlTDpIlkoSvb7BhTpE++jD2JpwZ96CVvmoZD6w=";
+          vendorHash = "sha256-pb4aMyZb6Za4lZIs6NH2vrRPqorHgT9abTu526n11JE=";
 
           nativeBuildInputs = systemDeps;
           buildInputs = systemDeps;

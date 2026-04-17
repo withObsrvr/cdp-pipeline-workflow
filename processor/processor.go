@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/stellar/go-stellar-sdk/hash"
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/hash"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/xdr"
 )
 
 // Processor defines the interface for processing messages.

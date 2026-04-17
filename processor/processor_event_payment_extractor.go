@@ -5,10 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 	"time"
-
-	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/logging"
 )
 
 // EventPayment represents a structured payment event from Kwickbit's payment processor contract
@@ -44,7 +43,7 @@ type EventPaymentStats struct {
 
 // NewEventPaymentExtractor creates a new EventPaymentExtractor processor
 func NewEventPaymentExtractor(config map[string]interface{}) (*EventPaymentExtractor, error) {
-	logging.Info("EventPaymentExtractor: Initializing processor")
+	log.Printf("EventPaymentExtractor: Initializing processor")
 
 	return &EventPaymentExtractor{
 		processors: make([]Processor, 0),
@@ -83,7 +82,7 @@ func (p *EventPaymentExtractor) Process(ctx context.Context, msg Message) error 
 		p.mu.Lock()
 		p.stats.Errors++
 		p.mu.Unlock()
-		logging.Error("EventPaymentExtractor: Error extracting payment from ledger %d: %v",
+		log.Printf("EventPaymentExtractor: Error extracting payment from ledger %d: %v",
 			contractEvent.LedgerSequence, err)
 		return nil // Don't stop processing, just skip this event
 	}
@@ -92,7 +91,7 @@ func (p *EventPaymentExtractor) Process(ctx context.Context, msg Message) error 
 	p.stats.ExtractedPayments++
 	p.mu.Unlock()
 
-	logging.Info("EventPaymentExtractor: Extracted payment_id=%s, amount=%d, merchant=%s, block=%d",
+	log.Printf("EventPaymentExtractor: Extracted payment_id=%s, amount=%d, merchant=%s, block=%d",
 		eventPayment.PaymentID, eventPayment.Amount, eventPayment.MerchantID, eventPayment.BlockHeight)
 
 	// Forward to subscribed processors/consumers
@@ -102,7 +101,7 @@ func (p *EventPaymentExtractor) Process(ctx context.Context, msg Message) error 
 
 	for _, processor := range p.processors {
 		if err := processor.Process(ctx, eventPaymentMsg); err != nil {
-			logging.Error("EventPaymentExtractor: Error forwarding to processor: %v", err)
+			log.Printf("EventPaymentExtractor: Error forwarding to processor: %v", err)
 		}
 	}
 
@@ -289,7 +288,7 @@ func (p *EventPaymentExtractor) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	logging.Info("EventPaymentExtractor Stats: Processed %d events, Extracted %d payments, Skipped %d, Errors %d",
+	log.Printf("EventPaymentExtractor Stats: Processed %d events, Extracted %d payments, Skipped %d, Errors %d",
 		p.stats.TotalEvents, p.stats.ExtractedPayments, p.stats.SkippedEvents, p.stats.Errors)
 
 	return nil

@@ -7,13 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"strconv"
 	"time"
 
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/strkey"
-	"github.com/stellar/go-stellar-sdk/xdr"
-	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/logging"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/strkey"
+	"github.com/stellar/go/xdr"
 )
 
 // ============================================
@@ -152,7 +152,7 @@ func (p *BronzeExtractorsProcessor) extractTransactions(lcm *xdr.LedgerCloseMeta
 
 	reader, err := p.getTransactionReader(lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create transaction reader: %v", err)
+		log.Printf("BronzeExtractor: Failed to create transaction reader: %v", err)
 		return transactions
 	}
 	defer reader.Close()
@@ -165,7 +165,7 @@ func (p *BronzeExtractorsProcessor) extractTransactions(lcm *xdr.LedgerCloseMeta
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading transaction in ledger %d: %v", ledgerSeq, err)
+			log.Printf("BronzeExtractor: Error reading transaction in ledger %d: %v", ledgerSeq, err)
 			continue
 		}
 
@@ -294,7 +294,7 @@ func (p *BronzeExtractorsProcessor) extractOperations(lcm *xdr.LedgerCloseMeta, 
 
 	reader, err := p.getTransactionReader(lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create transaction reader for operations: %v", err)
+		log.Printf("BronzeExtractor: Failed to create transaction reader for operations: %v", err)
 		return operations
 	}
 	defer reader.Close()
@@ -307,7 +307,7 @@ func (p *BronzeExtractorsProcessor) extractOperations(lcm *xdr.LedgerCloseMeta, 
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading transaction for operations: %v", err)
+			log.Printf("BronzeExtractor: Error reading transaction for operations: %v", err)
 			continue
 		}
 
@@ -427,7 +427,7 @@ func (p *BronzeExtractorsProcessor) extractEffects(lcm *xdr.LedgerCloseMeta, clo
 
 	reader, err := p.getTransactionReader(lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create transaction reader for effects: %v", err)
+		log.Printf("BronzeExtractor: Failed to create transaction reader for effects: %v", err)
 		return effects
 	}
 	defer reader.Close()
@@ -440,7 +440,7 @@ func (p *BronzeExtractorsProcessor) extractEffects(lcm *xdr.LedgerCloseMeta, clo
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading transaction for effects: %v", err)
+			log.Printf("BronzeExtractor: Error reading transaction for effects: %v", err)
 			continue
 		}
 
@@ -485,7 +485,7 @@ func (p *BronzeExtractorsProcessor) extractTrades(lcm *xdr.LedgerCloseMeta, clos
 
 	reader, err := p.getTransactionReader(lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create transaction reader for trades: %v", err)
+		log.Printf("BronzeExtractor: Failed to create transaction reader for trades: %v", err)
 		return trades
 	}
 	defer reader.Close()
@@ -498,7 +498,7 @@ func (p *BronzeExtractorsProcessor) extractTrades(lcm *xdr.LedgerCloseMeta, clos
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading transaction for trades: %v", err)
+			log.Printf("BronzeExtractor: Error reading transaction for trades: %v", err)
 			continue
 		}
 
@@ -672,7 +672,7 @@ func (p *BronzeExtractorsProcessor) extractNativeBalances(lcm *xdr.LedgerCloseMe
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create change reader: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader: %v", err)
 		return balances
 	}
 	defer reader.Close()
@@ -685,7 +685,7 @@ func (p *BronzeExtractorsProcessor) extractNativeBalances(lcm *xdr.LedgerCloseMe
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading change: %v", err)
+			log.Printf("BronzeExtractor: Error reading change: %v", err)
 			continue
 		}
 
@@ -751,7 +751,7 @@ func (p *BronzeExtractorsProcessor) extractAccounts(lcm *xdr.LedgerCloseMeta, cl
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create change reader for accounts: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for accounts: %v", err)
 		return accounts
 	}
 	defer reader.Close()
@@ -765,7 +765,7 @@ func (p *BronzeExtractorsProcessor) extractAccounts(lcm *xdr.LedgerCloseMeta, cl
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading change for accounts: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for accounts: %v", err)
 			continue
 		}
 
@@ -857,7 +857,7 @@ func (p *BronzeExtractorsProcessor) extractTrustlines(lcm *xdr.LedgerCloseMeta, 
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create change reader for trustlines: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for trustlines: %v", err)
 		return trustlines
 	}
 	defer reader.Close()
@@ -870,7 +870,7 @@ func (p *BronzeExtractorsProcessor) extractTrustlines(lcm *xdr.LedgerCloseMeta, 
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading change for trustlines: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for trustlines: %v", err)
 			continue
 		}
 
@@ -933,7 +933,7 @@ func (p *BronzeExtractorsProcessor) extractOffers(lcm *xdr.LedgerCloseMeta, clos
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create change reader for offers: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for offers: %v", err)
 		return offers
 	}
 	defer reader.Close()
@@ -946,7 +946,7 @@ func (p *BronzeExtractorsProcessor) extractOffers(lcm *xdr.LedgerCloseMeta, clos
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading change for offers: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for offers: %v", err)
 			continue
 		}
 
@@ -1011,7 +1011,7 @@ func (p *BronzeExtractorsProcessor) extractClaimableBalances(lcm *xdr.LedgerClos
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create change reader for claimable balances: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for claimable balances: %v", err)
 		return balances
 	}
 	defer reader.Close()
@@ -1024,7 +1024,7 @@ func (p *BronzeExtractorsProcessor) extractClaimableBalances(lcm *xdr.LedgerClos
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading change for claimable balances: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for claimable balances: %v", err)
 			continue
 		}
 
@@ -1092,7 +1092,7 @@ func (p *BronzeExtractorsProcessor) extractLiquidityPools(lcm *xdr.LedgerCloseMe
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create change reader for liquidity pools: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for liquidity pools: %v", err)
 		return pools
 	}
 	defer reader.Close()
@@ -1105,7 +1105,7 @@ func (p *BronzeExtractorsProcessor) extractLiquidityPools(lcm *xdr.LedgerCloseMe
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading change for liquidity pools: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for liquidity pools: %v", err)
 			continue
 		}
 
@@ -1170,7 +1170,7 @@ func (p *BronzeExtractorsProcessor) extractContractEvents(lcm *xdr.LedgerCloseMe
 
 	reader, err := p.getTransactionReader(lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create transaction reader for contract events: %v", err)
+		log.Printf("BronzeExtractor: Failed to create transaction reader for contract events: %v", err)
 		return events
 	}
 	defer reader.Close()
@@ -1183,7 +1183,7 @@ func (p *BronzeExtractorsProcessor) extractContractEvents(lcm *xdr.LedgerCloseMe
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading transaction for contract events: %v", err)
+			log.Printf("BronzeExtractor: Error reading transaction for contract events: %v", err)
 			continue
 		}
 
@@ -1267,7 +1267,7 @@ func (p *BronzeExtractorsProcessor) extractContractData(lcm *xdr.LedgerCloseMeta
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create change reader for contract data: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for contract data: %v", err)
 		return data
 	}
 	defer reader.Close()
@@ -1280,7 +1280,7 @@ func (p *BronzeExtractorsProcessor) extractContractData(lcm *xdr.LedgerCloseMeta
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading change for contract data: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for contract data: %v", err)
 			continue
 		}
 
@@ -1363,7 +1363,7 @@ func (p *BronzeExtractorsProcessor) extractContractCode(lcm *xdr.LedgerCloseMeta
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create change reader for contract code: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for contract code: %v", err)
 		return codes
 	}
 	defer reader.Close()
@@ -1376,7 +1376,7 @@ func (p *BronzeExtractorsProcessor) extractContractCode(lcm *xdr.LedgerCloseMeta
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading change for contract code: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for contract code: %v", err)
 			continue
 		}
 
@@ -1442,7 +1442,7 @@ func (p *BronzeExtractorsProcessor) extractConfigSettings(lcm *xdr.LedgerCloseMe
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create change reader for config settings: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for config settings: %v", err)
 		return settings
 	}
 	defer reader.Close()
@@ -1455,7 +1455,7 @@ func (p *BronzeExtractorsProcessor) extractConfigSettings(lcm *xdr.LedgerCloseMe
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading change for config settings: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for config settings: %v", err)
 			continue
 		}
 
@@ -1518,7 +1518,7 @@ func (p *BronzeExtractorsProcessor) extractTTL(lcm *xdr.LedgerCloseMeta, closedA
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create change reader for TTL: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for TTL: %v", err)
 		return ttls
 	}
 	defer reader.Close()
@@ -1531,7 +1531,7 @@ func (p *BronzeExtractorsProcessor) extractTTL(lcm *xdr.LedgerCloseMeta, closedA
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading change for TTL: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for TTL: %v", err)
 			continue
 		}
 
@@ -1677,7 +1677,7 @@ func (p *BronzeExtractorsProcessor) extractAccountSigners(lcm *xdr.LedgerCloseMe
 
 	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(p.networkPassphrase, *lcm)
 	if err != nil {
-		logging.Error("BronzeExtractor: Failed to create change reader for account signers: %v", err)
+		log.Printf("BronzeExtractor: Failed to create change reader for account signers: %v", err)
 		return signers
 	}
 	defer reader.Close()
@@ -1690,7 +1690,7 @@ func (p *BronzeExtractorsProcessor) extractAccountSigners(lcm *xdr.LedgerCloseMe
 			break
 		}
 		if err != nil {
-			logging.Error("BronzeExtractor: Error reading change for account signers: %v", err)
+			log.Printf("BronzeExtractor: Error reading change for account signers: %v", err)
 			continue
 		}
 

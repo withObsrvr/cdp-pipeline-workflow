@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 	"time"
 
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/xdr"
-	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/logging"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/xdr"
 )
 
 // LedgerChange represents a change in the ledger
@@ -80,7 +80,7 @@ func (p *LedgerChangeProcessor) Process(ctx context.Context, msg Message) error 
 	}
 
 	sequence := ledgerCloseMeta.LedgerSequence()
-	logging.Debug("Processing ledger %d for changes", sequence)
+	log.Printf("Processing ledger %d for changes", sequence)
 
 	txReader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(p.networkPassphrase, ledgerCloseMeta)
 	if err != nil {
@@ -101,15 +101,15 @@ func (p *LedgerChangeProcessor) Process(ctx context.Context, msg Message) error 
 			return fmt.Errorf("error reading transaction: %w", err)
 		}
 		txCount++
-		logging.Debug("Processing transaction %d in ledger %d", txCount, sequence)
+		log.Printf("Processing transaction %d in ledger %d", txCount, sequence)
 
 		// Get changes directly from the transaction
 		changes, err := tx.GetChanges()
 		if err != nil {
-			logging.Debug("Error getting changes: %v", err)
+			log.Printf("Error getting changes: %v", err)
 			continue
 		}
-		logging.Debug("Found %d changes in transaction %d", len(changes), txCount)
+		log.Printf("Found %d changes in transaction %d", len(changes), txCount)
 
 		// Process each change
 		for _, change := range changes {
@@ -147,12 +147,12 @@ func (p *LedgerChangeProcessor) Process(ctx context.Context, msg Message) error 
 			case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
 				// For removed entries, we need to get the key from Pre
 				if change.Pre == nil {
-					logging.Debug("Warning: removed entry has nil Pre state")
+					log.Printf("Warning: removed entry has nil Pre state")
 					continue
 				}
 				key, err := change.Pre.LedgerKey()
 				if err != nil {
-					logging.Debug("Error getting ledger key: %v", err)
+					log.Printf("Error getting ledger key: %v", err)
 					continue
 				}
 				ledgerChange, err = p.processChange(xdr.LedgerEntryChange{
@@ -167,13 +167,13 @@ func (p *LedgerChangeProcessor) Process(ctx context.Context, msg Message) error 
 			}
 
 			if err != nil {
-				logging.Debug("Error processing change: %v", err)
+				log.Printf("Error processing change: %v", err)
 				continue
 			}
 
 			// Forward the change
 			if err := p.forwardToProcessors(ctx, ledgerChange); err != nil {
-				logging.Debug("Error forwarding change: %v", err)
+				log.Printf("Error forwarding change: %v", err)
 				continue
 			}
 
@@ -186,18 +186,18 @@ func (p *LedgerChangeProcessor) Process(ctx context.Context, msg Message) error 
 		if tx.UnsafeMeta.V1 != nil {
 			for opIndex, op := range tx.UnsafeMeta.V1.Operations {
 				opChanges := op.Changes
-				logging.Debug("Found %d changes in operation %d", len(opChanges), opIndex)
+				log.Printf("Found %d changes in operation %d", len(opChanges), opIndex)
 
 				for _, change := range opChanges {
 					ledgerChange, err := p.processChange(change, sequence, closeTime, tx.Result.TransactionHash.HexString(), opIndex)
 					if err != nil {
-						logging.Debug("Error processing change: %v", err)
+						log.Printf("Error processing change: %v", err)
 						continue
 					}
 
 					// Forward the change
 					if err := p.forwardToProcessors(ctx, ledgerChange); err != nil {
-						logging.Debug("Error forwarding change: %v", err)
+						log.Printf("Error forwarding change: %v", err)
 						continue
 					}
 
@@ -209,7 +209,7 @@ func (p *LedgerChangeProcessor) Process(ctx context.Context, msg Message) error 
 		}
 	}
 
-	logging.Debug("Completed processing ledger %d with %d transactions", sequence, txCount)
+	log.Printf("Completed processing ledger %d with %d transactions", sequence, txCount)
 
 	p.mu.Lock()
 	p.stats.ProcessedLedgers++

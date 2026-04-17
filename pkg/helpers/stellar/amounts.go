@@ -5,8 +5,8 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/stellar/go-stellar-sdk/amount"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/amount"
+	"github.com/stellar/go/xdr"
 )
 
 // FormatAmount converts a raw int64 amount to a decimal string

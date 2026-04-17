@@ -12,8 +12,8 @@ import (
 	"bytes"
 
 	"github.com/guregu/null"
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/xdr"
 )
 
 // ClaimableBalanceEvent represents a processed claimable balance event

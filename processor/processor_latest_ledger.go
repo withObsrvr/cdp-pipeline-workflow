@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/ingest/ledger"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/ingest/ledger"
+	"github.com/stellar/go/xdr"
 )
 
 // Enhanced LatestLedger struct with transaction metrics

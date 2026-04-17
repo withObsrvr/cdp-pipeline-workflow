@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 	"time"
 
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/strkey"
-	"github.com/stellar/go-stellar-sdk/xdr"
-	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/logging"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/strkey"
+	"github.com/stellar/go/xdr"
 )
 
 // ContractInvocation represents a contract invocation event
@@ -117,7 +117,7 @@ func (p *ContractInvocationProcessor) Process(ctx context.Context, msg Message) 
 	archiveMetadata, _ := msg.GetArchiveMetadata()
 
 	sequence := ledgerCloseMeta.LedgerSequence()
-	logging.Debug("Processing ledger %d for contract invocations", sequence)
+	log.Printf("Processing ledger %d for contract invocations", sequence)
 
 	txReader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(p.networkPassphrase, ledgerCloseMeta)
 	if err != nil {
@@ -140,13 +140,13 @@ func (p *ContractInvocationProcessor) Process(ctx context.Context, msg Message) 
 			if op.Body.Type == xdr.OperationTypeInvokeHostFunction {
 				invocation, err := p.processContractInvocation(tx, opIndex, op, ledgerCloseMeta, archiveMetadata)
 				if err != nil {
-					logging.Debug("Error processing contract invocation: %v", err)
+					log.Printf("Error processing contract invocation: %v", err)
 					continue
 				}
 
 				if invocation != nil {
 					if err := p.forwardToProcessors(ctx, invocation); err != nil {
-						logging.Debug("Error forwarding invocation: %v", err)
+						log.Printf("Error forwarding invocation: %v", err)
 					}
 				}
 			}
@@ -235,7 +235,7 @@ func (p *ContractInvocationProcessor) processContractInvocation(
 		if len(invokeContract.Args) > 0 {
 			argumentsRaw, rawArgs, decodedArgs, err := extractArguments(invokeContract.Args)
 			if err != nil {
-				logging.Debug("Error extracting arguments: %v", err)
+				log.Printf("Error extracting arguments: %v", err)
 			}
 			invocation.ArgumentsRaw = argumentsRaw
 			invocation.Arguments = rawArgs
@@ -251,9 +251,9 @@ func (p *ContractInvocationProcessor) processContractInvocation(
 	
 	// Debug: Log authorization entries
 	if len(invokeHostFunction.Auth) == 0 {
-		logging.Debug("No authorization entries found for transaction %s", tx.Result.TransactionHash.HexString())
+		log.Printf("No authorization entries found for transaction %s", tx.Result.TransactionHash.HexString())
 	} else {
-		logging.Debug("Found %d authorization entries for transaction %s", 
+		log.Printf("Found %d authorization entries for transaction %s", 
 			len(invokeHostFunction.Auth), tx.Result.TransactionHash.HexString())
 	}
 	
@@ -286,7 +286,7 @@ func (p *ContractInvocationProcessor) processContractInvocation(
 		}
 		p.mu.Unlock()
 		
-		logging.Debug("Contract invocation with %d cross-contract calls (max depth: %d)", 
+		log.Printf("Contract invocation with %d cross-contract calls (max depth: %d)", 
 			len(invocation.ContractCalls), p.stats.MaxCallDepth)
 	}
 
@@ -352,7 +352,7 @@ func (p *ContractInvocationProcessor) extractDiagnosticEvents(tx ingest.LedgerTr
 				contractIDBytes := event.ContractId
 				contractID, err := strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
 				if err != nil {
-					logging.Debug("Error encoding contract ID for diagnostic event: %v", err)
+					log.Printf("Error encoding contract ID for diagnostic event: %v", err)
 					continue
 				}
 
@@ -364,7 +364,7 @@ func (p *ContractInvocationProcessor) extractDiagnosticEvents(tx ingest.LedgerTr
 				for _, topic := range topics {
 					decoded, err := ConvertScValToJSON(topic)
 					if err != nil {
-						logging.Debug("Error decoding topic: %v", err)
+						log.Printf("Error decoding topic: %v", err)
 						decoded = nil
 					}
 					topicsDecoded = append(topicsDecoded, decoded)
@@ -376,7 +376,7 @@ func (p *ContractInvocationProcessor) extractDiagnosticEvents(tx ingest.LedgerTr
 				// Decode data
 				dataDecoded, err := ConvertScValToJSON(data)
 				if err != nil {
-					logging.Debug("Error decoding event data: %v", err)
+					log.Printf("Error decoding event data: %v", err)
 					dataDecoded = nil
 				}
 
@@ -422,7 +422,7 @@ func (p *ContractInvocationProcessor) extractContractCallsFromAuth(
 	}
 	
 	if len(calls) > 0 {
-		logging.Debug("Extracted %d cross-contract calls from authorization data", len(calls))
+		log.Printf("Extracted %d cross-contract calls from authorization data", len(calls))
 	}
 	
 	return calls
@@ -436,23 +436,23 @@ func (p *ContractInvocationProcessor) extractContractCalls(tx ingest.LedgerTrans
 	if tx.UnsafeMeta.V == 3 {
 		sorobanMeta := tx.UnsafeMeta.V3.SorobanMeta
 		if sorobanMeta != nil {
-			logging.Debug("Checking SorobanMeta for transaction %s", tx.Result.TransactionHash.HexString())
+			log.Printf("Checking SorobanMeta for transaction %s", tx.Result.TransactionHash.HexString())
 			
 			// Check regular events (not just diagnostic)
 			if sorobanMeta.Events != nil && len(sorobanMeta.Events) > 0 {
-				logging.Debug("Found %d regular events in SorobanMeta", len(sorobanMeta.Events))
+				log.Printf("Found %d regular events in SorobanMeta", len(sorobanMeta.Events))
 			}
 			
 			// Process diagnostic events which may contain contract calls
 			if len(sorobanMeta.DiagnosticEvents) > 0 {
 				// Log diagnostic events for debugging
-				logging.Debug("Found %d diagnostic events in SorobanMeta", len(sorobanMeta.DiagnosticEvents))
+				log.Printf("Found %d diagnostic events in SorobanMeta", len(sorobanMeta.DiagnosticEvents))
 			}
 			
 			// Check the return value which might contain invocation information
 			// Note: ReturnValue is a ScVal, not a pointer, so we check its type
 			if sorobanMeta.ReturnValue.Type != xdr.ScValTypeScvVoid {
-				logging.Debug("Found non-void return value in SorobanMeta")
+				log.Printf("Found non-void return value in SorobanMeta")
 			}
 		}
 	}
@@ -486,7 +486,7 @@ func (p *ContractInvocationProcessor) processAuthorizationTree(
 		var err error
 		contractID, err = strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
 		if err != nil {
-			logging.Debug("Error encoding contract ID for invocation: %v", err)
+			log.Printf("Error encoding contract ID for invocation: %v", err)
 			return
 		}
 		
@@ -504,7 +504,7 @@ func (p *ContractInvocationProcessor) processAuthorizationTree(
 		}
 		
 		// Log the authorization for debugging
-		logging.Debug("Authorization tree: depth=%d, from=%s, to=%s, function=%s, args=%d", 
+		log.Printf("Authorization tree: depth=%d, from=%s, to=%s, function=%s, args=%d", 
 			depth, fromContract, contractID, functionName, len(args))
 	}
 
@@ -544,14 +544,14 @@ func (p *ContractInvocationProcessor) extractContractCallsFromDiagnosticEvents(
 ) {
 	// Safety check
 	if invocation == nil {
-		logging.Debug("ERROR: invocation is nil in extractContractCallsFromDiagnosticEvents")
+		log.Printf("ERROR: invocation is nil in extractContractCallsFromDiagnosticEvents")
 		return
 	}
 	
 	// Get diagnostic events
 	diagnosticEvents, err := tx.GetDiagnosticEvents()
 	if err != nil {
-		logging.Debug("Error getting diagnostic events: %v", err)
+		log.Printf("Error getting diagnostic events: %v", err)
 		return
 	}
 	
@@ -559,7 +559,7 @@ func (p *ContractInvocationProcessor) extractContractCallsFromDiagnosticEvents(
 		return
 	}
 	
-	logging.Debug("Checking %d diagnostic events for cross-contract calls", len(diagnosticEvents))
+	log.Printf("Checking %d diagnostic events for cross-contract calls", len(diagnosticEvents))
 	
 	// Look for contract invocation patterns in diagnostic events
 	executionOrder := len(invocation.ContractCalls)
@@ -577,14 +577,14 @@ func (p *ContractInvocationProcessor) extractContractCallsFromDiagnosticEvents(
 	for i, diagEvent := range diagnosticEvents {
 		// Safety check for the event structure
 		if diagEvent.Event.ContractId == nil {
-			logging.Debug("Diagnostic event %d has nil ContractId, skipping", i)
+			log.Printf("Diagnostic event %d has nil ContractId, skipping", i)
 			continue
 		}
 		
 		// Get the contract that emitted this event
 		eventContractID, err := strkey.Encode(strkey.VersionByteContract, diagEvent.Event.ContractId[:])
 		if err != nil {
-			logging.Debug("Error encoding contract ID from diagnostic event %d: %v", i, err)
+			log.Printf("Error encoding contract ID from diagnostic event %d: %v", i, err)
 			continue
 		}
 		
@@ -608,7 +608,7 @@ func (p *ContractInvocationProcessor) extractContractCallsFromDiagnosticEvents(
 		}
 		
 		// Only log for debugging when needed
-		// logging.Debug("Diagnostic event %d: contract=%s, type=%s, topic=%s, successful=%v", 
+		// log.Printf("Diagnostic event %d: contract=%s, type=%s, topic=%s, successful=%v", 
 		//	i, eventContractID, eventType, firstTopic, diagEvent.InSuccessfulContractCall)
 		
 		// For fn_call events from the main contract, check if they're calling another contract
@@ -625,7 +625,7 @@ func (p *ContractInvocationProcessor) extractContractCallsFromDiagnosticEvents(
 					
 					if diagEvent.Event.Body.V == 0 && diagEvent.Event.Body.V0 != nil {
 						if decoded, err := ConvertScValToJSON(diagEvent.Event.Body.V0.Data); err == nil {
-							// logging.Debug("fn_call data for cross-contract call: %+v", decoded)
+							// log.Printf("fn_call data for cross-contract call: %+v", decoded)
 							// Try to extract function name and arguments from various formats
 							switch data := decoded.(type) {
 							case []interface{}:
@@ -668,7 +668,7 @@ func (p *ContractInvocationProcessor) extractContractCallsFromDiagnosticEvents(
 								arguments = []interface{}{decoded}
 							}
 							
-							// logging.Debug("Inferred function name: %s with args: %+v", functionName, arguments)
+							// log.Printf("Inferred function name: %s with args: %+v", functionName, arguments)
 						}
 					}
 					
@@ -687,7 +687,7 @@ func (p *ContractInvocationProcessor) extractContractCallsFromDiagnosticEvents(
 					invocation.ContractCalls = append(invocation.ContractCalls, call)
 					executionOrder++
 					
-					logging.Debug("Found cross-contract call from fn_call: %s -> %s (%s)", 
+					log.Printf("Found cross-contract call from fn_call: %s -> %s (%s)", 
 						eventContractID, nextContractID, functionName)
 				}
 			}
@@ -729,13 +729,13 @@ func (p *ContractInvocationProcessor) extractContractCallsFromDiagnosticEvents(
 				// For fn_call events, look at the data to extract the actual function name
 				if isFnCall && diagEvent.Event.Body.V == 0 && diagEvent.Event.Body.V0 != nil {
 					if decoded, err := ConvertScValToJSON(diagEvent.Event.Body.V0.Data); err == nil {
-						logging.Debug("fn_call event %d data: %+v", i, decoded)
+						log.Printf("fn_call event %d data: %+v", i, decoded)
 						// The data often contains [contract_id, function_name, ...args]
 						if dataArray, ok := decoded.([]interface{}); ok && len(dataArray) > 1 {
 							// Second element is often the function name
 							if fnSymbol, ok := dataArray[1].(string); ok {
 								functionName = fnSymbol
-								logging.Debug("Extracted function name from fn_call: %s", functionName)
+								log.Printf("Extracted function name from fn_call: %s", functionName)
 							}
 						}
 					}
@@ -776,7 +776,7 @@ func (p *ContractInvocationProcessor) extractContractCallsFromDiagnosticEvents(
 							if decoded, err := ConvertScValToJSON(v0Body.Data); err == nil {
 								// Log the structure to understand what's available
 								if functionName == "fn_call" || functionName == "unknown" {
-									logging.Debug("Diagnostic event %d data for %s (type=%d): %+v", i, eventContractID, diagEvent.Event.Type, decoded)
+									log.Printf("Diagnostic event %d data for %s (type=%d): %+v", i, eventContractID, diagEvent.Event.Type, decoded)
 								}
 								
 								// Try various patterns to extract function name
@@ -844,7 +844,7 @@ func (p *ContractInvocationProcessor) extractContractCallsFromDiagnosticEvents(
 				invocation.ContractCalls = append(invocation.ContractCalls, call)
 				executionOrder++
 				
-				logging.Debug("Found cross-contract call from diagnostic event %d: %s -> %s (%s)", 
+				log.Printf("Found cross-contract call from diagnostic event %d: %s -> %s (%s)", 
 					i, fromContract, eventContractID, functionName)
 			}
 			
@@ -857,7 +857,7 @@ func (p *ContractInvocationProcessor) extractContractCallsFromDiagnosticEvents(
 	}
 	
 	if len(invocation.ContractCalls) > 0 {
-		logging.Debug("Extracted %d cross-contract calls from diagnostic events", len(invocation.ContractCalls))
+		log.Printf("Extracted %d cross-contract calls from diagnostic events", len(invocation.ContractCalls))
 	}
 }
 
@@ -880,7 +880,7 @@ func (p *ContractInvocationProcessor) correlateWithDiagnosticEvents(
 	// Get diagnostic events to determine actual execution
 	diagnosticEvents, err := tx.GetDiagnosticEvents()
 	if err != nil {
-		logging.Debug("Error getting diagnostic events: %v", err)
+		log.Printf("Error getting diagnostic events: %v", err)
 		return
 	}
 	
@@ -888,7 +888,7 @@ func (p *ContractInvocationProcessor) correlateWithDiagnosticEvents(
 		return
 	}
 	
-	logging.Debug("Correlating %d contract calls with %d diagnostic events", 
+	log.Printf("Correlating %d contract calls with %d diagnostic events", 
 		len(invocation.ContractCalls), len(diagnosticEvents))
 	
 	// Create a map of authorized calls for quick lookup
@@ -908,7 +908,7 @@ func (p *ContractInvocationProcessor) correlateWithDiagnosticEvents(
 		if event.Event.Type == xdr.ContractEventTypeContract {
 			contractID, err := strkey.Encode(strkey.VersionByteContract, event.Event.ContractId[:])
 			if err != nil {
-				logging.Debug("Error encoding contract ID from diagnostic event: %v", err)
+				log.Printf("Error encoding contract ID from diagnostic event: %v", err)
 				continue
 			}
 			
@@ -923,7 +923,7 @@ func (p *ContractInvocationProcessor) correlateWithDiagnosticEvents(
 					} else {
 						failedCalls++
 					}
-					logging.Debug("Updated call %s success status to %v", key, event.InSuccessfulContractCall)
+					log.Printf("Updated call %s success status to %v", key, event.InSuccessfulContractCall)
 					break
 				}
 			}
@@ -931,7 +931,7 @@ func (p *ContractInvocationProcessor) correlateWithDiagnosticEvents(
 	}
 	
 	if successfulCalls > 0 || failedCalls > 0 {
-		logging.Debug("Correlation complete: %d successful, %d failed calls", successfulCalls, failedCalls)
+		log.Printf("Correlation complete: %d successful, %d failed calls", successfulCalls, failedCalls)
 	}
 }
 
@@ -942,7 +942,7 @@ func (p *ContractInvocationProcessor) extractStateChanges(tx ingest.LedgerTransa
 	// Extract state changes from ledger changes in the transaction meta
 	txChanges, err := tx.GetChanges()
 	if err != nil {
-		logging.Debug("Error getting transaction changes: %v", err)
+		log.Printf("Error getting transaction changes: %v", err)
 		return changes
 	}
 
@@ -1002,13 +1002,13 @@ func (p *ContractInvocationProcessor) extractStateChangeFromContractData(
 	// Extract contract ID
 	contractIDBytes := contractData.Contract.ContractId
 	if contractIDBytes == nil {
-		logging.Debug("Contract ID is nil in state change data")
+		log.Printf("Contract ID is nil in state change data")
 		return nil
 	}
 
 	contractID, err := strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
 	if err != nil {
-		logging.Debug("Error encoding contract ID: %v", err)
+		log.Printf("Error encoding contract ID: %v", err)
 		return nil
 	}
 
@@ -1099,7 +1099,7 @@ func extractArguments(args []xdr.ScVal) ([]xdr.ScVal, []json.RawMessage, map[str
 		// Convert ScVal to JSON-serializable format
 		converted, err := ConvertScValToJSON(arg)
 		if err != nil {
-			logging.Debug("Error converting argument %d: %v", i, err)
+			log.Printf("Error converting argument %d: %v", i, err)
 			converted = map[string]interface{}{
 				"error": err.Error(),
 				"type":  arg.Type.String(),
@@ -1109,7 +1109,7 @@ func extractArguments(args []xdr.ScVal) ([]xdr.ScVal, []json.RawMessage, map[str
 		// Store raw JSON
 		jsonBytes, err := json.Marshal(converted)
 		if err != nil {
-			logging.Debug("Error marshaling argument %d: %v", i, err)
+			log.Printf("Error marshaling argument %d: %v", i, err)
 			continue
 		}
 		jsonRawArgs = append(jsonRawArgs, jsonBytes)

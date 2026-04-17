@@ -7,7 +7,7 @@ import (
 	"log"
 
 	"github.com/withObsrvr/cdp-pipeline-workflow/processor"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/xdr"
 )
 
 // LogDebug is a simple consumer that logs messages for debugging
