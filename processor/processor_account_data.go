@@ -3,11 +3,11 @@ package processor
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
-	"github.com/stellar/go/strkey"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/logging"
 )
 
 // AccountDataConfig holds the configuration for the account data processor
@@ -92,11 +92,11 @@ func (p *ProcessAccountData) Process(ctx context.Context, msg Message) error {
 		}
 	}
 
-	log.Printf("Processing ledger %d for account data", ledgerMeta.LedgerSequence())
+	logging.Debug("Processing ledger %d for account data", ledgerMeta.LedgerSequence())
 
 	// Extract account changes from ledgerMeta
 	accountChanges := getAccountChanges(*ledgerMeta)
-	log.Printf("Found %d account changes in ledger %d", len(accountChanges), ledgerMeta.LedgerSequence())
+	logging.Debug("Found %d account changes in ledger %d", len(accountChanges), ledgerMeta.LedgerSequence())
 
 	// Track errors but don't fail immediately
 	var processingErrors []error
@@ -109,17 +109,17 @@ func (p *ProcessAccountData) Process(ctx context.Context, msg Message) error {
 			return fmt.Errorf("processing interrupted: %w", processingCtx.Err())
 		}
 
-		log.Printf("Processing account change %d of %d (type: %s)",
+		logging.Debug("Processing account change %d of %d (type: %s)",
 			i+1, len(accountChanges), change.Type)
 
 		record, err := processAccountChange(change, *ledgerMeta)
 		if err != nil {
-			log.Printf("Error processing account change: %v", err)
+			logging.Debug("Error processing account change: %v", err)
 			processingErrors = append(processingErrors, fmt.Errorf("error processing change %d: %w", i+1, err))
 			continue
 		}
 
-		log.Printf("Successfully processed account %s (deleted: %t)",
+		logging.Debug("Successfully processed account %s (deleted: %t)",
 			record.AccountID, record.Deleted)
 
 		// Update stats
@@ -136,7 +136,7 @@ func (p *ProcessAccountData) Process(ctx context.Context, msg Message) error {
 	}
 
 	p.stats.LastProcessedTime = time.Now()
-	log.Printf("Finished processing ledger %d, processed %d accounts (created: %d, updated: %d, deleted: %d)",
+	logging.Debug("Finished processing ledger %d, processed %d accounts (created: %d, updated: %d, deleted: %d)",
 		ledgerMeta.LedgerSequence(), p.stats.ProcessedAccounts, p.stats.CreatedAccounts,
 		p.stats.UpdatedAccounts, p.stats.DeletedAccounts)
 
@@ -156,24 +156,24 @@ func (p *ProcessAccountData) Process(ctx context.Context, msg Message) error {
 	outputMsg.Metadata["processor_account_data"] = true
 
 	// Forward to subscribers
-	log.Printf("Forwarding %d account records to %d processors",
+	logging.Debug("Forwarding %d account records to %d processors",
 		len(accountRecords), len(p.processors))
 
 	for i, processor := range p.processors {
-		log.Printf("ProcessAccountData: Forwarding to processor %d/%d (%T)", i+1, len(p.processors), processor)
+		logging.Debug("ProcessAccountData: Forwarding to processor %d/%d (%T)", i+1, len(p.processors), processor)
 		// Create a separate context for each processor with a reasonable timeout
 		procCtx, procCancel := context.WithTimeout(processingCtx, 30*time.Second)
 
-		log.Printf("ProcessAccountData: About to call Process on %T", processor)
+		logging.Debug("ProcessAccountData: About to call Process on %T", processor)
 		err := processor.Process(procCtx, outputMsg)
-		log.Printf("ProcessAccountData: Process call returned for %T, err=%v", processor, err)
+		logging.Debug("ProcessAccountData: Process call returned for %T, err=%v", processor, err)
 		procCancel() // Cancel the context immediately after use
 
 		if err != nil {
-			log.Printf("Error forwarding to processor %d (%T): %v", i+1, processor, err)
+			logging.Debug("Error forwarding to processor %d (%T): %v", i+1, processor, err)
 			processingErrors = append(processingErrors, fmt.Errorf("error in processor: %w", err))
 		} else {
-			log.Printf("Successfully forwarded to processor %d (%T)", i+1, processor)
+			logging.Debug("Successfully forwarded to processor %d (%T)", i+1, processor)
 		}
 	}
 
@@ -291,7 +291,7 @@ func processAccountChange(change xdr.LedgerEntryChange, meta xdr.LedgerCloseMeta
 		sponsorBytes := entry.Ext.V1.SponsoringId.Ed25519[:]
 		sponsor, err = strkey.Encode(strkey.VersionByteAccountID, sponsorBytes)
 		if err != nil {
-			log.Printf("Warning: Could not encode sponsor ID: %v", err)
+			logging.Debug("Warning: Could not encode sponsor ID: %v", err)
 		}
 	}
 
@@ -336,7 +336,7 @@ func processAccountChange(change xdr.LedgerEntryChange, meta xdr.LedgerCloseMeta
 			inflationDestBytes = accountEntry.InflationDest.Ed25519[:]
 			inflationDest, err := strkey.Encode(strkey.VersionByteAccountID, inflationDestBytes)
 			if err != nil {
-				log.Printf("Warning: Could not encode inflation destination: %v", err)
+				logging.Debug("Warning: Could not encode inflation destination: %v", err)
 			} else {
 				record.InflationDest = inflationDest
 			}
@@ -357,39 +357,39 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 	var accountChanges []xdr.LedgerEntryChange
 	var changes []xdr.LedgerEntryChange
 
-	log.Printf("getAccountChanges: Processing ledger %d (meta version: %d)", meta.LedgerSequence(), meta.V)
+	logging.Debug("getAccountChanges: Processing ledger %d (meta version: %d)", meta.LedgerSequence(), meta.V)
 
 	switch meta.V {
 	case 0:
 		if meta.V0 != nil {
-			log.Printf("getAccountChanges: Processing V0 meta")
+			logging.Debug("getAccountChanges: Processing V0 meta")
 
 			// Check if TxSet exists and is not empty
 			if meta.V0.TxSet.Txs != nil {
-				log.Printf("getAccountChanges: Found %d transactions in TxSet", len(meta.V0.TxSet.Txs))
+				logging.Debug("getAccountChanges: Found %d transactions in TxSet", len(meta.V0.TxSet.Txs))
 
 				// Extract changes from transaction set
 				for i := range meta.V0.TxSet.Txs {
 					// Use the Operations() method to get operations
 					ops := meta.V0.TxSet.Txs[i].Operations()
-					log.Printf("getAccountChanges: Transaction %d has %d operations", i+1, len(ops))
+					logging.Debug("getAccountChanges: Transaction %d has %d operations", i+1, len(ops))
 				}
 			} else {
-				log.Printf("getAccountChanges: No transactions in TxSet")
+				logging.Debug("getAccountChanges: No transactions in TxSet")
 			}
 
 			// Extract changes directly from V0
 			if meta.V0.TxProcessing != nil {
-				log.Printf("getAccountChanges: Found %d TxProcessing entries", len(meta.V0.TxProcessing))
+				logging.Debug("getAccountChanges: Found %d TxProcessing entries", len(meta.V0.TxProcessing))
 
 				for i, txProcessing := range meta.V0.TxProcessing {
 					if txProcessing.FeeProcessing != nil {
-						log.Printf("getAccountChanges: TxProcessing[%d] has %d FeeProcessing changes",
+						logging.Debug("getAccountChanges: TxProcessing[%d] has %d FeeProcessing changes",
 							i, len(txProcessing.FeeProcessing))
 						changes = append(changes, txProcessing.FeeProcessing...)
 					}
 
-					log.Printf("getAccountChanges: TxProcessing[%d] TxApplyProcessing version: %d",
+					logging.Debug("getAccountChanges: TxProcessing[%d] TxApplyProcessing version: %d",
 						i, txProcessing.TxApplyProcessing.V)
 
 					// Handle TxApplyProcessing based on its version
@@ -397,10 +397,10 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 					case 1:
 						v1Meta := txProcessing.TxApplyProcessing.MustV1()
 						if v1Meta.Operations != nil {
-							log.Printf("getAccountChanges: V1 meta has %d operations", len(v1Meta.Operations))
+							logging.Debug("getAccountChanges: V1 meta has %d operations", len(v1Meta.Operations))
 							for j, opMeta := range v1Meta.Operations {
 								if opMeta.Changes != nil {
-									log.Printf("getAccountChanges: V1 operation %d has %d changes",
+									logging.Debug("getAccountChanges: V1 operation %d has %d changes",
 										j, len(opMeta.Changes))
 									changes = append(changes, opMeta.Changes...)
 								}
@@ -409,10 +409,10 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 					case 2:
 						v2Meta := txProcessing.TxApplyProcessing.MustV2()
 						if v2Meta.Operations != nil {
-							log.Printf("getAccountChanges: V2 meta has %d operations", len(v2Meta.Operations))
+							logging.Debug("getAccountChanges: V2 meta has %d operations", len(v2Meta.Operations))
 							for j, opMeta := range v2Meta.Operations {
 								if opMeta.Changes != nil {
-									log.Printf("getAccountChanges: V2 operation %d has %d changes",
+									logging.Debug("getAccountChanges: V2 operation %d has %d changes",
 										j, len(opMeta.Changes))
 									changes = append(changes, opMeta.Changes...)
 								}
@@ -421,10 +421,10 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 					case 3:
 						v3Meta := txProcessing.TxApplyProcessing.MustV3()
 						if v3Meta.Operations != nil {
-							log.Printf("getAccountChanges: V3 meta has %d operations", len(v3Meta.Operations))
+							logging.Debug("getAccountChanges: V3 meta has %d operations", len(v3Meta.Operations))
 							for j, opMeta := range v3Meta.Operations {
 								if opMeta.Changes != nil {
-									log.Printf("getAccountChanges: V3 operation %d has %d changes",
+									logging.Debug("getAccountChanges: V3 operation %d has %d changes",
 										j, len(opMeta.Changes))
 									changes = append(changes, opMeta.Changes...)
 								}
@@ -433,10 +433,10 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 					case 4:
 						v4Meta := txProcessing.TxApplyProcessing.MustV4()
 						if v4Meta.Operations != nil {
-							log.Printf("getAccountChanges: V4 meta has %d operations", len(v4Meta.Operations))
+							logging.Debug("getAccountChanges: V4 meta has %d operations", len(v4Meta.Operations))
 							for j, opMeta := range v4Meta.Operations {
 								if opMeta.Changes != nil {
-									log.Printf("getAccountChanges: V4 operation %d has %d changes",
+									logging.Debug("getAccountChanges: V4 operation %d has %d changes",
 										j, len(opMeta.Changes))
 									changes = append(changes, opMeta.Changes...)
 								}
@@ -444,45 +444,45 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 						}
 						// V4 also includes Soroban transaction data
 						if v4Meta.SorobanMeta != nil {
-							log.Printf("getAccountChanges: V4 has Soroban meta")
+							logging.Debug("getAccountChanges: V4 has Soroban meta")
 						}
 					default:
-						log.Printf("getAccountChanges: Unknown TxApplyProcessing version: %d",
+						logging.Debug("getAccountChanges: Unknown TxApplyProcessing version: %d",
 							txProcessing.TxApplyProcessing.V)
 					}
 				}
 			} else {
-				log.Printf("getAccountChanges: No TxProcessing entries found")
+				logging.Debug("getAccountChanges: No TxProcessing entries found")
 			}
 		}
 	case 1:
 		if meta.V1 != nil {
-			log.Printf("getAccountChanges: Processing V1 meta")
+			logging.Debug("getAccountChanges: Processing V1 meta")
 
 			// Process TxProcessing entries
 			if meta.V1.TxProcessing != nil {
-				log.Printf("getAccountChanges: Found %d TxProcessing entries in V1 meta", len(meta.V1.TxProcessing))
+				logging.Debug("getAccountChanges: Found %d TxProcessing entries in V1 meta", len(meta.V1.TxProcessing))
 
 				for i, txProcessing := range meta.V1.TxProcessing {
 					// Process fee changes
 					if txProcessing.FeeProcessing != nil {
-						log.Printf("getAccountChanges: V1 TxProcessing[%d] has %d FeeProcessing changes",
+						logging.Debug("getAccountChanges: V1 TxProcessing[%d] has %d FeeProcessing changes",
 							i, len(txProcessing.FeeProcessing))
 						changes = append(changes, txProcessing.FeeProcessing...)
 					}
 
 					// Process transaction metadata based on version
-					log.Printf("getAccountChanges: V1 TxProcessing[%d] TxApplyProcessing version: %d",
+					logging.Debug("getAccountChanges: V1 TxProcessing[%d] TxApplyProcessing version: %d",
 						i, txProcessing.TxApplyProcessing.V)
 
 					switch txProcessing.TxApplyProcessing.V {
 					case 1:
 						v1Meta := txProcessing.TxApplyProcessing.MustV1()
 						if v1Meta.Operations != nil {
-							log.Printf("getAccountChanges: V1 meta has %d operations", len(v1Meta.Operations))
+							logging.Debug("getAccountChanges: V1 meta has %d operations", len(v1Meta.Operations))
 							for j, opMeta := range v1Meta.Operations {
 								if opMeta.Changes != nil {
-									log.Printf("getAccountChanges: V1 operation %d has %d changes",
+									logging.Debug("getAccountChanges: V1 operation %d has %d changes",
 										j, len(opMeta.Changes))
 									changes = append(changes, opMeta.Changes...)
 								}
@@ -491,10 +491,10 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 					case 2:
 						v2Meta := txProcessing.TxApplyProcessing.MustV2()
 						if v2Meta.Operations != nil {
-							log.Printf("getAccountChanges: V2 meta has %d operations", len(v2Meta.Operations))
+							logging.Debug("getAccountChanges: V2 meta has %d operations", len(v2Meta.Operations))
 							for j, opMeta := range v2Meta.Operations {
 								if opMeta.Changes != nil {
-									log.Printf("getAccountChanges: V2 operation %d has %d changes",
+									logging.Debug("getAccountChanges: V2 operation %d has %d changes",
 										j, len(opMeta.Changes))
 									changes = append(changes, opMeta.Changes...)
 								}
@@ -503,10 +503,10 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 					case 3:
 						v3Meta := txProcessing.TxApplyProcessing.MustV3()
 						if v3Meta.Operations != nil {
-							log.Printf("getAccountChanges: V3 meta has %d operations", len(v3Meta.Operations))
+							logging.Debug("getAccountChanges: V3 meta has %d operations", len(v3Meta.Operations))
 							for j, opMeta := range v3Meta.Operations {
 								if opMeta.Changes != nil {
-									log.Printf("getAccountChanges: V3 operation %d has %d changes",
+									logging.Debug("getAccountChanges: V3 operation %d has %d changes",
 										j, len(opMeta.Changes))
 									changes = append(changes, opMeta.Changes...)
 								}
@@ -515,10 +515,10 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 					case 4:
 						v4Meta := txProcessing.TxApplyProcessing.MustV4()
 						if v4Meta.Operations != nil {
-							log.Printf("getAccountChanges: V4 meta has %d operations", len(v4Meta.Operations))
+							logging.Debug("getAccountChanges: V4 meta has %d operations", len(v4Meta.Operations))
 							for j, opMeta := range v4Meta.Operations {
 								if opMeta.Changes != nil {
-									log.Printf("getAccountChanges: V4 operation %d has %d changes",
+									logging.Debug("getAccountChanges: V4 operation %d has %d changes",
 										j, len(opMeta.Changes))
 									changes = append(changes, opMeta.Changes...)
 								}
@@ -526,63 +526,63 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 						}
 						// V4 also includes Soroban transaction data
 						if v4Meta.SorobanMeta != nil {
-							log.Printf("getAccountChanges: V4 has Soroban meta")
+							logging.Debug("getAccountChanges: V4 has Soroban meta")
 						}
 					default:
-						log.Printf("getAccountChanges: Unknown TxApplyProcessing version: %d",
+						logging.Debug("getAccountChanges: Unknown TxApplyProcessing version: %d",
 							txProcessing.TxApplyProcessing.V)
 					}
 				}
 			} else {
-				log.Printf("getAccountChanges: No TxProcessing entries found in V1 meta")
+				logging.Debug("getAccountChanges: No TxProcessing entries found in V1 meta")
 			}
 
 			// Try to access changes directly from V1 if available
 			// This is a more exploratory approach since we don't know the exact structure
-			log.Printf("getAccountChanges: Exploring V1 meta structure for changes")
+			logging.Debug("getAccountChanges: Exploring V1 meta structure for changes")
 
 			// Inspect the V1 structure to find any fields that might contain changes
 			// This is a debugging step to help understand the structure
-			log.Printf("getAccountChanges: V1 TxSet type: %T", meta.V1.TxSet)
+			logging.Debug("getAccountChanges: V1 TxSet type: %T", meta.V1.TxSet)
 
 			// Instead of comparing TxSet with nil, let's check if it has any transactions
 			// by examining its fields or using reflection
 			if meta.V1.TxSet.V == 0 {
-				log.Printf("getAccountChanges: V1 TxSet is legacy format (V=0)")
+				logging.Debug("getAccountChanges: V1 TxSet is legacy format (V=0)")
 			} else if meta.V1.TxSet.V == 1 {
-				log.Printf("getAccountChanges: V1 TxSet is generalized format (V=1)")
+				logging.Debug("getAccountChanges: V1 TxSet is generalized format (V=1)")
 			}
 
 			// Add more exploration of the V1 structure as needed
 		}
 	case 2:
 		if meta.V2 != nil {
-			log.Printf("getAccountChanges: Processing V2 meta")
+			logging.Debug("getAccountChanges: Processing V2 meta")
 			
 			// Process TxProcessing entries
 			if meta.V2.TxProcessing != nil {
-				log.Printf("getAccountChanges: Found %d TxProcessing entries in V2 meta", len(meta.V2.TxProcessing))
+				logging.Debug("getAccountChanges: Found %d TxProcessing entries in V2 meta", len(meta.V2.TxProcessing))
 				
 				for i, txProcessing := range meta.V2.TxProcessing {
 					// Process fee changes
 					if txProcessing.FeeProcessing != nil {
-						log.Printf("getAccountChanges: V2 TxProcessing[%d] has %d FeeProcessing changes",
+						logging.Debug("getAccountChanges: V2 TxProcessing[%d] has %d FeeProcessing changes",
 							i, len(txProcessing.FeeProcessing))
 						changes = append(changes, txProcessing.FeeProcessing...)
 					}
 					
 					// Process transaction metadata based on version
-					log.Printf("getAccountChanges: V2 TxProcessing[%d] TxApplyProcessing version: %d",
+					logging.Debug("getAccountChanges: V2 TxProcessing[%d] TxApplyProcessing version: %d",
 						i, txProcessing.TxApplyProcessing.V)
 					
 					switch txProcessing.TxApplyProcessing.V {
 					case 1:
 						v1Meta := txProcessing.TxApplyProcessing.MustV1()
 						if v1Meta.Operations != nil {
-							log.Printf("getAccountChanges: V1 meta has %d operations", len(v1Meta.Operations))
+							logging.Debug("getAccountChanges: V1 meta has %d operations", len(v1Meta.Operations))
 							for j, opMeta := range v1Meta.Operations {
 								if opMeta.Changes != nil {
-									log.Printf("getAccountChanges: V1 operation %d has %d changes",
+									logging.Debug("getAccountChanges: V1 operation %d has %d changes",
 										j, len(opMeta.Changes))
 									changes = append(changes, opMeta.Changes...)
 								}
@@ -591,10 +591,10 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 					case 2:
 						v2Meta := txProcessing.TxApplyProcessing.MustV2()
 						if v2Meta.Operations != nil {
-							log.Printf("getAccountChanges: V2 meta has %d operations", len(v2Meta.Operations))
+							logging.Debug("getAccountChanges: V2 meta has %d operations", len(v2Meta.Operations))
 							for j, opMeta := range v2Meta.Operations {
 								if opMeta.Changes != nil {
-									log.Printf("getAccountChanges: V2 operation %d has %d changes",
+									logging.Debug("getAccountChanges: V2 operation %d has %d changes",
 										j, len(opMeta.Changes))
 									changes = append(changes, opMeta.Changes...)
 								}
@@ -603,10 +603,10 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 					case 3:
 						v3Meta := txProcessing.TxApplyProcessing.MustV3()
 						if v3Meta.Operations != nil {
-							log.Printf("getAccountChanges: V3 meta has %d operations", len(v3Meta.Operations))
+							logging.Debug("getAccountChanges: V3 meta has %d operations", len(v3Meta.Operations))
 							for j, opMeta := range v3Meta.Operations {
 								if opMeta.Changes != nil {
-									log.Printf("getAccountChanges: V3 operation %d has %d changes",
+									logging.Debug("getAccountChanges: V3 operation %d has %d changes",
 										j, len(opMeta.Changes))
 									changes = append(changes, opMeta.Changes...)
 								}
@@ -615,10 +615,10 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 					case 4:
 						v4Meta := txProcessing.TxApplyProcessing.MustV4()
 						if v4Meta.Operations != nil {
-							log.Printf("getAccountChanges: V4 meta has %d operations", len(v4Meta.Operations))
+							logging.Debug("getAccountChanges: V4 meta has %d operations", len(v4Meta.Operations))
 							for j, opMeta := range v4Meta.Operations {
 								if opMeta.Changes != nil {
-									log.Printf("getAccountChanges: V4 operation %d has %d changes",
+									logging.Debug("getAccountChanges: V4 operation %d has %d changes",
 										j, len(opMeta.Changes))
 									changes = append(changes, opMeta.Changes...)
 								}
@@ -626,26 +626,26 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 						}
 						// V4 also includes Soroban transaction data
 						if v4Meta.SorobanMeta != nil {
-							log.Printf("getAccountChanges: V4 has Soroban meta")
+							logging.Debug("getAccountChanges: V4 has Soroban meta")
 						}
 					default:
-						log.Printf("getAccountChanges: Unknown TxApplyProcessing version: %d",
+						logging.Debug("getAccountChanges: Unknown TxApplyProcessing version: %d",
 							txProcessing.TxApplyProcessing.V)
 					}
 				}
 			} else {
-				log.Printf("getAccountChanges: No TxProcessing entries found in V2 meta")
+				logging.Debug("getAccountChanges: No TxProcessing entries found in V2 meta")
 			}
 		}
 	default:
-		log.Printf("getAccountChanges: Unknown meta version: %d", meta.V)
+		logging.Debug("getAccountChanges: Unknown meta version: %d", meta.V)
 	}
 
-	log.Printf("getAccountChanges: Found %d total changes", len(changes))
+	logging.Debug("getAccountChanges: Found %d total changes", len(changes))
 
 	// Filter for account changes
 	for i, change := range changes {
-		log.Printf("getAccountChanges: Examining change %d of type %s", i+1, change.Type)
+		logging.Debug("getAccountChanges: Examining change %d of type %s", i+1, change.Type)
 
 		// Check if this is an account entry
 		var entry *xdr.LedgerEntry
@@ -653,37 +653,37 @@ func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
 		switch change.Type {
 		case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
 			entry = change.Created
-			log.Printf("getAccountChanges: Found Created entry")
+			logging.Debug("getAccountChanges: Found Created entry")
 		case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
 			entry = change.Updated
-			log.Printf("getAccountChanges: Found Updated entry")
+			logging.Debug("getAccountChanges: Found Updated entry")
 		case xdr.LedgerEntryChangeTypeLedgerEntryState:
 			entry = change.State
-			log.Printf("getAccountChanges: Found State entry")
+			logging.Debug("getAccountChanges: Found State entry")
 		case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
-			log.Printf("getAccountChanges: Found Removed entry")
+			logging.Debug("getAccountChanges: Found Removed entry")
 			// For removals, we need to check the key type
 			if change.Removed != nil && change.Removed.Type == xdr.LedgerEntryTypeAccount {
-				log.Printf("getAccountChanges: Found account removal!")
+				logging.Debug("getAccountChanges: Found account removal!")
 				accountChanges = append(accountChanges, change)
 			}
 			continue
 		default:
-			log.Printf("getAccountChanges: Unknown change type: %s", change.Type)
+			logging.Debug("getAccountChanges: Unknown change type: %s", change.Type)
 			continue
 		}
 
 		if entry != nil {
-			log.Printf("getAccountChanges: Entry type: %s", entry.Data.Type)
+			logging.Debug("getAccountChanges: Entry type: %s", entry.Data.Type)
 			if entry.Data.Type == xdr.LedgerEntryTypeAccount {
-				log.Printf("getAccountChanges: Found account entry!")
+				logging.Debug("getAccountChanges: Found account entry!")
 				accountChanges = append(accountChanges, change)
 			}
 		} else {
-			log.Printf("getAccountChanges: Entry is nil")
+			logging.Debug("getAccountChanges: Entry is nil")
 		}
 	}
 
-	log.Printf("getAccountChanges: Returning %d account changes", len(accountChanges))
+	logging.Debug("getAccountChanges: Returning %d account changes", len(accountChanges))
 	return accountChanges
 }

@@ -7,8 +7,8 @@ import (
 	"log"
 	"strconv"
 
-	"github.com/stellar/go/amount"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/amount"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 type FilterPayments struct {

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/stellar/go/ingest"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/ingest"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 type LedgerReader struct {

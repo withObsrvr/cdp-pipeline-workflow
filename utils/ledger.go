@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // LedgerSequence returns the sequence number of a ledger
