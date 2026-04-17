@@ -9,9 +9,9 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/strkey"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/strkey"
+	"github.com/stellar/go/xdr"
 )
 
 // AssetEnrichment represents the enriched asset data

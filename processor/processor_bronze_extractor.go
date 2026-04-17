@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/xdr"
 )
 
 // BronzeExtractorsProcessor extracts all 19 Bronze table data types from LedgerCloseMeta

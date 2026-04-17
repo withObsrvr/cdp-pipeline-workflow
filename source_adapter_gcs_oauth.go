@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
-	"github.com/stellar/go-stellar-sdk/support/datastore"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/ingest/cdp"
+	"github.com/stellar/go/ingest/ledgerbackend"
+	"github.com/stellar/go/support/datastore"
+	"github.com/stellar/go/xdr"
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
 	"github.com/withObsrvr/cdp-pipeline-workflow/utils"
 )
@@ -179,13 +179,13 @@ func (adapter *GCSBufferedStorageSourceAdapter) Run(ctx context.Context) error {
 	}
 
 	// Create buffered storage configuration
-	bufferedConfig := ingest.DefaultBufferedStorageBackendConfig(schema.LedgersPerFile)
+	bufferedConfig := cdp.DefaultBufferedStorageBackendConfig(schema.LedgersPerFile)
 	bufferedConfig.BufferSize = adapter.config.BufferSize
 	bufferedConfig.NumWorkers = adapter.config.NumWorkers
 	bufferedConfig.RetryLimit = adapter.config.RetryLimit
 	bufferedConfig.RetryWait = time.Duration(adapter.config.RetryWait) * time.Second
 
-	publisherConfig := ingest.PublisherConfig{
+	publisherConfig := cdp.PublisherConfig{
 		DataStoreConfig:       dataStoreConfig,
 		BufferedStorageConfig: bufferedConfig,
 	}
@@ -207,7 +207,7 @@ func (adapter *GCSBufferedStorageSourceAdapter) Run(ctx context.Context) error {
 	lastLogTime := time.Now()
 	lastLedgerTime := time.Now()
 
-	err := ingest.ApplyLedgerMetadata(
+	err := cdp.ApplyLedgerMetadata(
 		ledgerRange,
 		publisherConfig,
 		ctx,

@@ -7,8 +7,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/xdr"
 )
 
 type FilterEventsProcessor struct {

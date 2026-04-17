@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/effects"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/processors/effects"
+	"github.com/stellar/go/xdr"
 )
 
 // StellarEffectsProcessor wraps the official Stellar effects processor

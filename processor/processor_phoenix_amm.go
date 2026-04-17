@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stellar/go-stellar-sdk/amount"
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/amount"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/xdr"
 )
 
 // PhoenixEvent represents a processed Phoenix AMM event

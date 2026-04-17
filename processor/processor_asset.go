@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/xdr"
 )
 
 // AssetEvent represents a processed asset event

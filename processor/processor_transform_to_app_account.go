@@ -7,9 +7,9 @@ import (
 	"io"
 	"log"
 
-	"github.com/stellar/go-stellar-sdk/amount"
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/amount"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/xdr"
 )
 
 // TransformToAppAccount represents a processor that transforms account data

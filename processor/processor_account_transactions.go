@@ -8,10 +8,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/stellar/go-stellar-sdk/amount"
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/strkey"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/amount"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/strkey"
+	"github.com/stellar/go/xdr"
 )
 
 // AccountTransaction represents a transaction involving a specific account

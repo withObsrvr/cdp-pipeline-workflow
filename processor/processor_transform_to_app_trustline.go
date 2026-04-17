@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"strconv"
 
 	"github.com/pkg/errors"
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/xdr"
-	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/logging"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/xdr"
 )
 
 type AppTrustline struct {
@@ -61,7 +61,7 @@ func (t *TransformToAppTrustline) Subscribe(receiver Processor) {
 }
 
 func (t *TransformToAppTrustline) Process(ctx context.Context, msg Message) error {
-	logging.Debug("Processing message in TransformToAppTrustline")
+	log.Printf("Processing message in TransformToAppTrustline")
 	ledgerCloseMeta := msg.Payload.(xdr.LedgerCloseMeta)
 	ledgerTxReader, err := ingest.NewLedgerTransactionReaderFromLedgerCloseMeta(t.networkPassphrase, ledgerCloseMeta)
 	if err != nil {
@@ -89,11 +89,11 @@ func (t *TransformToAppTrustline) Process(ctx context.Context, msg Message) erro
 			switch op.Body.Type {
 			case xdr.OperationTypeChangeTrust:
 				if err := t.processChangeTrust(ctx, op, tx, closeTime, ledgerCloseMeta.LedgerSequence(), txHash); err != nil {
-					logging.Debug("Error processing change trust operation %d: %v", opIdx, err)
+					log.Printf("Error processing change trust operation %d: %v", opIdx, err)
 				}
 			case xdr.OperationTypeSetTrustLineFlags:
 				if err := t.processSetTrustlineFlags(ctx, op, tx, closeTime, ledgerCloseMeta.LedgerSequence(), txHash); err != nil {
-					logging.Debug("Error processing set trustline flags operation %d: %v", opIdx, err)
+					log.Printf("Error processing set trustline flags operation %d: %v", opIdx, err)
 				}
 			}
 		}
@@ -110,7 +110,7 @@ func (t *TransformToAppTrustline) processChangeTrust(
 	ledgerSeq uint32,
 	txHash string,
 ) error {
-	logging.Debug("Processing ChangeTrust operation in ledger %d with hash %s", ledgerSeq, txHash)
+	log.Printf("Processing ChangeTrust operation in ledger %d with hash %s", ledgerSeq, txHash)
 
 	// Safely get the change trust operation
 	changeTrustOp, ok := op.Body.GetChangeTrustOp()
@@ -119,21 +119,21 @@ func (t *TransformToAppTrustline) processChangeTrust(
 	}
 
 	// Debug log the ChangeTrustOp structure
-	logging.Debug("ChangeTrustOp details: %+v", changeTrustOp)
-	logging.Debug("Asset Type: %v", changeTrustOp.Line.Type)
+	log.Printf("ChangeTrustOp details: %+v", changeTrustOp)
+	log.Printf("Asset Type: %v", changeTrustOp.Line.Type)
 
 	// Get source account with careful type checking
 	var sourceAccount string
 	if op.SourceAccount != nil {
 		sourceAccount = op.SourceAccount.ToAccountId().Address()
-		logging.Debug("Source Account from operation: %s", sourceAccount)
+		log.Printf("Source Account from operation: %s", sourceAccount)
 	} else {
 		source := tx.Envelope.SourceAccount()
 		if source == (xdr.MuxedAccount{}) {
 			return fmt.Errorf("no valid source account found")
 		}
 		sourceAccount = source.ToAccountId().Address()
-		logging.Debug("Source Account from envelope: %s", sourceAccount)
+		log.Printf("Source Account from envelope: %s", sourceAccount)
 	}
 
 	// Handle assets including pool shares with nil checks
@@ -164,10 +164,10 @@ func (t *TransformToAppTrustline) processChangeTrust(
 		// Check if LiquidityPool pointer is not nil
 		if changeTrustOp.Line.LiquidityPool != nil {
 			poolID = fmt.Sprintf("pool-%s", txHash[:8])
-			logging.Debug("Pool parameters found: %+v", *changeTrustOp.Line.LiquidityPool)
+			log.Printf("Pool parameters found: %+v", *changeTrustOp.Line.LiquidityPool)
 		} else {
 			poolID = "unknown-pool"
-			logging.Debug("No pool parameters found")
+			log.Printf("No pool parameters found")
 		}
 		assetIssuer = poolID
 
@@ -233,9 +233,9 @@ func (t *TransformToAppTrustline) processChangeTrust(
 
 	// Log the final trustline object before sending
 	trustlineJSON, _ := json.MarshalIndent(trustline, "", "  ")
-	logging.Debug("Final trustline object:\n%s", string(trustlineJSON))
+	log.Printf("Final trustline object:\n%s", string(trustlineJSON))
 
-	logging.Debug("Created trustline object with type=%s, asset_code=%s", trustline.Type, trustline.AssetCode)
+	log.Printf("Created trustline object with type=%s, asset_code=%s", trustline.Type, trustline.AssetCode)
 
 	return t.sendTrustlineToProcessors(ctx, trustline)
 }
@@ -294,7 +294,7 @@ func (t *TransformToAppTrustline) sendTrustlineToProcessors(ctx context.Context,
 		return fmt.Errorf("error marshaling trustline: %w", err)
 	}
 
-	logging.Debug("Forwarding trustline payload: %s", string(jsonBytes))
+	log.Printf("Forwarding trustline payload: %s", string(jsonBytes))
 
 	message := Message{Payload: jsonBytes}
 	for _, processor := range t.processors {

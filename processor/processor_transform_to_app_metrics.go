@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/stellar/go/ingest"
+	"github.com/stellar/go/xdr"
 )
 
 type AppNetworkMetrics struct {
