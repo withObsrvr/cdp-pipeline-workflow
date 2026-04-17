@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/stellar/go/ingest/cdp"
-	"github.com/stellar/go/ingest/ledgerbackend"
-	"github.com/stellar/go/support/datastore"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/ingest"
+	"github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
+	"github.com/stellar/go-stellar-sdk/support/datastore"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/checkpoint"
 	cdpProcessor "github.com/withObsrvr/cdp-pipeline-workflow/processor"
 	"github.com/withObsrvr/cdp-pipeline-workflow/utils"
@@ -292,13 +292,13 @@ func (adapter *BufferedStorageSourceAdapterEnhanced) processLedgerRange(ctx cont
 	}
 
 	// Create buffered storage configuration
-	bufferedConfig := cdp.DefaultBufferedStorageBackendConfig(schema.LedgersPerFile)
+	bufferedConfig := ingest.DefaultBufferedStorageBackendConfig(schema.LedgersPerFile)
 	bufferedConfig.BufferSize = adapter.config.BufferSize
 	bufferedConfig.NumWorkers = adapter.config.NumWorkers
 	bufferedConfig.RetryLimit = adapter.config.RetryLimit
 	bufferedConfig.RetryWait = time.Duration(adapter.config.RetryWait) * time.Second
 
-	publisherConfig := cdp.PublisherConfig{
+	publisherConfig := ingest.PublisherConfig{
 		DataStoreConfig:       dataStoreConfig,
 		BufferedStorageConfig: bufferedConfig,
 	}
@@ -331,7 +331,7 @@ func (adapter *BufferedStorageSourceAdapterEnhanced) processLedgerRange(ctx cont
 	}
 	log.Printf("DataStore created successfully: %T", store)
 	
-	err = cdp.ApplyLedgerMetadata(
+	err = ingest.ApplyLedgerMetadata(
 		ledgerRange,
 		publisherConfig,
 		ctx,
@@ -447,13 +447,13 @@ func (adapter *BufferedStorageSourceAdapterEnhanced) processLedgerRangeForContin
 	}
 
 	// Create buffered storage configuration
-	bufferedConfig := cdp.DefaultBufferedStorageBackendConfig(schema.LedgersPerFile)
+	bufferedConfig := ingest.DefaultBufferedStorageBackendConfig(schema.LedgersPerFile)
 	bufferedConfig.BufferSize = adapter.config.BufferSize
 	bufferedConfig.NumWorkers = adapter.config.NumWorkers
 	bufferedConfig.RetryLimit = adapter.config.RetryLimit
 	bufferedConfig.RetryWait = time.Duration(adapter.config.RetryWait) * time.Second
 
-	publisherConfig := cdp.PublisherConfig{
+	publisherConfig := ingest.PublisherConfig{
 		DataStoreConfig:       dataStoreConfig,
 		BufferedStorageConfig: bufferedConfig,
 	}
@@ -469,7 +469,7 @@ func (adapter *BufferedStorageSourceAdapterEnhanced) processLedgerRangeForContin
 	var processedLedgers uint32
 	lastLogTime := time.Now()
 
-	err := cdp.ApplyLedgerMetadata(
+	err := ingest.ApplyLedgerMetadata(
 		ledgerRange,
 		publisherConfig,
 		ctx,

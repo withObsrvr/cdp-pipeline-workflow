@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // LedgerSequence returns the sequence number of a ledger
@@ -74,7 +74,7 @@ func TotalByteSizeOfBucketList(lcm xdr.LedgerCloseMeta) (*uint64, error) {
 func TimePointToUTCTimeStamp(providedTime xdr.TimePoint) (time.Time, error) {
 	intTime := int64(providedTime)
 	if intTime < 0 {
-		return time.Now(), errors.New("the timepoint is negative")
+		return time.Time{}, errors.New("the timepoint is negative")
 	}
 	return time.Unix(intTime, 0).UTC(), nil
 }

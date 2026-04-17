@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stellar/go/ingest"
-	"github.com/stellar/go/strkey"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/ingest"
+	"github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 var (
@@ -403,7 +403,7 @@ func (t *TransformContractDataStruct) TransformContractData(change xdr.LedgerEnt
 		return ContractDataOutput{}, fmt.Errorf("could not extract contract data from ledger entry; actual type is %s", ledgerEntry.Data.Type), false
 	}
 
-	if contractData.Key.Type.String() == "ScValTypeScvLedgerKeyNonce" {
+	if contractData.Key.Type == xdr.ScValTypeScvLedgerKeyNonce {
 		// Is a nonce and should be discarded
 		return ContractDataOutput{}, nil, false
 	}
