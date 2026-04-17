@@ -109,7 +109,7 @@ func (p *FilteredContractInvocationProcessor) Process(ctx context.Context, msg M
 			if op.Body.Type == xdr.OperationTypeInvokeHostFunction {
 				invocation, err := p.processContractInvocation(tx, opIndex, op, ledgerCloseMeta)
 				if err != nil {
-					logging.Debug("Error processing contract invocation: %v", err)
+					logging.Error("Error processing contract invocation: %v", err)
 					continue
 				}
 

@@ -5,10 +5,11 @@ import (
 	"time"
 
 	"github.com/guregu/null"
+	"github.com/stellar/go-stellar-sdk/amount"
 	"github.com/stellar/go-stellar-sdk/ingest"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	asset "github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/asset"
 	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/utils"
-	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 // ClaimableBalanceOutput is a representation of a claimable balances that aligns with the BigQuery table claimable_balances
@@ -19,7 +20,7 @@ type ClaimableBalanceOutput struct {
 	AssetIssuer        string           `json:"asset_issuer"`
 	AssetType          string           `json:"asset_type"`
 	AssetID            int64            `json:"asset_id"`
-	AssetAmount        float64          `json:"asset_amount"`
+	AssetAmount        string           `json:"asset_amount"`
 	Sponsor            null.String      `json:"sponsor"`
 	Flags              uint32           `json:"flags"`
 	LastModifiedLedger uint32           `json:"last_modified_ledger"`
@@ -62,7 +63,7 @@ func TransformClaimableBalance(ledgerChange ingest.Change, header xdr.LedgerHead
 		return ClaimableBalanceOutput{}, err
 	}
 	outputClaimants := TransformClaimants(balanceEntry.Claimants)
-	outputAmount := balanceEntry.Amount
+	outputAmount := amount.String(balanceEntry.Amount)
 
 	outputLastModifiedLedger := uint32(ledgerEntry.LastModifiedLedgerSeq)
 
@@ -80,7 +81,7 @@ func TransformClaimableBalance(ledgerChange ingest.Change, header xdr.LedgerHead
 		AssetType:          outputAsset.AssetType,
 		AssetID:            outputAsset.AssetID,
 		Claimants:          outputClaimants,
-		AssetAmount:        float64(outputAmount) / 1.0e7,
+		AssetAmount:        outputAmount,
 		Sponsor:            utils.LedgerEntrySponsorToNullString(ledgerEntry),
 		LastModifiedLedger: outputLastModifiedLedger,
 		LedgerEntryChange:  uint32(changeType),

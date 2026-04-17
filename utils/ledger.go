@@ -74,7 +74,7 @@ func TotalByteSizeOfBucketList(lcm xdr.LedgerCloseMeta) (*uint64, error) {
 func TimePointToUTCTimeStamp(providedTime xdr.TimePoint) (time.Time, error) {
 	intTime := int64(providedTime)
 	if intTime < 0 {
-		return time.Now(), errors.New("the timepoint is negative")
+		return time.Time{}, errors.New("the timepoint is negative")
 	}
 	return time.Unix(intTime, 0).UTC(), nil
 }

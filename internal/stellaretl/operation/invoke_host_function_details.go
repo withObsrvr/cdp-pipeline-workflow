@@ -74,7 +74,7 @@ func (o *LedgerOperation) InvokeHostFunctionDetails() (InvokeHostFunctionDetail,
 
 		preImageDetails, err := switchContractIdPreimage(args.ContractIdPreimage)
 		if err != nil {
-			return InvokeHostFunctionDetail{}, nil
+			return InvokeHostFunctionDetail{}, err
 		}
 
 		o.getCreateContractDetails(&invokeHostFunctionDetail, preImageDetails)

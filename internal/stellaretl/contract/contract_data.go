@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/utils"
 	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/utils"
 )
 
 // ContractDataOutput is a representation of contract data that aligns with the Bigquery table soroban_contract_data
@@ -81,7 +81,7 @@ func (t *TransformContractDataStruct) TransformContractData(ledgerChange ingest.
 		return ContractDataOutput{}, fmt.Errorf("could not extract contract data from ledger entry; actual type is %s", ledgerEntry.Data.Type), false
 	}
 
-	if contractData.Key.Type.String() == "ScValTypeScvLedgerKeyNonce" {
+	if contractData.Key.Type == xdr.ScValTypeScvLedgerKeyNonce {
 		// Is a nonce and should be discarded
 		return ContractDataOutput{}, nil, false
 	}
@@ -105,8 +105,14 @@ func (t *TransformContractDataStruct) TransformContractData(ledgerChange ingest.
 
 	dataBalanceHolder, dataBalance, _ := t.ContractBalanceFromContractData(ledgerEntry, passphrase)
 	if dataBalance != nil {
-		holderHashByte, _ := xdr.Hash(dataBalanceHolder).MarshalBinary()
-		contractDataBalanceHolder, _ = strkey.Encode(strkey.VersionByteContract, holderHashByte)
+		holderHashByte, err := xdr.Hash(dataBalanceHolder).MarshalBinary()
+		if err != nil {
+			return ContractDataOutput{}, fmt.Errorf("marshal contract balance holder: %w", err), false
+		}
+		contractDataBalanceHolder, err = strkey.Encode(strkey.VersionByteContract, holderHashByte)
+		if err != nil {
+			return ContractDataOutput{}, fmt.Errorf("encode contract balance holder: %w", err), false
+		}
 		contractDataBalance = dataBalance.String()
 	}
 
@@ -116,8 +122,14 @@ func (t *TransformContractDataStruct) TransformContractData(ledgerChange ingest.
 	}
 
 	contractDataKeyType := contractData.Key.Type.String()
-	contractDataContractIdByte, _ := contractDataContractId.MarshalBinary()
-	outputContractDataContractId, _ := strkey.Encode(strkey.VersionByteContract, contractDataContractIdByte)
+	contractDataContractIdByte, err := contractDataContractId.MarshalBinary()
+	if err != nil {
+		return ContractDataOutput{}, fmt.Errorf("marshal contract data contract id: %w", err), false
+	}
+	outputContractDataContractId, err := strkey.Encode(strkey.VersionByteContract, contractDataContractIdByte)
+	if err != nil {
+		return ContractDataOutput{}, fmt.Errorf("encode contract data contract id: %w", err), false
+	}
 
 	contractDataDurability := contractData.Durability.String()
 

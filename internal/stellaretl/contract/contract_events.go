@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/stellar/go-stellar-sdk/ingest"
-	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/utils"
 	"github.com/stellar/go-stellar-sdk/strkey"
-	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/toid"
 	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/toid"
+	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/utils"
 )
 
 // ContractEventOutput is a representation of soroban contract events and diagnostic events
@@ -65,20 +65,32 @@ func TransformContractEvent(transaction ingest.LedgerTransaction, lhe xdr.Ledger
 		outputType := event.Type
 		outputTypeString := event.Type.String()
 
-		eventTopics := getEventTopics(event.Body)
+		eventTopics, err := getEventTopics(event.Body)
+		if err != nil {
+			return []ContractEventOutput{}, err
+		}
 		outputTopics, outputTopicsDecoded := SerializeScValArray(eventTopics)
 		outputTopicsJson["topics"] = outputTopics
 		outputTopicsDecodedJson["topics_decoded"] = outputTopicsDecoded
 
-		eventData := getEventData(event.Body)
+		eventData, err := getEventData(event.Body)
+		if err != nil {
+			return []ContractEventOutput{}, err
+		}
 		outputData, outputDataDecoded := SerializeScVal(eventData)
 
 		// Convert the xdrContactId to string
 		// TODO: https://stellarorg.atlassian.net/browse/HUBBLE-386 this should be a stellar/go/xdr function
 		if event.ContractId != nil {
 			contractId := *event.ContractId
-			contractIdByte, _ := contractId.MarshalBinary()
-			outputContractId, _ = strkey.Encode(strkey.VersionByteContract, contractIdByte)
+			contractIdByte, err := contractId.MarshalBinary()
+			if err != nil {
+				return []ContractEventOutput{}, fmt.Errorf("marshal contract id: %w", err)
+			}
+			outputContractId, err = strkey.Encode(strkey.VersionByteContract, contractIdByte)
+			if err != nil {
+				return []ContractEventOutput{}, fmt.Errorf("encode contract id: %w", err)
+			}
 		}
 
 		outputContractEventXDR, err := xdr.MarshalBase64(contractEvent)
@@ -113,24 +125,24 @@ func TransformContractEvent(transaction ingest.LedgerTransaction, lhe xdr.Ledger
 }
 
 // TODO this should be a stellar/go/xdr function
-func getEventTopics(eventBody xdr.ContractEventBody) []xdr.ScVal {
+func getEventTopics(eventBody xdr.ContractEventBody) ([]xdr.ScVal, error) {
 	switch eventBody.V {
 	case 0:
 		contractEventV0 := eventBody.MustV0()
-		return contractEventV0.Topics
+		return contractEventV0.Topics, nil
 	default:
-		panic("unsupported event body version: " + string(eventBody.V))
+		return nil, fmt.Errorf("unsupported event body version: %d", eventBody.V)
 	}
 }
 
 // TODO this should be a stellar/go/xdr function
-func getEventData(eventBody xdr.ContractEventBody) xdr.ScVal {
+func getEventData(eventBody xdr.ContractEventBody) (xdr.ScVal, error) {
 	switch eventBody.V {
 	case 0:
 		contractEventV0 := eventBody.MustV0()
-		return contractEventV0.Data
+		return contractEventV0.Data, nil
 	default:
-		panic("unsupported event body version: " + string(eventBody.V))
+		return xdr.ScVal{}, fmt.Errorf("unsupported event body version: %d", eventBody.V)
 	}
 }
 

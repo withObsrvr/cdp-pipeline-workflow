@@ -403,7 +403,7 @@ func (t *TransformContractDataStruct) TransformContractData(change xdr.LedgerEnt
 		return ContractDataOutput{}, fmt.Errorf("could not extract contract data from ledger entry; actual type is %s", ledgerEntry.Data.Type), false
 	}
 
-	if contractData.Key.Type.String() == "ScValTypeScvLedgerKeyNonce" {
+	if contractData.Key.Type == xdr.ScValTypeScvLedgerKeyNonce {
 		// Is a nonce and should be discarded
 		return ContractDataOutput{}, nil, false
 	}

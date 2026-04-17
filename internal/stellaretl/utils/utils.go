@@ -31,7 +31,7 @@ func ExtractEntryFromChange(change ingest.Change) (xdr.LedgerEntry, xdr.LedgerEn
 func TimePointToUTCTimeStamp(providedTime xdr.TimePoint) (time.Time, error) {
 	intTime := int64(providedTime)
 	if intTime < 0 {
-		return time.Now(), fmt.Errorf("the timepoint is negative")
+		return time.Time{}, fmt.Errorf("the timepoint is negative")
 	}
 	return time.Unix(intTime, 0).UTC(), nil
 }

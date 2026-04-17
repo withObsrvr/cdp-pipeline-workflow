@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/utils"
-	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/toid"
 	"github.com/stellar/go-stellar-sdk/xdr"
+	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/toid"
+	"github.com/withObsrvr/cdp-pipeline-workflow/internal/stellaretl/utils"
 )
 
 // AssetOutput is a representation of an asset that aligns with the BigQuery table history_assets
@@ -19,31 +19,56 @@ type AssetOutput struct {
 	LedgerSequence uint32    `json:"ledger_sequence"`
 }
 
-// TransformAsset converts an asset from a payment operation into a form suitable for BigQuery
+// TransformAsset converts an asset-bearing operation into a form suitable for BigQuery
 func TransformAsset(operation xdr.Operation, operationIndex int32, transactionIndex int32, ledgerSeq int32, lcm xdr.LedgerCloseMeta) (AssetOutput, error) {
 	operationID := toid.New(ledgerSeq, int32(transactionIndex), operationIndex).ToInt64()
 
-	opType := operation.Body.Type
-	if opType != xdr.OperationTypePayment && opType != xdr.OperationTypeManageSellOffer {
-		return AssetOutput{}, fmt.Errorf("operation of type %d cannot issue an asset (id %d)", opType, operationID)
-	}
-
-	asset := xdr.Asset{}
-	switch opType {
-	case xdr.OperationTypeManageSellOffer:
-		opSellOf, ok := operation.Body.GetManageSellOfferOp()
-		if !ok {
-			return AssetOutput{}, fmt.Errorf("operation of type ManageSellOfferOp cannot issue an asset (id %d)", operationID)
-		}
-		asset = opSellOf.Selling
-
+	var asset xdr.Asset
+	switch operation.Body.Type {
 	case xdr.OperationTypePayment:
 		opPayment, ok := operation.Body.GetPaymentOp()
 		if !ok {
 			return AssetOutput{}, fmt.Errorf("could not access Payment info for this operation (id %d)", operationID)
 		}
 		asset = opPayment.Asset
-
+	case xdr.OperationTypeManageSellOffer:
+		opSellOffer, ok := operation.Body.GetManageSellOfferOp()
+		if !ok {
+			return AssetOutput{}, fmt.Errorf("could not access ManageSellOffer info for this operation (id %d)", operationID)
+		}
+		asset = opSellOffer.Selling
+	case xdr.OperationTypeManageBuyOffer:
+		opBuyOffer, ok := operation.Body.GetManageBuyOfferOp()
+		if !ok {
+			return AssetOutput{}, fmt.Errorf("could not access ManageBuyOffer info for this operation (id %d)", operationID)
+		}
+		asset = opBuyOffer.Buying
+	case xdr.OperationTypeCreatePassiveSellOffer:
+		opPassiveSellOffer, ok := operation.Body.GetCreatePassiveSellOfferOp()
+		if !ok {
+			return AssetOutput{}, fmt.Errorf("could not access CreatePassiveSellOffer info for this operation (id %d)", operationID)
+		}
+		asset = opPassiveSellOffer.Selling
+	case xdr.OperationTypeChangeTrust:
+		opChangeTrust, ok := operation.Body.GetChangeTrustOp()
+		if !ok {
+			return AssetOutput{}, fmt.Errorf("could not access ChangeTrust info for this operation (id %d)", operationID)
+		}
+		asset = opChangeTrust.Line.ToAsset()
+	case xdr.OperationTypePathPaymentStrictReceive:
+		opPathPayment, ok := operation.Body.GetPathPaymentStrictReceiveOp()
+		if !ok {
+			return AssetOutput{}, fmt.Errorf("could not access PathPaymentStrictReceive info for this operation (id %d)", operationID)
+		}
+		asset = opPathPayment.DestAsset
+	case xdr.OperationTypePathPaymentStrictSend:
+		opPathPayment, ok := operation.Body.GetPathPaymentStrictSendOp()
+		if !ok {
+			return AssetOutput{}, fmt.Errorf("could not access PathPaymentStrictSend info for this operation (id %d)", operationID)
+		}
+		asset = opPathPayment.DestAsset
+	default:
+		return AssetOutput{}, fmt.Errorf("operation of type %d does not contain a supported asset (id %d)", operation.Body.Type, operationID)
 	}
 
 	outputAsset, err := TransformSingleAsset(asset)
