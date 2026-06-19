@@ -123,7 +123,7 @@ func TestValidateBucketNaming(t *testing.T) {
 				} else if tt.errorContains != "" {
 					// Check if error message contains expected substring
 					if len(err.Error()) < len(tt.errorContains) ||
-					   !contains(err.Error(), tt.errorContains) {
+						!containsSubstring(err.Error(), tt.errorContains) {
 						t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
 					}
 				}
@@ -136,8 +136,8 @@ func TestValidateBucketNaming(t *testing.T) {
 	}
 }
 
-// contains checks if a string contains a substring
-func contains(s, substr string) bool {
+// containsSubstring checks if a string contains a substring
+func containsSubstring(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
 			return true
@@ -203,7 +203,7 @@ func TestNewSaveToDuckLakeWithS3Config(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("expected error but got none")
-				} else if tt.errorMsg != "" && !contains(err.Error(), tt.errorMsg) {
+				} else if tt.errorMsg != "" && !containsSubstring(err.Error(), tt.errorMsg) {
 					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
 				}
 			} else {

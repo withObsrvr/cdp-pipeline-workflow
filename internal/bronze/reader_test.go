@@ -9,6 +9,9 @@ import (
 func TestParquetReader_ReadLocalFile(t *testing.T) {
 	// Skip if test file doesn't exist
 	testFile := "/tmp/bronze-test/part-3-10002.parquet"
+	if _, err := os.Stat(testFile); err != nil {
+		t.Skipf("Skipping local parquet test: fixture not found at %s", testFile)
+	}
 
 	reader, err := NewParquetReader()
 	if err != nil {
@@ -142,6 +145,9 @@ func TestParquetReader_ReadFromGCS(t *testing.T) {
 
 func TestParquetReader_ReadWithChannels(t *testing.T) {
 	testFile := "/tmp/bronze-test/part-3-10002.parquet"
+	if _, err := os.Stat(testFile); err != nil {
+		t.Skipf("Skipping local parquet channel test: fixture not found at %s", testFile)
+	}
 
 	reader, err := NewParquetReader()
 	if err != nil {

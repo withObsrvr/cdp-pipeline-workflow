@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/stellar/go-stellar-sdk/ingest"
+	"github.com/stellar/go-stellar-sdk/ingest/ledgerbackend"
 	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -448,15 +450,67 @@ func BenchmarkBufferedStorageSourceAdapter(b *testing.B) {
 // Helper functions
 
 func createTestAdapter(t testing.TB, config map[string]interface{}, mockStore *MockDataStore) *BufferedStorageSourceAdapter {
-	// Create a modified adapter that uses our mock
 	adapter, err := NewBufferedStorageSourceAdapter(config)
 	require.NoError(t, err)
 
-	// We need to inject the mock datastore
-	// This would require modifying the adapter to accept a datastore interface
-	// For now, we'll assume the adapter can be configured with a mock
+	bufferedAdapter := adapter.(*BufferedStorageSourceAdapter)
+	bufferedAdapter.applyLedgerMetadata = func(
+		ledgerRange ledgerbackend.Range,
+		publisherConfig ingest.PublisherConfig,
+		ctx context.Context,
+		callback func(xdr.LedgerCloseMeta) error,
+	) error {
+		for ledgerSeq := ledgerRange.From(); ledgerSeq <= ledgerRange.To() || !ledgerRange.Bounded(); ledgerSeq++ {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 
-	return adapter.(*BufferedStorageSourceAdapter)
+			var data []byte
+			var err error
+			for attempt := uint32(0); attempt <= bufferedAdapter.config.RetryLimit; attempt++ {
+				data, err = mockStore.GetFile(fmt.Sprintf("ledger-%d.xdr", ledgerSeq))
+				if err != nil {
+					data, err = mockStore.GetFile(fmt.Sprintf("ledgers/%06d/%06d/ledger-%d.xdr", ledgerSeq/FilesPerPartition, ledgerSeq/LedgersPerFileGroup, ledgerSeq))
+				}
+				if err == nil {
+					break
+				}
+				if err.Error() == "file not found" {
+					break
+				}
+			}
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
+			if err != nil {
+				if err.Error() == "file not found" {
+					continue
+				}
+				return err
+			}
+
+			var ledger xdr.LedgerCloseMeta
+			if err := ledger.UnmarshalBinary(data); err != nil {
+				return err
+			}
+			if err := callback(ledger); err != nil {
+				return err
+			}
+
+			if ledgerRange.Bounded() && ledgerSeq == ledgerRange.To() {
+				break
+			}
+		}
+		return nil
+	}
+
+	return bufferedAdapter
 }
 
 func createTestLedger(sequence uint32) xdr.LedgerCloseMeta {

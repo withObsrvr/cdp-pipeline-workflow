@@ -88,7 +88,7 @@ func TestContractInvocationExtractor_ExtractCarbonSink(t *testing.T) {
 		t.Fatalf("Failed to extract contract data: %v", err)
 	}
 
-	// Validate results  
+	// Validate results
 	expectedTOID := (uint64(84191) << 32) | (uint64(0) << 20) | uint64(0)
 	if extracted.Toid != expectedTOID {
 		t.Errorf("Expected TOID %d, got %d", expectedTOID, extracted.Toid)
@@ -344,14 +344,14 @@ func TestContractInvocationExtractor_TOIDGeneration(t *testing.T) {
 			ledger:   84191,
 			txIdx:    0,
 			opIdx:    0,
-			expected: 361850667008, // (84191 << 32)
+			expected: 361597591617536, // (84191 << 32)
 		},
 		{
 			name:     "with_tx_index",
 			ledger:   100,
 			txIdx:    5,
 			opIdx:    0,
-			expected: 429496734720, // (100 << 32) | (5 << 20)
+			expected: 429496750080, // (100 << 32) | (5 << 12)
 		},
 		{
 			name:     "with_op_index",
@@ -365,7 +365,7 @@ func TestContractInvocationExtractor_TOIDGeneration(t *testing.T) {
 			ledger:   100,
 			txIdx:    5,
 			opIdx:    3,
-			expected: 429496734723, // (100 << 32) | (5 << 20) | 3
+			expected: 429496750083, // (100 << 32) | (5 << 12) | 3
 		},
 	}
 

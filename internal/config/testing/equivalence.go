@@ -3,7 +3,8 @@ package testing
 import (
 	"fmt"
 	"reflect"
-	
+	"strconv"
+
 	"github.com/withObsrvr/cdp-pipeline-workflow/internal/config/v2"
 )
 
@@ -18,7 +19,7 @@ func NewConfigEquivalenceChecker() (*ConfigEquivalenceChecker, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &ConfigEquivalenceChecker{
 		loader: loader,
 	}, nil
@@ -34,9 +35,9 @@ type EquivalenceResult struct {
 
 // Difference represents a difference between configurations
 type Difference struct {
-	Path     string
-	Legacy   interface{}
-	V2       interface{}
+	Path       string
+	Legacy     interface{}
+	V2         interface{}
 	IsCritical bool
 }
 
@@ -47,22 +48,22 @@ func (c *ConfigEquivalenceChecker) CheckEquivalence(legacyConfig, v2Config map[s
 	if err != nil {
 		return nil, fmt.Errorf("loading legacy config: %w", err)
 	}
-	
+
 	v2Result, err := c.loader.LoadFromData(v2Config)
 	if err != nil {
 		return nil, fmt.Errorf("loading v2 config: %w", err)
 	}
-	
+
 	result := &EquivalenceResult{
 		Equivalent:   true,
 		LegacyResult: legacyResult,
 		V2Result:     v2Result,
 	}
-	
+
 	// Compare the transformed configurations
 	differences := c.compareConfigs(legacyResult.Config, v2Result.Config, "")
 	result.Differences = differences
-	
+
 	// Check if any critical differences
 	for _, diff := range differences {
 		if diff.IsCritical {
@@ -70,14 +71,14 @@ func (c *ConfigEquivalenceChecker) CheckEquivalence(legacyConfig, v2Config map[s
 			break
 		}
 	}
-	
+
 	return result, nil
 }
 
 // compareConfigs recursively compares two configurations
 func (c *ConfigEquivalenceChecker) compareConfigs(legacy, v2 *v2.TransformedConfig, path string) []Difference {
 	var differences []Difference
-	
+
 	// Compare number of pipelines
 	if len(legacy.Pipelines) != len(v2.Pipelines) {
 		// In v2, we often have a single "default" pipeline
@@ -88,7 +89,7 @@ func (c *ConfigEquivalenceChecker) compareConfigs(legacy, v2 *v2.TransformedConf
 					// Names might differ, but content should match
 					pipelineDiffs := c.comparePipelines(legacyPipeline, v2Pipeline, fmt.Sprintf("%s.pipelines", path))
 					differences = append(differences, pipelineDiffs...)
-					
+
 					// Add non-critical difference for pipeline name
 					if legacyName != v2Name {
 						differences = append(differences, Difference{
@@ -139,18 +140,18 @@ func (c *ConfigEquivalenceChecker) compareConfigs(legacy, v2 *v2.TransformedConf
 			}
 		}
 	}
-	
+
 	return differences
 }
 
 // comparePipelines compares two pipeline configurations
 func (c *ConfigEquivalenceChecker) comparePipelines(legacy, v2 v2.TransformedPipeline, path string) []Difference {
 	var differences []Difference
-	
+
 	// Compare source
 	sourceDiffs := c.compareComponents(legacy.Source, v2.Source, fmt.Sprintf("%s.source", path))
 	differences = append(differences, sourceDiffs...)
-	
+
 	// Compare processors
 	if len(legacy.Processors) != len(v2.Processors) {
 		differences = append(differences, Difference{
@@ -165,7 +166,7 @@ func (c *ConfigEquivalenceChecker) comparePipelines(legacy, v2 v2.TransformedPip
 			differences = append(differences, procDiffs...)
 		}
 	}
-	
+
 	// Compare consumers
 	if len(legacy.Consumers) != len(v2.Consumers) {
 		differences = append(differences, Difference{
@@ -180,14 +181,14 @@ func (c *ConfigEquivalenceChecker) comparePipelines(legacy, v2 v2.TransformedPip
 			differences = append(differences, consDiffs...)
 		}
 	}
-	
+
 	return differences
 }
 
 // compareComponents compares two component configurations
 func (c *ConfigEquivalenceChecker) compareComponents(legacy, v2 v2.TransformedComponent, path string) []Difference {
 	var differences []Difference
-	
+
 	// Compare types
 	if legacy.Type != v2.Type {
 		differences = append(differences, Difference{
@@ -197,18 +198,18 @@ func (c *ConfigEquivalenceChecker) compareComponents(legacy, v2 v2.TransformedCo
 			IsCritical: true,
 		})
 	}
-	
+
 	// Compare configs
 	configDiffs := c.compareConfigMaps(legacy.Config, v2.Config, fmt.Sprintf("%s.config", path))
 	differences = append(differences, configDiffs...)
-	
+
 	return differences
 }
 
 // compareConfigMaps compares two configuration maps
 func (c *ConfigEquivalenceChecker) compareConfigMaps(legacy, v2 map[string]interface{}, path string) []Difference {
 	var differences []Difference
-	
+
 	// Check all keys in legacy
 	for key, legacyValue := range legacy {
 		if v2Value, ok := v2[key]; ok {
@@ -220,6 +221,24 @@ func (c *ConfigEquivalenceChecker) compareConfigMaps(legacy, v2 map[string]inter
 					Legacy:     legacyValue,
 					V2:         v2Value,
 					IsCritical: isCritical,
+				})
+			}
+		} else if aliasKey, ok := c.configAlias(key); ok {
+			if aliasValue, ok := v2[aliasKey]; ok {
+				if !c.valuesEqual(legacyValue, aliasValue) {
+					differences = append(differences, Difference{
+						Path:       fmt.Sprintf("%s.%s", path, key),
+						Legacy:     legacyValue,
+						V2:         aliasValue,
+						IsCritical: !c.isDefaultValueDifference(key, legacyValue, aliasValue),
+					})
+				}
+			} else if !c.isDefaultValue(key, legacyValue) {
+				differences = append(differences, Difference{
+					Path:       fmt.Sprintf("%s.%s", path, key),
+					Legacy:     legacyValue,
+					V2:         "missing",
+					IsCritical: true,
 				})
 			}
 		} else {
@@ -234,7 +253,7 @@ func (c *ConfigEquivalenceChecker) compareConfigMaps(legacy, v2 map[string]inter
 			}
 		}
 	}
-	
+
 	// Check for keys in v2 that aren't in legacy
 	for key, v2Value := range v2 {
 		if _, ok := legacy[key]; !ok {
@@ -249,7 +268,7 @@ func (c *ConfigEquivalenceChecker) compareConfigMaps(legacy, v2 map[string]inter
 			}
 		}
 	}
-	
+
 	return differences
 }
 
@@ -259,7 +278,7 @@ func (c *ConfigEquivalenceChecker) valuesEqual(a, b interface{}) bool {
 	if c.numericEqual(a, b) {
 		return true
 	}
-	
+
 	return reflect.DeepEqual(a, b)
 }
 
@@ -268,11 +287,11 @@ func (c *ConfigEquivalenceChecker) numericEqual(a, b interface{}) bool {
 	// Convert to float64 for comparison
 	aFloat, aOk := toFloat64(a)
 	bFloat, bOk := toFloat64(b)
-	
+
 	if aOk && bOk {
 		return aFloat == bFloat
 	}
-	
+
 	return false
 }
 
@@ -289,6 +308,9 @@ func toFloat64(v interface{}) (float64, bool) {
 		return float64(val), true
 	case int32:
 		return float64(val), true
+	case string:
+		parsed, err := strconv.ParseFloat(val, 64)
+		return parsed, err == nil
 	default:
 		return 0, false
 	}
@@ -298,17 +320,28 @@ func toFloat64(v interface{}) (float64, bool) {
 func (c *ConfigEquivalenceChecker) isDefaultValueDifference(key string, legacy, v2 interface{}) bool {
 	// Common default value differences that are not critical
 	defaultDifferences := map[string]bool{
-		"num_workers":     true,
-		"buffer_size":     true,
-		"retry_limit":     true,
-		"retry_wait":      true,
-		"batch_size":      true,
-		"compression":     true,
-		"create_table":    true,
-		"include_failed":  true,
+		"num_workers":          true,
+		"buffer_size":          true,
+		"retry_limit":          true,
+		"retry_wait":           true,
+		"batch_size":           true,
+		"compression":          true,
+		"create_table":         true,
+		"include_failed":       true,
+		"history_archive_urls": true,
 	}
-	
+
 	return defaultDifferences[key]
+}
+
+// configAlias maps legacy config keys to their v2-expanded equivalents.
+func (c *ConfigEquivalenceChecker) configAlias(key string) (string, bool) {
+	aliases := map[string]string{
+		"path":       "path_prefix",
+		"table_name": "table",
+	}
+	alias, ok := aliases[key]
+	return alias, ok
 }
 
 // isDefaultValue checks if a value is a known default
@@ -324,11 +357,11 @@ func (c *ConfigEquivalenceChecker) isDefaultValue(key string, value interface{})
 		"include_failed":   false,
 		"schema_evolution": true,
 	}
-	
+
 	if defaultVal, ok := knownDefaults[key]; ok {
 		return c.valuesEqual(value, defaultVal)
 	}
-	
+
 	return false
 }
 
@@ -337,12 +370,12 @@ func (r *EquivalenceResult) GenerateReport() string {
 	if r.Equivalent {
 		return "✅ Configurations are functionally equivalent\n"
 	}
-	
+
 	report := "❌ Configurations have critical differences:\n\n"
-	
+
 	criticalCount := 0
 	nonCriticalCount := 0
-	
+
 	for _, diff := range r.Differences {
 		if diff.IsCritical {
 			criticalCount++
@@ -351,10 +384,10 @@ func (r *EquivalenceResult) GenerateReport() string {
 			nonCriticalCount++
 		}
 	}
-	
+
 	if nonCriticalCount > 0 {
 		report += fmt.Sprintf("\nℹ️  Also found %d non-critical differences (defaults, names, etc.)\n", nonCriticalCount)
 	}
-	
+
 	return report
 }
