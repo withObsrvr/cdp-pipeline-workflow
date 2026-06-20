@@ -169,7 +169,8 @@ func TestSchemaDefinition_CreateSQL(t *testing.T) {
 			// DuckLake does not support PRIMARY KEY or PARTITION BY clauses in CREATE TABLE.
 			// Deduplication is handled by the schema's MERGE/UPSERT logic, but the
 			// columns that identify a unique record must still exist in the table.
-			assert.Contains(t, schema.CreateSQL, "Deduplication is handled via MERGE/UPSERT logic")
+			assert.NotContains(t, strings.ToUpper(schema.CreateSQL), "PRIMARY KEY")
+			assert.NotContains(t, strings.ToUpper(schema.CreateSQL), "PARTITION BY RANGE")
 			for _, col := range tc.expectedPKCols {
 				assert.Contains(t, schema.CreateSQL, col, "CreateSQL should include deduplication column %s", col)
 			}

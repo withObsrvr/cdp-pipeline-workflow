@@ -89,7 +89,7 @@ func TestContractInvocationExtractor_ExtractCarbonSink(t *testing.T) {
 	}
 
 	// Validate results
-	expectedTOID := (uint64(84191) << 32) | (uint64(0) << 20) | uint64(0)
+	expectedTOID := (uint64(84191) << 32) | (uint64(0) << 12) | uint64(0)
 	if extracted.Toid != expectedTOID {
 		t.Errorf("Expected TOID %d, got %d", expectedTOID, extracted.Toid)
 	}

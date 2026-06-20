@@ -9,9 +9,7 @@ import (
 func TestParquetReader_ReadLocalFile(t *testing.T) {
 	// Skip if test file doesn't exist
 	testFile := "/tmp/bronze-test/part-3-10002.parquet"
-	if _, err := os.Stat(testFile); err != nil {
-		t.Skipf("Skipping local parquet test: fixture not found at %s", testFile)
-	}
+	requireLocalFixture(t, testFile, "local parquet test")
 
 	reader, err := NewParquetReader()
 	if err != nil {
@@ -88,6 +86,16 @@ func TestParquetReader_ReadLocalFile(t *testing.T) {
 	t.Logf("Successfully read and unmarshaled %d ledgers", len(ledgers))
 }
 
+func requireLocalFixture(t *testing.T, path, testName string) {
+	t.Helper()
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			t.Skipf("Skipping %s: fixture not found at %s", testName, path)
+		}
+		t.Fatalf("Failed to stat local fixture %s: %v", path, err)
+	}
+}
+
 func TestParquetReader_ReadFromGCS(t *testing.T) {
 	// Skip this test by default - requires GCS credentials (HMAC keys)
 	// To run: go test -v -run TestParquetReader_ReadFromGCS ./internal/bronze/... -tags=gcs
@@ -145,9 +153,7 @@ func TestParquetReader_ReadFromGCS(t *testing.T) {
 
 func TestParquetReader_ReadWithChannels(t *testing.T) {
 	testFile := "/tmp/bronze-test/part-3-10002.parquet"
-	if _, err := os.Stat(testFile); err != nil {
-		t.Skipf("Skipping local parquet channel test: fixture not found at %s", testFile)
-	}
+	requireLocalFixture(t, testFile, "local parquet channel test")
 
 	reader, err := NewParquetReader()
 	if err != nil {

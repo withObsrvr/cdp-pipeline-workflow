@@ -209,10 +209,12 @@ func (c *ConfigEquivalenceChecker) compareComponents(legacy, v2 v2.TransformedCo
 // compareConfigMaps compares two configuration maps
 func (c *ConfigEquivalenceChecker) compareConfigMaps(legacy, v2 map[string]interface{}, path string) []Difference {
 	var differences []Difference
+	matchedV2Keys := make(map[string]bool)
 
 	// Check all keys in legacy
 	for key, legacyValue := range legacy {
 		if v2Value, ok := v2[key]; ok {
+			matchedV2Keys[key] = true
 			if !c.valuesEqual(legacyValue, v2Value) {
 				// Check if this is a default value difference
 				isCritical := !c.isDefaultValueDifference(key, legacyValue, v2Value)
@@ -225,6 +227,7 @@ func (c *ConfigEquivalenceChecker) compareConfigMaps(legacy, v2 map[string]inter
 			}
 		} else if aliasKey, ok := c.configAlias(key); ok {
 			if aliasValue, ok := v2[aliasKey]; ok {
+				matchedV2Keys[aliasKey] = true
 				if !c.valuesEqual(legacyValue, aliasValue) {
 					differences = append(differences, Difference{
 						Path:       fmt.Sprintf("%s.%s", path, key),
@@ -254,8 +257,11 @@ func (c *ConfigEquivalenceChecker) compareConfigMaps(legacy, v2 map[string]inter
 		}
 	}
 
-	// Check for keys in v2 that aren't in legacy
+	// Check for keys in v2 that aren't in legacy or already matched through an alias.
 	for key, v2Value := range v2 {
+		if matchedV2Keys[key] {
+			continue
+		}
 		if _, ok := legacy[key]; !ok {
 			// This might be a new default in v2
 			if !c.isDefaultValue(key, v2Value) {
@@ -334,11 +340,23 @@ func (c *ConfigEquivalenceChecker) isDefaultValueDifference(key string, legacy, 
 	return defaultDifferences[key]
 }
 
-// configAlias maps legacy config keys to their v2-expanded equivalents.
+// configAlias maps equivalent config keys between loaded legacy and v2 configs.
 func (c *ConfigEquivalenceChecker) configAlias(key string) (string, bool) {
 	aliases := map[string]string{
-		"path":       "path_prefix",
-		"table_name": "table",
+		"bucket_name":       "bucket",
+		"bucket":            "bucket_name",
+		"path_prefix":       "path",
+		"path":              "path_prefix",
+		"table_name":        "table",
+		"table":             "table_name",
+		"num_workers":       "workers",
+		"workers":           "num_workers",
+		"buffer_size":       "buffer",
+		"buffer":            "buffer_size",
+		"batch_size":        "batch",
+		"batch":             "batch_size",
+		"connection_string": "connection",
+		"connection":        "connection_string",
 	}
 	alias, ok := aliases[key]
 	return alias, ok

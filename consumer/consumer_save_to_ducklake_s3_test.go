@@ -1,6 +1,7 @@
 package consumer
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -120,12 +121,8 @@ func TestValidateBucketNaming(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("expected error but got none")
-				} else if tt.errorContains != "" {
-					// Check if error message contains expected substring
-					if len(err.Error()) < len(tt.errorContains) ||
-						!containsSubstring(err.Error(), tt.errorContains) {
-						t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
-					}
+				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errorContains, err.Error())
 				}
 			} else {
 				if err != nil {
@@ -134,16 +131,6 @@ func TestValidateBucketNaming(t *testing.T) {
 			}
 		})
 	}
-}
-
-// containsSubstring checks if a string contains a substring
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // TestNewSaveToDuckLakeWithS3ConfigValidation tests bucket naming validation only
@@ -203,7 +190,7 @@ func TestNewSaveToDuckLakeWithS3Config(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("expected error but got none")
-				} else if tt.errorMsg != "" && !containsSubstring(err.Error(), tt.errorMsg) {
+				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
 					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
 				}
 			} else {

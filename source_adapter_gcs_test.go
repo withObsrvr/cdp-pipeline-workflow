@@ -24,6 +24,8 @@ const (
 	LedgersPerFileGroup = 1
 )
 
+var errMockFileNotFound = errors.New("file not found")
+
 // MockDataStore simulates the datastore for testing
 type MockDataStore struct {
 	mu         sync.Mutex
@@ -73,7 +75,7 @@ func (m *MockDataStore) GetFile(path string) ([]byte, error) {
 
 	data, ok := m.files[path]
 	if !ok {
-		return nil, errors.New("file not found")
+		return nil, errMockFileNotFound
 	}
 
 	return data, nil
@@ -477,7 +479,7 @@ func createTestAdapter(t testing.TB, config map[string]interface{}, mockStore *M
 				if err == nil {
 					break
 				}
-				if err.Error() == "file not found" {
+				if errors.Is(err, errMockFileNotFound) {
 					break
 				}
 			}
@@ -489,8 +491,11 @@ func createTestAdapter(t testing.TB, config map[string]interface{}, mockStore *M
 			}
 
 			if err != nil {
-				if err.Error() == "file not found" {
-					continue
+				if errors.Is(err, errMockFileNotFound) {
+					if ledgerRange.Bounded() {
+						continue
+					}
+					return nil
 				}
 				return err
 			}
