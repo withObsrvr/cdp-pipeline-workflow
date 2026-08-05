@@ -147,7 +147,7 @@ Source -> Processor(s) -> Consumer(s)
 - Development workflow uses `dockerfile.dev` with debugging tools
 - Production builds use multi-stage `dockerfile` with minimal runtime
 - `run-local.sh` script simplifies local Docker development
-- Go version: 1.23 (production), 1.22.5 (development)
+- Go version: 1.25 (must match the `go` directive in go.mod)
 - Required system libraries: libzmq3-dev, libczmq-dev, libsodium-dev
 
 ### Common Pipeline Types
