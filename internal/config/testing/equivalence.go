@@ -357,6 +357,17 @@ func (c *ConfigEquivalenceChecker) configAlias(key string) (string, bool) {
 		"batch":             "batch_size",
 		"connection_string": "connection",
 		"connection":        "connection_string",
+		// Keep the pairs below in sync with getFieldAlias in
+		// internal/cli/cmd/config.go; a pair missing here surfaces as a spurious
+		// critical difference during equivalence checks.
+		"min_amount":         "min",
+		"min":                "min_amount",
+		"max_amount":         "max",
+		"max":                "max_amount",
+		"time_to_live":       "ttl",
+		"ttl":                "time_to_live",
+		"network_passphrase": "passphrase",
+		"passphrase":         "network_passphrase",
 	}
 	alias, ok := aliases[key]
 	return alias, ok

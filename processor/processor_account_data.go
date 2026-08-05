@@ -307,7 +307,7 @@ func processAccountChange(change ingest.Change, meta xdr.LedgerCloseMeta) (*Acco
 		NumSponsoring:      uint32(accountEntry.NumSponsoring()),
 		LastModifiedLedger: uint32(entry.LastModifiedLedgerSeq),
 		LedgerEntryChange:  ledgerEntryChangeType,
-		Deleted:            false, // removals return a minimal record above
+		Deleted:            false,
 		ClosedAt:           closedAt,
 		LedgerSequence:     uint32(meta.LedgerSequence()),
 		Timestamp:          time.Now(),

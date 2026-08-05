@@ -154,9 +154,12 @@ func (p *LedgerChangeProcessor) Process(ctx context.Context, msg Message) error 
 					logging.Debug("Warning: removed entry has nil Pre state")
 					continue
 				}
-				key, err := change.Pre.LedgerKey()
-				if err != nil {
-					logging.Debug("Error getting ledger key: %v", err)
+				// Note: keyErr is deliberately a distinct name. Using := for err
+				// here would shadow the err declared above, so the processChange
+				// error below would never reach the check after this switch.
+				key, keyErr := change.Pre.LedgerKey()
+				if keyErr != nil {
+					logging.Debug("Error getting ledger key: %v", keyErr)
 					continue
 				}
 				ledgerChange, err = p.processChange(xdr.LedgerEntryChange{
