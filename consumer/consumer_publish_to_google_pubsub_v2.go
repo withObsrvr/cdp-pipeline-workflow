@@ -83,6 +83,14 @@ type PublishToGooglePubSubV2Stats struct {
 	FailedPublishes     atomic.Uint64
 }
 
+// PublishToGooglePubSubV2StatsSnapshot is a point-in-time, copyable view of
+// PublishToGooglePubSubV2Stats.
+type PublishToGooglePubSubV2StatsSnapshot struct {
+	TotalProcessed      uint64
+	SuccessfulPublishes uint64
+	FailedPublishes     uint64
+}
+
 // NewPublishToGooglePubSubV2 creates a new Google Pub/Sub publisher consumer with V2 message format
 func NewPublishToGooglePubSubV2(config map[string]interface{}) (*PublishToGooglePubSubV2, error) {
 	consumer := &PublishToGooglePubSubV2{
@@ -247,10 +255,17 @@ func (c *PublishToGooglePubSubV2) Subscribe(processor processor.Processor) {
 	log.Printf("PublishToGooglePubSubV2: Subscribe called but consumers don't support subscriptions")
 }
 
-// GetStats returns current publishing statistics
-// Note: With atomic operations, we can return stats without locking
-func (c *PublishToGooglePubSubV2) GetStats() PublishToGooglePubSubV2Stats {
-	return c.stats
+// GetStats returns a snapshot of current publishing statistics.
+//
+// It returns a plain-value snapshot rather than PublishToGooglePubSubV2Stats
+// itself: copying a struct of atomics copies the atomics, and a copied atomic
+// is not safe to use.
+func (c *PublishToGooglePubSubV2) GetStats() PublishToGooglePubSubV2StatsSnapshot {
+	return PublishToGooglePubSubV2StatsSnapshot{
+		TotalProcessed:      c.stats.TotalProcessed.Load(),
+		SuccessfulPublishes: c.stats.SuccessfulPublishes.Load(),
+		FailedPublishes:     c.stats.FailedPublishes.Load(),
+	}
 }
 
 // Close closes the Pub/Sub client and topic, printing statistics

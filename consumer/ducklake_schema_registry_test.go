@@ -169,8 +169,12 @@ func TestSchemaDefinition_CreateSQL(t *testing.T) {
 			// DuckLake does not support PRIMARY KEY or PARTITION BY clauses in CREATE TABLE.
 			// Deduplication is handled by the schema's MERGE/UPSERT logic, but the
 			// columns that identify a unique record must still exist in the table.
-			assert.NotContains(t, strings.ToUpper(schema.CreateSQL), "PRIMARY KEY")
-			assert.NotContains(t, strings.ToUpper(schema.CreateSQL), "PARTITION BY RANGE")
+			//
+			// Comments are stripped first: the schemas document the absence of these
+			// clauses in prose, and that prose is not a clause.
+			sql := strings.ToUpper(stripSQLLineComments(schema.CreateSQL))
+			assert.NotContains(t, sql, "PRIMARY KEY")
+			assert.NotContains(t, sql, "PARTITION BY RANGE")
 			for _, col := range tc.expectedPKCols {
 				assert.Contains(t, schema.CreateSQL, col, "CreateSQL should include deduplication column %s", col)
 			}
@@ -478,4 +482,18 @@ func TestColumnDefinition_NoDuplicates(t *testing.T) {
 			}
 		})
 	}
+}
+
+// stripSQLLineComments removes `--` line comments from a SQL statement so that
+// assertions about clauses are not tripped by prose describing them.
+func stripSQLLineComments(sql string) string {
+	lines := strings.Split(sql, "\n")
+	stripped := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if idx := strings.Index(line, "--"); idx >= 0 {
+			line = line[:idx]
+		}
+		stripped = append(stripped, line)
+	}
+	return strings.Join(stripped, "\n")
 }
