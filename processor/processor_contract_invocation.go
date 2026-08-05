@@ -343,51 +343,64 @@ func (p *ContractInvocationProcessor) GetStats() struct {
 func (p *ContractInvocationProcessor) extractDiagnosticEvents(tx ingest.LedgerTransaction, opIndex int) []DiagnosticEvent {
 	var events []DiagnosticEvent
 
-	// Check if we have diagnostic events in the transaction meta
-	if tx.UnsafeMeta.V == 3 {
-		sorobanMeta := tx.UnsafeMeta.V3.SorobanMeta
-		if sorobanMeta != nil && sorobanMeta.Events != nil {
-			for _, event := range sorobanMeta.Events {
-				// Convert contract ID
-				contractIDBytes := event.ContractId
-				contractID, err := strkey.Encode(strkey.VersionByteContract, contractIDBytes[:])
-				if err != nil {
-					logging.Debug("Error encoding contract ID for diagnostic event: %v", err)
-					continue
-				}
+	// Use the SDK helper so events are found regardless of TransactionMeta
+	// version: V3 carries contract events under SorobanMeta, while V4 (CAP-67
+	// unified events) moves them onto the per-operation meta.
+	txEvents, err := tx.GetTransactionEvents()
+	if err != nil {
+		logging.Debug("Error getting transaction events: %v", err)
+		return events
+	}
 
-				// Store raw topics
-				topics := event.Body.V0.Topics
-
-				// Decode topics
-				var topicsDecoded []interface{}
-				for _, topic := range topics {
-					decoded, err := ConvertScValToJSON(topic)
-					if err != nil {
-						logging.Debug("Error decoding topic: %v", err)
-						decoded = nil
-					}
-					topicsDecoded = append(topicsDecoded, decoded)
-				}
-
-				// Store raw data
-				data := event.Body.V0.Data
-
-				// Decode data
-				dataDecoded, err := ConvertScValToJSON(data)
-				if err != nil {
-					logging.Debug("Error decoding event data: %v", err)
-					dataDecoded = nil
-				}
-
-				events = append(events, DiagnosticEvent{
-					ContractID:    contractID,
-					Topics:        topics,
-					TopicsDecoded: topicsDecoded,
-					Data:          data,
-					DataDecoded:   dataDecoded,
-				})
+	if opIndex >= 0 && opIndex < len(txEvents.OperationEvents) {
+		for _, event := range txEvents.OperationEvents[opIndex] {
+			// ContractId is optional in the XDR, and the event body is a union.
+			if event.ContractId == nil {
+				continue
 			}
+			body, ok := event.Body.GetV0()
+			if !ok {
+				continue
+			}
+
+			// Convert contract ID
+			contractID, err := strkey.Encode(strkey.VersionByteContract, event.ContractId[:])
+			if err != nil {
+				logging.Debug("Error encoding contract ID for diagnostic event: %v", err)
+				continue
+			}
+
+			// Store raw topics
+			topics := body.Topics
+
+			// Decode topics
+			var topicsDecoded []interface{}
+			for _, topic := range topics {
+				decoded, err := ConvertScValToJSON(topic)
+				if err != nil {
+					logging.Debug("Error decoding topic: %v", err)
+					decoded = nil
+				}
+				topicsDecoded = append(topicsDecoded, decoded)
+			}
+
+			// Store raw data
+			data := body.Data
+
+			// Decode data
+			dataDecoded, err := ConvertScValToJSON(data)
+			if err != nil {
+				logging.Debug("Error decoding event data: %v", err)
+				dataDecoded = nil
+			}
+
+			events = append(events, DiagnosticEvent{
+				ContractID:    contractID,
+				Topics:        topics,
+				TopicsDecoded: topicsDecoded,
+				Data:          data,
+				DataDecoded:   dataDecoded,
+			})
 		}
 	}
 

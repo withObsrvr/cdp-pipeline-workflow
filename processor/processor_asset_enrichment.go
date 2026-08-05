@@ -174,18 +174,22 @@ func (p *AssetEnrichmentProcessor) Process(ctx context.Context, msg Message) err
 			}
 
 			// Get account entry from transaction metadata
+			// GetOperationChanges is meta-version aware (V1 through V4), unlike
+			// reading UnsafeMeta.V1 directly. Pre holds the entry's prior state,
+			// which is what the State change carried in the raw meta.
 			var accountEntry *xdr.AccountEntry
-			if tx.UnsafeMeta.V1 != nil && len(tx.UnsafeMeta.V1.Operations) > 0 {
-				for _, change := range tx.UnsafeMeta.V1.Operations[0].Changes {
-					if change.Type == xdr.LedgerEntryChangeTypeLedgerEntryState {
-						if change.State != nil && change.State.Data.Type == xdr.LedgerEntryTypeAccount {
-							if acc, ok := change.State.Data.GetAccount(); ok {
-								if acc.AccountId.Address() == sourceAccount {
-									accountEntry = &acc
-									break
-								}
-							}
-						}
+			opChanges, err := tx.GetOperationChanges(0)
+			if err != nil {
+				log.Printf("Error getting operation changes for asset enrichment: %v", err)
+			}
+			for _, change := range opChanges {
+				if change.Type != xdr.LedgerEntryTypeAccount || change.Pre == nil {
+					continue
+				}
+				if acc, ok := change.Pre.Data.GetAccount(); ok {
+					if acc.AccountId.Address() == sourceAccount {
+						accountEntry = &acc
+						break
 					}
 				}
 			}

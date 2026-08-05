@@ -161,13 +161,64 @@ func ExtractEntryFromIngestChange(change ingest.Change) (xdr.LedgerEntry, xdr.Le
 func ExtractEntryFromXDRChange(change xdr.LedgerEntryChange) (xdr.LedgerEntry, xdr.LedgerEntryChangeType, bool, error) {
 	switch change.Type {
 	case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
+		if change.Created == nil {
+			return xdr.LedgerEntry{}, change.Type, false, fmt.Errorf("created change has no entry")
+		}
 		return *change.Created, change.Type, false, nil
 	case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
+		if change.Updated == nil {
+			return xdr.LedgerEntry{}, change.Type, false, fmt.Errorf("updated change has no entry")
+		}
 		return *change.Updated, change.Type, false, nil
 	case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
+		// A raw removal carries only the ledger key, so the pre-state has to come
+		// from the State entry that precedes it in the change stream.
+		if change.State == nil {
+			return xdr.LedgerEntry{}, change.Type, true, fmt.Errorf("removed change has no prior state entry")
+		}
 		return *change.State, change.Type, true, nil
+	case xdr.LedgerEntryChangeTypeLedgerEntryRestored:
+		// Protocol 23+ (CAP-0062) restores archived entries.
+		if change.Restored == nil {
+			return xdr.LedgerEntry{}, change.Type, false, fmt.Errorf("restored change has no entry")
+		}
+		return *change.Restored, change.Type, false, nil
 	default:
 		return xdr.LedgerEntry{}, change.Type, false, fmt.Errorf("unable to extract ledger entry type from change")
+	}
+}
+
+// LedgerEntryChangeFromIngestChange converts an ingest.Change back into the raw
+// xdr.LedgerEntryChange shape the transform helpers expect. The SDK's change
+// readers are meta-version aware, so going through them and converting here
+// keeps callers off of version-specific UnsafeMeta fields.
+//
+// Removals are emitted as a State entry rather than a Removed key, because that
+// is where ExtractEntryFromXDRChange reads the pre-state from.
+func LedgerEntryChangeFromIngestChange(change ingest.Change) (xdr.LedgerEntryChange, bool) {
+	switch {
+	case change.ChangeType == xdr.LedgerEntryChangeTypeLedgerEntryRestored && change.Post != nil:
+		return xdr.LedgerEntryChange{
+			Type:     xdr.LedgerEntryChangeTypeLedgerEntryRestored,
+			Restored: change.Post,
+		}, true
+	case change.Pre == nil && change.Post != nil:
+		return xdr.LedgerEntryChange{
+			Type:    xdr.LedgerEntryChangeTypeLedgerEntryCreated,
+			Created: change.Post,
+		}, true
+	case change.Pre != nil && change.Post != nil:
+		return xdr.LedgerEntryChange{
+			Type:    xdr.LedgerEntryChangeTypeLedgerEntryUpdated,
+			Updated: change.Post,
+		}, true
+	case change.Pre != nil && change.Post == nil:
+		return xdr.LedgerEntryChange{
+			Type:  xdr.LedgerEntryChangeTypeLedgerEntryRemoved,
+			State: change.Pre,
+		}, true
+	default:
+		return xdr.LedgerEntryChange{}, false
 	}
 }
 

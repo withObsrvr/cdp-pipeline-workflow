@@ -219,43 +219,20 @@ func (p *BronzeExtractorsProcessor) emit(ctx context.Context, tableType string, 
 
 // Helper methods to get ledger info
 
+// These delegate to the SDK accessors, which resolve the LedgerCloseMeta
+// version internally. Hand-rolled version switches silently returned zero
+// values for anything they did not enumerate.
+
 func (p *BronzeExtractorsProcessor) getLedgerSequence(lcm *xdr.LedgerCloseMeta) uint32 {
-	switch lcm.V {
-	case 0:
-		return uint32(lcm.MustV0().LedgerHeader.Header.LedgerSeq)
-	case 1:
-		return uint32(lcm.MustV1().LedgerHeader.Header.LedgerSeq)
-	case 2:
-		return uint32(lcm.MustV2().LedgerHeader.Header.LedgerSeq)
-	default:
-		return 0
-	}
+	return lcm.LedgerSequence()
 }
 
 func (p *BronzeExtractorsProcessor) getClosedAt(lcm *xdr.LedgerCloseMeta) time.Time {
-	switch lcm.V {
-	case 0:
-		return time.Unix(int64(lcm.MustV0().LedgerHeader.Header.ScpValue.CloseTime), 0)
-	case 1:
-		return time.Unix(int64(lcm.MustV1().LedgerHeader.Header.ScpValue.CloseTime), 0)
-	case 2:
-		return time.Unix(int64(lcm.MustV2().LedgerHeader.Header.ScpValue.CloseTime), 0)
-	default:
-		return time.Time{}
-	}
+	return time.Unix(int64(lcm.LedgerCloseTime()), 0)
 }
 
 func (p *BronzeExtractorsProcessor) getLedgerHeader(lcm *xdr.LedgerCloseMeta) xdr.LedgerHeaderHistoryEntry {
-	switch lcm.V {
-	case 0:
-		return lcm.MustV0().LedgerHeader
-	case 1:
-		return lcm.MustV1().LedgerHeader
-	case 2:
-		return lcm.MustV2().LedgerHeader
-	default:
-		return xdr.LedgerHeaderHistoryEntry{}
-	}
+	return lcm.LedgerHeaderHistoryEntry()
 }
 
 // getTransactionReader creates an ingest.LedgerTransactionReader for the ledger

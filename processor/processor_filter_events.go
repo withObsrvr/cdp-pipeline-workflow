@@ -88,42 +88,29 @@ func (f *FilterEventsProcessor) processLedgerCloseMeta(ctx context.Context, ledg
 	// Process each transaction
 	var tx ingest.LedgerTransaction
 	for tx, err = txReader.Read(); err == nil; tx, err = txReader.Read() {
-		// Safety check for metadata
-		if tx.UnsafeMeta.V1 == nil {
+		// GetChanges is meta-version aware (V1 through V4) and covers both
+		// transaction-level and operation-level changes. Contract data is written
+		// by operations, so reading UnsafeMeta.V1.TxChanges alone missed it.
+		changes, changesErr := tx.GetChanges()
+		if changesErr != nil {
+			log.Printf("Error getting changes: %v", changesErr)
 			continue
 		}
 
 		// Process each change
-		for i := range tx.UnsafeMeta.V1.TxChanges {
-			change := tx.UnsafeMeta.V1.TxChanges[i]
-
-			// Get the relevant LedgerEntry based on change type
-			var entry *xdr.LedgerEntry
-			var isRemoved bool
-
-			switch change.Type {
-			case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
-				if change.Created != nil {
-					entry = change.Created
-				}
-			case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
-				if change.Updated != nil {
-					entry = change.Updated
-				}
-			case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
-				if change.State != nil {
-					entry = change.State
-					isRemoved = true
-				}
-			}
-
-			// Safety check for entry
-			if entry == nil {
+		for _, change := range changes {
+			// Check if it's contract data
+			if change.Type != xdr.LedgerEntryTypeContractData {
 				continue
 			}
 
-			// Check if it's contract data
-			if entry.Data.Type != xdr.LedgerEntryTypeContractData {
+			// Inspect the resulting state, falling back to the prior state for
+			// removals.
+			entry := change.Post
+			if entry == nil {
+				entry = change.Pre
+			}
+			if entry == nil {
 				continue
 			}
 
@@ -159,21 +146,9 @@ func (f *FilterEventsProcessor) processLedgerCloseMeta(ctx context.Context, ledg
 
 			log.Printf("Found matching contract: %s", contractIDStr)
 
-			// Create change message for next processor
-			var changeType xdr.LedgerEntryChangeType
-			if isRemoved {
-				changeType = xdr.LedgerEntryChangeTypeLedgerEntryRemoved
-			} else {
-				changeType = xdr.LedgerEntryChangeTypeLedgerEntryUpdated
-			}
-
-			changeMsg := Message{
-				Payload: ingest.Change{
-					Type: xdr.LedgerEntryType(changeType),
-					Pre:  nil,
-					Post: entry,
-				},
-			}
+			// Forward the change as-is: it already carries the correct entry type
+			// along with the pre/post states.
+			changeMsg := Message{Payload: change}
 
 			// Forward to next processors
 			for _, processor := range f.processors {

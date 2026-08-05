@@ -103,9 +103,16 @@ func (p *LedgerToJSONProcessor) buildLedgerJSON(lcm *xdr.LedgerCloseMeta) (map[s
 		"failed_transaction_count":      0,
 	}
 
-	// Add optional fields
-	if lcm.V1 != nil {
-		output["soroban_fee_write_1kb"] = lcm.V1.Ext.V1.SorobanFeeWrite1Kb
+	// Add optional fields. The Soroban ext is absent on pre-Protocol-20 ledgers,
+	// and it lives on both LedgerCloseMeta V1 and V2.
+	if lcmV1, ok := lcm.GetV1(); ok {
+		if extV1, ok := lcmV1.Ext.GetV1(); ok {
+			output["soroban_fee_write_1kb"] = extV1.SorobanFeeWrite1Kb
+		}
+	} else if lcmV2, ok := lcm.GetV2(); ok {
+		if extV1, ok := lcmV2.Ext.GetV1(); ok {
+			output["soroban_fee_write_1kb"] = extV1.SorobanFeeWrite1Kb
+		}
 	}
 
 	// Process transactions

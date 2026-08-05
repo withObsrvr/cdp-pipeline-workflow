@@ -96,53 +96,56 @@ func (p *ClaimableBalanceProcessor) Process(ctx context.Context, msg Message) er
 			return fmt.Errorf("error reading transaction: %w", err)
 		}
 
-		// Get the transaction metadata
-		if v1Meta, ok := tx.UnsafeMeta.GetV1(); ok {
-			// Process each operation's changes
-			for i := range v1Meta.Operations {
-				changes := v1Meta.Operations[i].Changes
-				if changes == nil {
+		// Process each operation's changes. GetOperationChanges is meta-version
+		// aware (V1 through V4), unlike reading UnsafeMeta.V1 directly.
+		for i := uint32(0); i < tx.OperationCount(); i++ {
+			changes, err := tx.GetOperationChanges(i)
+			if err != nil {
+				log.Printf("Error getting changes for operation %d: %v", i, err)
+				continue
+			}
+
+			for _, change := range changes {
+				if change.Type != xdr.LedgerEntryTypeClaimableBalance {
 					continue
 				}
 
-				for _, change := range changes {
-					// Only process created/updated/removed entries
-					var entry *xdr.LedgerEntry
-					var changeType xdr.LedgerEntryChangeType
-					var deleted bool
+				// Only process created/updated/removed entries
+				var entry *xdr.LedgerEntry
+				var changeType xdr.LedgerEntryChangeType
+				var deleted bool
 
-					switch change.Type {
-					case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
-						entry = change.Created
-						changeType = change.Type
-					case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
-						entry = change.Updated
-						changeType = change.Type
-					case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
-						entry = change.State
-						changeType = change.Type
-						deleted = true
-					default:
-						continue
-					}
+				switch {
+				case change.Pre == nil && change.Post != nil:
+					entry = change.Post
+					changeType = xdr.LedgerEntryChangeTypeLedgerEntryCreated
+				case change.Pre != nil && change.Post != nil:
+					entry = change.Post
+					changeType = xdr.LedgerEntryChangeTypeLedgerEntryUpdated
+				case change.Pre != nil && change.Post == nil:
+					entry = change.Pre
+					changeType = xdr.LedgerEntryChangeTypeLedgerEntryRemoved
+					deleted = true
+				default:
+					continue
+				}
 
-					if entry == nil || entry.Data.Type != xdr.LedgerEntryTypeClaimableBalance {
-						continue
-					}
+				if entry == nil {
+					continue
+				}
 
-					event, err := p.transformClaimableBalance(*entry, changeType, deleted, closeTime, ledgerHeader)
-					if err != nil {
-						log.Printf("Error transforming claimable balance: %v", err)
-						continue
-					}
+				event, err := p.transformClaimableBalance(*entry, changeType, deleted, closeTime, ledgerHeader)
+				if err != nil {
+					log.Printf("Error transforming claimable balance: %v", err)
+					continue
+				}
 
-					// Update stats
-					p.updateStats(changeType)
+				// Update stats
+				p.updateStats(changeType)
 
-					// Forward to downstream processors
-					if err := p.forwardToProcessors(ctx, event); err != nil {
-						return fmt.Errorf("error forwarding event: %w", err)
-					}
+				// Forward to downstream processors
+				if err := p.forwardToProcessors(ctx, event); err != nil {
+					return fmt.Errorf("error forwarding event: %w", err)
 				}
 			}
 		}
@@ -189,7 +192,7 @@ func (p *ClaimableBalanceProcessor) transformClaimableBalance(
 
 	// Fix the sponsor field handling
 	var sponsorStr null.String
-	if entry.Ext.V == 1 && entry.Ext.V1.SponsoringId != nil {
+	if entry.Ext.V == 1 && entry.Ext.V1 != nil && entry.Ext.V1.SponsoringId != nil {
 		sponsorStr = null.StringFrom(entry.Ext.V1.SponsoringId.Address())
 	}
 
