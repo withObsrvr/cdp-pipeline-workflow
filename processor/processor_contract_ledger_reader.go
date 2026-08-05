@@ -294,17 +294,23 @@ func (p *ContractLedgerReader) Process(ctx context.Context, msg Message) error {
 
 		log.Printf("Processing transaction: %s", tx.Result.TransactionHash.HexString())
 
-		// Process each operation's changes
-		if tx.UnsafeMeta.V1 == nil {
-			continue
-		}
-
-		for i := range tx.UnsafeMeta.V1.Operations {
-			changes := tx.UnsafeMeta.V1.Operations[i].Changes
+		// Process each operation's changes. GetOperationChanges is meta-version
+		// aware (V1 through V4), unlike reading UnsafeMeta.V1 directly.
+		for i := uint32(0); i < tx.OperationCount(); i++ {
+			changes, err := tx.GetOperationChanges(i)
+			if err != nil {
+				log.Printf("Error getting changes for operation %d: %v", i, err)
+				continue
+			}
 			log.Printf("Found %d changes in operation %d", len(changes), i)
 
 			for _, change := range changes {
-				output, err, ok := p.transformer.TransformContractData(change, p.networkPassphrase, ledgerCloseMeta.LedgerHeaderHistoryEntry())
+				xdrChange, ok := LedgerEntryChangeFromIngestChange(change)
+				if !ok {
+					continue
+				}
+
+				output, err, ok := p.transformer.TransformContractData(xdrChange, p.networkPassphrase, ledgerCloseMeta.LedgerHeaderHistoryEntry())
 				if err != nil {
 					log.Printf("Error transforming contract data: %v", err)
 					continue

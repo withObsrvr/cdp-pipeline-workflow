@@ -15,9 +15,10 @@ import (
 )
 
 type BufferedStorageSourceAdapter struct {
-	config     BufferedStorageConfig
-	processors []cdpProcessor.Processor
-	schema     datastore.DataStoreSchema
+	config              BufferedStorageConfig
+	processors          []cdpProcessor.Processor
+	schema              datastore.DataStoreSchema
+	applyLedgerMetadata func(ledgerbackend.Range, ingest.PublisherConfig, context.Context, func(xdr.LedgerCloseMeta) error) error
 }
 
 type BufferedStorageConfig struct {
@@ -47,6 +48,16 @@ func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapt
 		return 0, false
 	}
 
+	bucketName, ok := config["bucket_name"].(string)
+	if !ok || bucketName == "" {
+		return nil, errors.New("bucket_name is required")
+	}
+
+	network, ok := config["network"].(string)
+	if !ok || network == "" {
+		return nil, errors.New("network is required")
+	}
+
 	// Get start ledger with more flexible type handling
 	startLedgerRaw, ok := config["start_ledger"]
 	if !ok {
@@ -57,16 +68,6 @@ func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapt
 		return nil, errors.New("invalid start_ledger value")
 	}
 	startLedger := uint32(startLedgerInt)
-
-	bucketName, ok := config["bucket_name"].(string)
-	if !ok {
-		return nil, errors.New("bucket_name is missing")
-	}
-
-	network, ok := config["network"].(string)
-	if !ok {
-		return nil, errors.New("network must be specified")
-	}
 
 	// Get other config values with defaults
 	bufferSizeInt, _ := getIntValue(config["buffer_size"])
@@ -101,7 +102,7 @@ func NewBufferedStorageSourceAdapter(config map[string]interface{}) (SourceAdapt
 
 		// Validate end ledger is greater than start ledger
 		if endLedger > 0 && endLedger < startLedger {
-			return nil, errors.New("end_ledger must be greater than start_ledger")
+			return nil, errors.New("invalid ledger range: end_ledger must be greater than start_ledger")
 		}
 	}
 
@@ -197,7 +198,12 @@ func (adapter *BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 	lastLogTime := time.Now()
 	lastLedgerTime := time.Now()
 
-	err := ingest.ApplyLedgerMetadata(
+	applyLedgerMetadata := adapter.applyLedgerMetadata
+	if applyLedgerMetadata == nil {
+		applyLedgerMetadata = ingest.ApplyLedgerMetadata
+	}
+
+	err := applyLedgerMetadata(
 		ledgerRange,
 		publisherConfig,
 		ctx,
@@ -240,17 +246,17 @@ func (adapter *BufferedStorageSourceAdapter) Run(ctx context.Context) error {
 
 func (adapter *BufferedStorageSourceAdapter) processLedger(ctx context.Context, ledger xdr.LedgerCloseMeta) error {
 	sequence := ledger.LedgerSequence()
-	
+
 	// Create archive metadata for source file provenance
 	archiveMetadata := utils.CreateGCSArchiveMetadata(
 		adapter.config.BucketName,
 		sequence,
 		adapter.schema,
 	)
-	
+
 	// Create message with metadata
 	message := utils.CreateMessageWithMetadata(ledger, archiveMetadata)
-	
+
 	for _, processor := range adapter.processors {
 		if err := processor.Process(ctx, message); err != nil {
 			return errors.Wrapf(err, "error processing ledger %d", sequence)

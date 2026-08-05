@@ -180,25 +180,29 @@ func (t *TransformToAppTrustline) processChangeTrust(
 		assetIssuer = asset.GetIssuer()
 	}
 
-	// Safely process metadata changes
-	if tx.UnsafeMeta.V1 != nil && len(tx.UnsafeMeta.V1.Operations) > 0 {
-		for _, change := range tx.UnsafeMeta.V1.Operations[0].Changes {
-			if change.Type == xdr.LedgerEntryChangeTypeLedgerEntryState {
-				if change.State != nil && change.State.Data.Type == xdr.LedgerEntryTypeTrustline {
-					if tl, ok := change.State.Data.GetTrustLine(); ok {
-						previousFlags = uint32(tl.Flags)
-					}
-				}
-			} else if change.Type == xdr.LedgerEntryChangeTypeLedgerEntryUpdated {
-				if change.Updated != nil && change.Updated.Data.Type == xdr.LedgerEntryTypeTrustline {
-					if tl, ok := change.Updated.Data.GetTrustLine(); ok {
-						currentBalance = tl.Balance
-						liabilities := tl.Liabilities()
-						buyingLiabilities = liabilities.Buying
-						sellingLiabilities = liabilities.Selling
-						lastModifiedLedgerSeq = uint32(change.Updated.LastModifiedLedgerSeq)
-					}
-				}
+	// Safely process metadata changes. GetOperationChanges is meta-version aware
+	// (V1 through V4), unlike reading UnsafeMeta.V1 directly. Pre holds the
+	// entry's prior state and Post its resulting state.
+	opChanges, err := tx.GetOperationChanges(0)
+	if err != nil {
+		logging.Debug("Error getting operation changes for trustline: %v", err)
+	}
+	for _, change := range opChanges {
+		if change.Type != xdr.LedgerEntryTypeTrustline {
+			continue
+		}
+		if change.Pre != nil {
+			if tl, ok := change.Pre.Data.GetTrustLine(); ok {
+				previousFlags = uint32(tl.Flags)
+			}
+		}
+		if change.Post != nil {
+			if tl, ok := change.Post.Data.GetTrustLine(); ok {
+				currentBalance = tl.Balance
+				liabilities := tl.Liabilities()
+				buyingLiabilities = liabilities.Buying
+				sellingLiabilities = liabilities.Selling
+				lastModifiedLedgerSeq = uint32(change.Post.LastModifiedLedgerSeq)
 			}
 		}
 	}

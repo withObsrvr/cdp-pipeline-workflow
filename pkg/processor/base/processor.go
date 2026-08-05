@@ -81,9 +81,16 @@ type Event struct {
 // ExtractEntryFromIngestChange gets the most recent state of an entry from an ingestion change
 func ExtractEntryFromIngestChange(change ingest.Change) (xdr.LedgerEntry, xdr.LedgerEntryChangeType, bool, error) {
 	switch changeType := change.ChangeType; changeType {
-	case xdr.LedgerEntryChangeTypeLedgerEntryCreated, xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
+	case xdr.LedgerEntryChangeTypeLedgerEntryCreated, xdr.LedgerEntryChangeTypeLedgerEntryUpdated,
+		xdr.LedgerEntryChangeTypeLedgerEntryRestored:
+		if change.Post == nil {
+			return xdr.LedgerEntry{}, changeType, false, fmt.Errorf("change of type %s has no post state", changeType)
+		}
 		return *change.Post, changeType, false, nil
 	case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
+		if change.Pre == nil {
+			return xdr.LedgerEntry{}, changeType, true, fmt.Errorf("removed change has no pre state")
+		}
 		return *change.Pre, changeType, true, nil
 	default:
 		return xdr.LedgerEntry{}, changeType, false, fmt.Errorf("unable to extract ledger entry type from change")
@@ -94,11 +101,28 @@ func ExtractEntryFromIngestChange(change ingest.Change) (xdr.LedgerEntry, xdr.Le
 func ExtractEntryFromXDRChange(change xdr.LedgerEntryChange) (xdr.LedgerEntry, xdr.LedgerEntryChangeType, bool, error) {
 	switch change.Type {
 	case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
+		if change.Created == nil {
+			return xdr.LedgerEntry{}, change.Type, false, fmt.Errorf("created change has no entry")
+		}
 		return *change.Created, change.Type, false, nil
 	case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
+		if change.Updated == nil {
+			return xdr.LedgerEntry{}, change.Type, false, fmt.Errorf("updated change has no entry")
+		}
 		return *change.Updated, change.Type, false, nil
 	case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
+		// A raw removal carries only the ledger key, so the pre-state has to come
+		// from the State entry that precedes it in the change stream.
+		if change.State == nil {
+			return xdr.LedgerEntry{}, change.Type, true, fmt.Errorf("removed change has no prior state entry")
+		}
 		return *change.State, change.Type, true, nil
+	case xdr.LedgerEntryChangeTypeLedgerEntryRestored:
+		// Protocol 23+ (CAP-0062) restores archived entries.
+		if change.Restored == nil {
+			return xdr.LedgerEntry{}, change.Type, false, fmt.Errorf("restored change has no entry")
+		}
+		return *change.Restored, change.Type, false, nil
 	default:
 		return xdr.LedgerEntry{}, change.Type, false, fmt.Errorf("unable to extract ledger entry type from change")
 	}

@@ -3,8 +3,10 @@ package processor
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
+	"github.com/stellar/go-stellar-sdk/ingest"
 	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/withObsrvr/cdp-pipeline-workflow/pkg/logging"
@@ -95,7 +97,10 @@ func (p *ProcessAccountData) Process(ctx context.Context, msg Message) error {
 	logging.Debug("Processing ledger %d for account data", ledgerMeta.LedgerSequence())
 
 	// Extract account changes from ledgerMeta
-	accountChanges := getAccountChanges(*ledgerMeta)
+	accountChanges, err := getAccountChanges(p.networkPassphrase, *ledgerMeta)
+	if err != nil {
+		return fmt.Errorf("error extracting account changes from ledger %d: %w", ledgerMeta.LedgerSequence(), err)
+	}
 	logging.Debug("Found %d account changes in ledger %d", len(accountChanges), ledgerMeta.LedgerSequence())
 
 	// Track errors but don't fail immediately
@@ -109,8 +114,8 @@ func (p *ProcessAccountData) Process(ctx context.Context, msg Message) error {
 			return fmt.Errorf("processing interrupted: %w", processingCtx.Err())
 		}
 
-		logging.Debug("Processing account change %d of %d (type: %s)",
-			i+1, len(accountChanges), change.Type)
+		logging.Debug("Processing account change %d of %d (change: %s, reason: %d)",
+			i+1, len(accountChanges), change.ChangeType, change.Reason)
 
 		record, err := processAccountChange(change, *ledgerMeta)
 		if err != nil {
@@ -197,28 +202,24 @@ func (p *ProcessAccountData) GetStats() struct {
 }
 
 // processAccountChange converts a single LedgerEntryChange into an AccountRecord.
-func processAccountChange(change xdr.LedgerEntryChange, meta xdr.LedgerCloseMeta) (*AccountRecord, error) {
+func processAccountChange(change ingest.Change, meta xdr.LedgerCloseMeta) (*AccountRecord, error) {
 	var entry xdr.LedgerEntry
 	var ledgerEntryChangeType uint32
 
-	// For removals, only Pre exists. For state/created/updated, use Post.
-	deleted := false
-	switch change.Type {
-	case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
-		if change.Removed == nil {
-			return nil, fmt.Errorf("removed change has nil Removed")
+	// An ingest.Change is normalised to a Pre/Post pair: no Post means the entry
+	// was removed, no Pre means it was created.
+	switch {
+	case change.Pre != nil && change.Post == nil:
+		// Removals only ever produced a minimal record here, keyed by account ID.
+		accountEntry, ok := change.Pre.Data.GetAccount()
+		if !ok {
+			return nil, fmt.Errorf("non-account entry encountered")
 		}
-		// For removed entries, we need to get the entry from the ledger key
-		// This is a significant change in how removals are handled
-		deleted = true
-		// Since we can't get the full entry from a removal, we'll create a minimal record
-		// with just the account ID and deletion status
-		key := *change.Removed
-		if key.Type != xdr.LedgerEntryTypeAccount {
-			return nil, fmt.Errorf("non-account key encountered")
+		if accountEntry.AccountId.Ed25519 == nil {
+			return nil, fmt.Errorf("account ID is nil")
 		}
 
-		accountID, err := strkey.Encode(strkey.VersionByteAccountID, key.Account.AccountId.Ed25519[:])
+		accountID, err := strkey.Encode(strkey.VersionByteAccountID, accountEntry.AccountId.Ed25519[:])
 		if err != nil {
 			return nil, fmt.Errorf("error encoding account ID: %w", err)
 		}
@@ -238,31 +239,14 @@ func processAccountChange(change xdr.LedgerEntryChange, meta xdr.LedgerCloseMeta
 			LedgerSequence: uint32(meta.LedgerSequence()),
 			Timestamp:      time.Now(),
 		}, nil
-	case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
-		if change.Created == nil {
-			return nil, fmt.Errorf("created change has nil Created")
-		}
-		entry = *change.Created
+	case change.Pre == nil && change.Post != nil:
+		entry = *change.Post
 		ledgerEntryChangeType = 1 // Created
-	case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
-		if change.Updated == nil {
-			return nil, fmt.Errorf("updated change has nil Updated")
-		}
-		entry = *change.Updated
+	case change.Pre != nil && change.Post != nil:
+		entry = *change.Post
 		ledgerEntryChangeType = 2 // Updated
-	case xdr.LedgerEntryChangeTypeLedgerEntryState:
-		if change.State == nil {
-			return nil, fmt.Errorf("state change has nil State")
-		}
-		entry = *change.State
-		ledgerEntryChangeType = 3 // State
 	default:
-		return nil, fmt.Errorf("unknown change type %s", change.Type)
-	}
-
-	// If we're processing a deletion, we've already returned a minimal record
-	if deleted {
-		return nil, fmt.Errorf("should not reach here for deleted entries")
+		return nil, fmt.Errorf("change has neither a pre nor a post state")
 	}
 
 	// Ensure this is an Account entry.
@@ -323,7 +307,7 @@ func processAccountChange(change xdr.LedgerEntryChange, meta xdr.LedgerCloseMeta
 		NumSponsoring:      uint32(accountEntry.NumSponsoring()),
 		LastModifiedLedger: uint32(entry.LastModifiedLedgerSeq),
 		LedgerEntryChange:  ledgerEntryChangeType,
-		Deleted:            deleted,
+		Deleted:            false,
 		ClosedAt:           closedAt,
 		LedgerSequence:     uint32(meta.LedgerSequence()),
 		Timestamp:          time.Now(),
@@ -353,337 +337,34 @@ func processAccountChange(change xdr.LedgerEntryChange, meta xdr.LedgerCloseMeta
 }
 
 // getAccountChanges extracts all account-related changes from the LedgerCloseMeta.
-func getAccountChanges(meta xdr.LedgerCloseMeta) []xdr.LedgerEntryChange {
-	var accountChanges []xdr.LedgerEntryChange
-	var changes []xdr.LedgerEntryChange
-
-	logging.Debug("getAccountChanges: Processing ledger %d (meta version: %d)", meta.LedgerSequence(), meta.V)
-
-	switch meta.V {
-	case 0:
-		if meta.V0 != nil {
-			logging.Debug("getAccountChanges: Processing V0 meta")
-
-			// Check if TxSet exists and is not empty
-			if meta.V0.TxSet.Txs != nil {
-				logging.Debug("getAccountChanges: Found %d transactions in TxSet", len(meta.V0.TxSet.Txs))
-
-				// Extract changes from transaction set
-				for i := range meta.V0.TxSet.Txs {
-					// Use the Operations() method to get operations
-					ops := meta.V0.TxSet.Txs[i].Operations()
-					logging.Debug("getAccountChanges: Transaction %d has %d operations", i+1, len(ops))
-				}
-			} else {
-				logging.Debug("getAccountChanges: No transactions in TxSet")
-			}
-
-			// Extract changes directly from V0
-			if meta.V0.TxProcessing != nil {
-				logging.Debug("getAccountChanges: Found %d TxProcessing entries", len(meta.V0.TxProcessing))
-
-				for i, txProcessing := range meta.V0.TxProcessing {
-					if txProcessing.FeeProcessing != nil {
-						logging.Debug("getAccountChanges: TxProcessing[%d] has %d FeeProcessing changes",
-							i, len(txProcessing.FeeProcessing))
-						changes = append(changes, txProcessing.FeeProcessing...)
-					}
-
-					logging.Debug("getAccountChanges: TxProcessing[%d] TxApplyProcessing version: %d",
-						i, txProcessing.TxApplyProcessing.V)
-
-					// Handle TxApplyProcessing based on its version
-					switch txProcessing.TxApplyProcessing.V {
-					case 1:
-						v1Meta := txProcessing.TxApplyProcessing.MustV1()
-						if v1Meta.Operations != nil {
-							logging.Debug("getAccountChanges: V1 meta has %d operations", len(v1Meta.Operations))
-							for j, opMeta := range v1Meta.Operations {
-								if opMeta.Changes != nil {
-									logging.Debug("getAccountChanges: V1 operation %d has %d changes",
-										j, len(opMeta.Changes))
-									changes = append(changes, opMeta.Changes...)
-								}
-							}
-						}
-					case 2:
-						v2Meta := txProcessing.TxApplyProcessing.MustV2()
-						if v2Meta.Operations != nil {
-							logging.Debug("getAccountChanges: V2 meta has %d operations", len(v2Meta.Operations))
-							for j, opMeta := range v2Meta.Operations {
-								if opMeta.Changes != nil {
-									logging.Debug("getAccountChanges: V2 operation %d has %d changes",
-										j, len(opMeta.Changes))
-									changes = append(changes, opMeta.Changes...)
-								}
-							}
-						}
-					case 3:
-						v3Meta := txProcessing.TxApplyProcessing.MustV3()
-						if v3Meta.Operations != nil {
-							logging.Debug("getAccountChanges: V3 meta has %d operations", len(v3Meta.Operations))
-							for j, opMeta := range v3Meta.Operations {
-								if opMeta.Changes != nil {
-									logging.Debug("getAccountChanges: V3 operation %d has %d changes",
-										j, len(opMeta.Changes))
-									changes = append(changes, opMeta.Changes...)
-								}
-							}
-						}
-					case 4:
-						v4Meta := txProcessing.TxApplyProcessing.MustV4()
-						if v4Meta.Operations != nil {
-							logging.Debug("getAccountChanges: V4 meta has %d operations", len(v4Meta.Operations))
-							for j, opMeta := range v4Meta.Operations {
-								if opMeta.Changes != nil {
-									logging.Debug("getAccountChanges: V4 operation %d has %d changes",
-										j, len(opMeta.Changes))
-									changes = append(changes, opMeta.Changes...)
-								}
-							}
-						}
-						// V4 also includes Soroban transaction data
-						if v4Meta.SorobanMeta != nil {
-							logging.Debug("getAccountChanges: V4 has Soroban meta")
-						}
-					default:
-						logging.Debug("getAccountChanges: Unknown TxApplyProcessing version: %d",
-							txProcessing.TxApplyProcessing.V)
-					}
-				}
-			} else {
-				logging.Debug("getAccountChanges: No TxProcessing entries found")
-			}
-		}
-	case 1:
-		if meta.V1 != nil {
-			logging.Debug("getAccountChanges: Processing V1 meta")
-
-			// Process TxProcessing entries
-			if meta.V1.TxProcessing != nil {
-				logging.Debug("getAccountChanges: Found %d TxProcessing entries in V1 meta", len(meta.V1.TxProcessing))
-
-				for i, txProcessing := range meta.V1.TxProcessing {
-					// Process fee changes
-					if txProcessing.FeeProcessing != nil {
-						logging.Debug("getAccountChanges: V1 TxProcessing[%d] has %d FeeProcessing changes",
-							i, len(txProcessing.FeeProcessing))
-						changes = append(changes, txProcessing.FeeProcessing...)
-					}
-
-					// Process transaction metadata based on version
-					logging.Debug("getAccountChanges: V1 TxProcessing[%d] TxApplyProcessing version: %d",
-						i, txProcessing.TxApplyProcessing.V)
-
-					switch txProcessing.TxApplyProcessing.V {
-					case 1:
-						v1Meta := txProcessing.TxApplyProcessing.MustV1()
-						if v1Meta.Operations != nil {
-							logging.Debug("getAccountChanges: V1 meta has %d operations", len(v1Meta.Operations))
-							for j, opMeta := range v1Meta.Operations {
-								if opMeta.Changes != nil {
-									logging.Debug("getAccountChanges: V1 operation %d has %d changes",
-										j, len(opMeta.Changes))
-									changes = append(changes, opMeta.Changes...)
-								}
-							}
-						}
-					case 2:
-						v2Meta := txProcessing.TxApplyProcessing.MustV2()
-						if v2Meta.Operations != nil {
-							logging.Debug("getAccountChanges: V2 meta has %d operations", len(v2Meta.Operations))
-							for j, opMeta := range v2Meta.Operations {
-								if opMeta.Changes != nil {
-									logging.Debug("getAccountChanges: V2 operation %d has %d changes",
-										j, len(opMeta.Changes))
-									changes = append(changes, opMeta.Changes...)
-								}
-							}
-						}
-					case 3:
-						v3Meta := txProcessing.TxApplyProcessing.MustV3()
-						if v3Meta.Operations != nil {
-							logging.Debug("getAccountChanges: V3 meta has %d operations", len(v3Meta.Operations))
-							for j, opMeta := range v3Meta.Operations {
-								if opMeta.Changes != nil {
-									logging.Debug("getAccountChanges: V3 operation %d has %d changes",
-										j, len(opMeta.Changes))
-									changes = append(changes, opMeta.Changes...)
-								}
-							}
-						}
-					case 4:
-						v4Meta := txProcessing.TxApplyProcessing.MustV4()
-						if v4Meta.Operations != nil {
-							logging.Debug("getAccountChanges: V4 meta has %d operations", len(v4Meta.Operations))
-							for j, opMeta := range v4Meta.Operations {
-								if opMeta.Changes != nil {
-									logging.Debug("getAccountChanges: V4 operation %d has %d changes",
-										j, len(opMeta.Changes))
-									changes = append(changes, opMeta.Changes...)
-								}
-							}
-						}
-						// V4 also includes Soroban transaction data
-						if v4Meta.SorobanMeta != nil {
-							logging.Debug("getAccountChanges: V4 has Soroban meta")
-						}
-					default:
-						logging.Debug("getAccountChanges: Unknown TxApplyProcessing version: %d",
-							txProcessing.TxApplyProcessing.V)
-					}
-				}
-			} else {
-				logging.Debug("getAccountChanges: No TxProcessing entries found in V1 meta")
-			}
-
-			// Try to access changes directly from V1 if available
-			// This is a more exploratory approach since we don't know the exact structure
-			logging.Debug("getAccountChanges: Exploring V1 meta structure for changes")
-
-			// Inspect the V1 structure to find any fields that might contain changes
-			// This is a debugging step to help understand the structure
-			logging.Debug("getAccountChanges: V1 TxSet type: %T", meta.V1.TxSet)
-
-			// Instead of comparing TxSet with nil, let's check if it has any transactions
-			// by examining its fields or using reflection
-			if meta.V1.TxSet.V == 0 {
-				logging.Debug("getAccountChanges: V1 TxSet is legacy format (V=0)")
-			} else if meta.V1.TxSet.V == 1 {
-				logging.Debug("getAccountChanges: V1 TxSet is generalized format (V=1)")
-			}
-
-			// Add more exploration of the V1 structure as needed
-		}
-	case 2:
-		if meta.V2 != nil {
-			logging.Debug("getAccountChanges: Processing V2 meta")
-			
-			// Process TxProcessing entries
-			if meta.V2.TxProcessing != nil {
-				logging.Debug("getAccountChanges: Found %d TxProcessing entries in V2 meta", len(meta.V2.TxProcessing))
-				
-				for i, txProcessing := range meta.V2.TxProcessing {
-					// Process fee changes
-					if txProcessing.FeeProcessing != nil {
-						logging.Debug("getAccountChanges: V2 TxProcessing[%d] has %d FeeProcessing changes",
-							i, len(txProcessing.FeeProcessing))
-						changes = append(changes, txProcessing.FeeProcessing...)
-					}
-					
-					// Process transaction metadata based on version
-					logging.Debug("getAccountChanges: V2 TxProcessing[%d] TxApplyProcessing version: %d",
-						i, txProcessing.TxApplyProcessing.V)
-					
-					switch txProcessing.TxApplyProcessing.V {
-					case 1:
-						v1Meta := txProcessing.TxApplyProcessing.MustV1()
-						if v1Meta.Operations != nil {
-							logging.Debug("getAccountChanges: V1 meta has %d operations", len(v1Meta.Operations))
-							for j, opMeta := range v1Meta.Operations {
-								if opMeta.Changes != nil {
-									logging.Debug("getAccountChanges: V1 operation %d has %d changes",
-										j, len(opMeta.Changes))
-									changes = append(changes, opMeta.Changes...)
-								}
-							}
-						}
-					case 2:
-						v2Meta := txProcessing.TxApplyProcessing.MustV2()
-						if v2Meta.Operations != nil {
-							logging.Debug("getAccountChanges: V2 meta has %d operations", len(v2Meta.Operations))
-							for j, opMeta := range v2Meta.Operations {
-								if opMeta.Changes != nil {
-									logging.Debug("getAccountChanges: V2 operation %d has %d changes",
-										j, len(opMeta.Changes))
-									changes = append(changes, opMeta.Changes...)
-								}
-							}
-						}
-					case 3:
-						v3Meta := txProcessing.TxApplyProcessing.MustV3()
-						if v3Meta.Operations != nil {
-							logging.Debug("getAccountChanges: V3 meta has %d operations", len(v3Meta.Operations))
-							for j, opMeta := range v3Meta.Operations {
-								if opMeta.Changes != nil {
-									logging.Debug("getAccountChanges: V3 operation %d has %d changes",
-										j, len(opMeta.Changes))
-									changes = append(changes, opMeta.Changes...)
-								}
-							}
-						}
-					case 4:
-						v4Meta := txProcessing.TxApplyProcessing.MustV4()
-						if v4Meta.Operations != nil {
-							logging.Debug("getAccountChanges: V4 meta has %d operations", len(v4Meta.Operations))
-							for j, opMeta := range v4Meta.Operations {
-								if opMeta.Changes != nil {
-									logging.Debug("getAccountChanges: V4 operation %d has %d changes",
-										j, len(opMeta.Changes))
-									changes = append(changes, opMeta.Changes...)
-								}
-							}
-						}
-						// V4 also includes Soroban transaction data
-						if v4Meta.SorobanMeta != nil {
-							logging.Debug("getAccountChanges: V4 has Soroban meta")
-						}
-					default:
-						logging.Debug("getAccountChanges: Unknown TxApplyProcessing version: %d",
-							txProcessing.TxApplyProcessing.V)
-					}
-				}
-			} else {
-				logging.Debug("getAccountChanges: No TxProcessing entries found in V2 meta")
-			}
-		}
-	default:
-		logging.Debug("getAccountChanges: Unknown meta version: %d", meta.V)
+//
+// LedgerChangeReader walks the whole ledger — fee changes, transaction-level
+// changes, per-operation changes, post-apply fee refunds and protocol upgrades —
+// and is aware of every LedgerCloseMeta and TransactionMeta version. It replaces
+// a hand-rolled walk that had to enumerate each version pair by hand and which
+// only ever looked at fee processing and operation meta.
+func getAccountChanges(networkPassphrase string, meta xdr.LedgerCloseMeta) ([]ingest.Change, error) {
+	reader, err := ingest.NewLedgerChangeReaderFromLedgerCloseMeta(networkPassphrase, meta)
+	if err != nil {
+		return nil, fmt.Errorf("error creating ledger change reader: %w", err)
 	}
+	defer reader.Close()
 
-	logging.Debug("getAccountChanges: Found %d total changes", len(changes))
-
-	// Filter for account changes
-	for i, change := range changes {
-		logging.Debug("getAccountChanges: Examining change %d of type %s", i+1, change.Type)
-
-		// Check if this is an account entry
-		var entry *xdr.LedgerEntry
-
-		switch change.Type {
-		case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
-			entry = change.Created
-			logging.Debug("getAccountChanges: Found Created entry")
-		case xdr.LedgerEntryChangeTypeLedgerEntryUpdated:
-			entry = change.Updated
-			logging.Debug("getAccountChanges: Found Updated entry")
-		case xdr.LedgerEntryChangeTypeLedgerEntryState:
-			entry = change.State
-			logging.Debug("getAccountChanges: Found State entry")
-		case xdr.LedgerEntryChangeTypeLedgerEntryRemoved:
-			logging.Debug("getAccountChanges: Found Removed entry")
-			// For removals, we need to check the key type
-			if change.Removed != nil && change.Removed.Type == xdr.LedgerEntryTypeAccount {
-				logging.Debug("getAccountChanges: Found account removal!")
-				accountChanges = append(accountChanges, change)
-			}
-			continue
-		default:
-			logging.Debug("getAccountChanges: Unknown change type: %s", change.Type)
-			continue
+	var accountChanges []ingest.Change
+	for {
+		change, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error reading ledger changes: %w", err)
 		}
 
-		if entry != nil {
-			logging.Debug("getAccountChanges: Entry type: %s", entry.Data.Type)
-			if entry.Data.Type == xdr.LedgerEntryTypeAccount {
-				logging.Debug("getAccountChanges: Found account entry!")
-				accountChanges = append(accountChanges, change)
-			}
-		} else {
-			logging.Debug("getAccountChanges: Entry is nil")
+		if change.Type == xdr.LedgerEntryTypeAccount {
+			accountChanges = append(accountChanges, change)
 		}
 	}
 
 	logging.Debug("getAccountChanges: Returning %d account changes", len(accountChanges))
-	return accountChanges
+	return accountChanges, nil
 }

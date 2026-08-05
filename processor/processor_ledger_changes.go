@@ -130,8 +130,12 @@ func (p *LedgerChangeProcessor) Process(ctx context.Context, msg Message) error 
 				changeType = xdr.LedgerEntryChangeTypeLedgerEntryState
 			}
 
-			// For transaction-level changes, use -1 as the operation index
+			// Operation changes carry their originating operation index; anything
+			// else (tx-level, fee, upgrade) is not attributable to an operation.
 			opIndex := -1
+			if change.Reason == ingest.LedgerEntryChangeReasonOperation {
+				opIndex = int(change.OperationIndex)
+			}
 
 			switch changeType {
 			case xdr.LedgerEntryChangeTypeLedgerEntryCreated:
@@ -150,9 +154,12 @@ func (p *LedgerChangeProcessor) Process(ctx context.Context, msg Message) error 
 					logging.Debug("Warning: removed entry has nil Pre state")
 					continue
 				}
-				key, err := change.Pre.LedgerKey()
-				if err != nil {
-					logging.Debug("Error getting ledger key: %v", err)
+				// Note: keyErr is deliberately a distinct name. Using := for err
+				// here would shadow the err declared above, so the processChange
+				// error below would never reach the check after this switch.
+				key, keyErr := change.Pre.LedgerKey()
+				if keyErr != nil {
+					logging.Debug("Error getting ledger key: %v", keyErr)
 					continue
 				}
 				ledgerChange, err = p.processChange(xdr.LedgerEntryChange{
@@ -182,31 +189,8 @@ func (p *LedgerChangeProcessor) Process(ctx context.Context, msg Message) error 
 			p.mu.Unlock()
 		}
 
-		// Also process operation level changes if available
-		if tx.UnsafeMeta.V1 != nil {
-			for opIndex, op := range tx.UnsafeMeta.V1.Operations {
-				opChanges := op.Changes
-				logging.Debug("Found %d changes in operation %d", len(opChanges), opIndex)
-
-				for _, change := range opChanges {
-					ledgerChange, err := p.processChange(change, sequence, closeTime, tx.Result.TransactionHash.HexString(), opIndex)
-					if err != nil {
-						logging.Debug("Error processing change: %v", err)
-						continue
-					}
-
-					// Forward the change
-					if err := p.forwardToProcessors(ctx, ledgerChange); err != nil {
-						logging.Debug("Error forwarding change: %v", err)
-						continue
-					}
-
-					p.mu.Lock()
-					p.stats.ChangesFound++
-					p.mu.Unlock()
-				}
-			}
-		}
+		// Operation-level changes are already included in tx.GetChanges() above,
+		// so there is nothing further to walk here.
 	}
 
 	logging.Debug("Completed processing ledger %d with %d transactions", sequence, txCount)

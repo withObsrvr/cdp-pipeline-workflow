@@ -244,28 +244,28 @@ func (p *BronzeExtractorsProcessor) extractTransactions(lcm *xdr.LedgerCloseMeta
 			}
 			eventsCount += int32(len(txEvents.TransactionEvents))
 			record.SorobanContractEventsCount = &eventsCount
+		}
 
-			// IMPORTANT: Direct UnsafeMeta access below is intentional and documented
-			//
-			// Reason: We need TotalNonRefundableResourceFeeCharged from transaction execution metadata.
-			// This is different from ResourceFee in the envelope (budgeted vs actual consumption).
-			//
-			// SDK Status: No helper method exists as of 2025-01 for accessing actual resource consumption
-			// from metadata. The tx.Envelope.V1.Tx.Ext.GetSorobanData().ResourceFee gives budgeted
-			// resources, not actual consumption from SorobanMeta.Ext.V1.TotalNonRefundableResourceFeeCharged.
-			//
-			// Safety: We only access V3 metadata after GetTransactionEvents() succeeded, confirming
-			// this is a Soroban transaction. This minimizes protocol version assumptions.
-			//
-			// TODO: When Stellar SDK adds a helper method for actual resource consumption (e.g.,
-			// tx.GetSorobanResourceConsumption()), replace this direct access with the SDK helper.
-			if tx.UnsafeMeta.V == 3 && tx.UnsafeMeta.V3.SorobanMeta != nil {
-				sorobanMeta := tx.UnsafeMeta.V3.SorobanMeta
-				if sorobanMeta.Ext.V == 1 {
-					instructions := int64(sorobanMeta.Ext.V1.TotalNonRefundableResourceFeeCharged)
-					record.SorobanResourcesInstructions = &instructions
-				}
-			}
+		// Soroban resources declared in the transaction envelope. These are the
+		// only resource counts the protocol records; the meta carries fees
+		// charged, not resources consumed.
+		//
+		// The SDK helpers resolve SorobanTransactionData across every envelope
+		// type (including fee bumps) and report whether this is a Soroban
+		// transaction at all, so no meta-version handling is needed here.
+		if instructions, ok := tx.SorobanResourcesInstructions(); ok {
+			instructionCount := int64(instructions)
+			record.SorobanResourcesInstructions = &instructionCount
+		}
+		// Named DiskReadBytes in the XDR since Protocol 23 (CAP-0062); it is the
+		// same field the older ReadBytes name referred to.
+		if readBytes, ok := tx.SorobanResourcesDiskReadBytes(); ok {
+			readByteCount := int64(readBytes)
+			record.SorobanResourcesReadBytes = &readByteCount
+		}
+		if writeBytes, ok := tx.SorobanResourcesWriteBytes(); ok {
+			writeByteCount := int64(writeBytes)
+			record.SorobanResourcesWriteBytes = &writeByteCount
 		}
 
 		// XDR fields (optional, can be expensive)

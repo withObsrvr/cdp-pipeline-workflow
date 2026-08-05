@@ -143,13 +143,13 @@ func TestProcessorType_IsValid(t *testing.T) {
 	}
 }
 
-// TestSchemaDefinition_CreateSQL tests that CreateSQL has PRIMARY KEY
+// TestSchemaDefinition_CreateSQL tests that CreateSQL contains expected deduplication columns.
 func TestSchemaDefinition_CreateSQL(t *testing.T) {
 	registry := NewDuckLakeSchemaRegistry()
 
 	testCases := []struct {
-		pType           processor.ProcessorType
-		expectedPKCols  []string
+		pType          processor.ProcessorType
+		expectedPKCols []string
 	}{
 		{
 			pType:          processor.ProcessorTypeContractInvocation,
@@ -166,16 +166,18 @@ func TestSchemaDefinition_CreateSQL(t *testing.T) {
 			schema, ok := registry.GetSchema(tc.pType)
 			require.True(t, ok)
 
-			// Verify PRIMARY KEY clause exists
-			assert.Contains(t, schema.CreateSQL, "PRIMARY KEY", "CreateSQL should contain PRIMARY KEY clause")
-
-			// Verify expected columns are mentioned in PRIMARY KEY
+			// DuckLake does not support PRIMARY KEY or PARTITION BY clauses in CREATE TABLE.
+			// Deduplication is handled by the schema's MERGE/UPSERT logic, but the
+			// columns that identify a unique record must still exist in the table.
+			//
+			// Comments are stripped first: the schemas document the absence of these
+			// clauses in prose, and that prose is not a clause.
+			sql := strings.ToUpper(stripSQLLineComments(schema.CreateSQL))
+			assert.NotContains(t, sql, "PRIMARY KEY")
+			assert.NotContains(t, sql, "PARTITION BY RANGE")
 			for _, col := range tc.expectedPKCols {
-				assert.Contains(t, schema.CreateSQL, col, "PRIMARY KEY should reference column %s", col)
+				assert.Contains(t, schema.CreateSQL, col, "CreateSQL should include deduplication column %s", col)
 			}
-
-			// Verify PARTITION BY RANGE clause exists
-			assert.Contains(t, schema.CreateSQL, "PARTITION BY RANGE", "CreateSQL should contain PARTITION BY RANGE clause")
 		})
 	}
 }
@@ -266,8 +268,8 @@ func TestSchemaDefinition_ColumnMapping(t *testing.T) {
 	registry := NewDuckLakeSchemaRegistry()
 
 	testCases := []struct {
-		pType            processor.ProcessorType
-		expectedColumns  []string
+		pType           processor.ProcessorType
+		expectedColumns []string
 	}{
 		{
 			pType: processor.ProcessorTypeContractInvocation,
@@ -480,4 +482,18 @@ func TestColumnDefinition_NoDuplicates(t *testing.T) {
 			}
 		})
 	}
+}
+
+// stripSQLLineComments removes `--` line comments from a SQL statement so that
+// assertions about clauses are not tripped by prose describing them.
+func stripSQLLineComments(sql string) string {
+	lines := strings.Split(sql, "\n")
+	stripped := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if idx := strings.Index(line, "--"); idx >= 0 {
+			line = line[:idx]
+		}
+		stripped = append(stripped, line)
+	}
+	return strings.Join(stripped, "\n")
 }

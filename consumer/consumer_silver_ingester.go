@@ -83,6 +83,15 @@ type SilverIngesterStats struct {
 	FailedFlushes  atomic.Uint64
 }
 
+// SilverIngesterStatsSnapshot is a point-in-time, copyable view of
+// SilverIngesterStats.
+type SilverIngesterStatsSnapshot struct {
+	TotalProcessed uint64
+	TotalFlushed   uint64
+	FlushCount     uint64
+	FailedFlushes  uint64
+}
+
 // NewSilverIngesterConsumer creates a new Bronze Copier consumer
 func NewSilverIngesterConsumer(config map[string]interface{}) (*SilverIngesterConsumer, error) {
 	consumer := &SilverIngesterConsumer{
@@ -409,9 +418,18 @@ func (c *SilverIngesterConsumer) Subscribe(p processor.Processor) {
 	log.Printf("SilverIngester: Subscribe called but consumers don't support subscriptions")
 }
 
-// GetStats returns current processing statistics
-func (c *SilverIngesterConsumer) GetStats() SilverIngesterStats {
-	return c.stats
+// GetStats returns a snapshot of current processing statistics.
+//
+// It returns a plain-value snapshot rather than SilverIngesterStats itself:
+// copying a struct of atomics copies the atomics, and a copied atomic is not
+// safe to use.
+func (c *SilverIngesterConsumer) GetStats() SilverIngesterStatsSnapshot {
+	return SilverIngesterStatsSnapshot{
+		TotalProcessed: c.stats.TotalProcessed.Load(),
+		TotalFlushed:   c.stats.TotalFlushed.Load(),
+		FlushCount:     c.stats.FlushCount.Load(),
+		FailedFlushes:  c.stats.FailedFlushes.Load(),
+	}
 }
 
 // Close flushes remaining data and closes the connection
