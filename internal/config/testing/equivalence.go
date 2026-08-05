@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/withObsrvr/cdp-pipeline-workflow/internal/config/v2"
 )
@@ -215,7 +216,7 @@ func (c *ConfigEquivalenceChecker) compareConfigMaps(legacy, v2 map[string]inter
 	for key, legacyValue := range legacy {
 		if v2Value, ok := v2[key]; ok {
 			matchedV2Keys[key] = true
-			if !c.valuesEqual(legacyValue, v2Value) {
+			if !c.valuesEqualForKey(key, legacyValue, v2Value) {
 				// Check if this is a default value difference
 				isCritical := !c.isDefaultValueDifference(key, legacyValue, v2Value)
 				differences = append(differences, Difference{
@@ -228,7 +229,7 @@ func (c *ConfigEquivalenceChecker) compareConfigMaps(legacy, v2 map[string]inter
 		} else if aliasKey, ok := c.configAlias(key); ok {
 			if aliasValue, ok := v2[aliasKey]; ok {
 				matchedV2Keys[aliasKey] = true
-				if !c.valuesEqual(legacyValue, aliasValue) {
+				if !c.valuesEqualForKey(key, legacyValue, aliasValue) {
 					differences = append(differences, Difference{
 						Path:       fmt.Sprintf("%s.%s", path, key),
 						Legacy:     legacyValue,
@@ -278,11 +279,25 @@ func (c *ConfigEquivalenceChecker) compareConfigMaps(legacy, v2 map[string]inter
 	return differences
 }
 
-// valuesEqual checks if two values are equal
-func (c *ConfigEquivalenceChecker) valuesEqual(a, b interface{}) bool {
-	// Handle numeric comparisons specially
+// valuesEqualForKey checks if two values for the given config key are equal.
+//
+// Numeric strings are coerced only for keys known to hold numbers. YAML readily
+// turns 100 into "100", so that coercion is needed — but applying it to every
+// string makes a string-typed field whose value happens to be digits compare
+// equal to a number (legacy bucket_name: "123" vs v2 bucket: 123), which the
+// loaders would reject at runtime. Blessing that as equivalent would hide a
+// broken migration, so the coercion is restricted by key.
+func (c *ConfigEquivalenceChecker) valuesEqualForKey(key string, a, b interface{}) bool {
 	if c.numericEqual(a, b) {
 		return true
+	}
+
+	if isNumericConfigKey(key) {
+		aFloat, aOk := toFloat64WithNumericStrings(a)
+		bFloat, bOk := toFloat64WithNumericStrings(b)
+		if aOk && bOk && aFloat == bFloat {
+			return true
+		}
 	}
 
 	return reflect.DeepEqual(a, b)
@@ -301,7 +316,33 @@ func (c *ConfigEquivalenceChecker) numericEqual(a, b interface{}) bool {
 	return false
 }
 
-// toFloat64 converts various numeric types to float64
+// isNumericConfigKey reports whether a config key holds a number, and so may
+// have been written as a quoted string in YAML. Add new numeric keys here; a
+// key that is missing only causes a spurious difference to be reported, never a
+// spurious equivalence.
+func isNumericConfigKey(key string) bool {
+	numericKeys := map[string]bool{
+		"start_ledger": true, "end_ledger": true,
+		"num_workers": true, "workers": true,
+		"buffer_size": true, "buffer": true,
+		"batch_size": true, "batch": true,
+		"retry_limit": true, "retry_wait": true,
+		"ledgers_per_file": true, "files_per_partition": true,
+		"max_file_size_mb": true, "rotation_interval_minutes": true,
+		"connection_pool_size": true, "max_open_conns": true, "max_idle_conns": true,
+		"high_water_mark": true, "send_timeout_ms": true,
+		"min_amount": true, "min": true,
+		"max_amount": true, "max": true,
+		"port": true, "redis_db": true, "limit": true,
+		"poll_interval": true, "flush_interval": true, "flush_interval_seconds": true,
+		"timeout": true, "connect_timeout": true,
+		"time_to_live": true, "ttl": true,
+	}
+	return numericKeys[key]
+}
+
+// toFloat64 converts various numeric types to float64. Strings are deliberately
+// not accepted; see toFloat64WithNumericStrings.
 func toFloat64(v interface{}) (float64, bool) {
 	switch val := v.(type) {
 	case float64:
@@ -314,30 +355,106 @@ func toFloat64(v interface{}) (float64, bool) {
 		return float64(val), true
 	case int32:
 		return float64(val), true
-	case string:
-		parsed, err := strconv.ParseFloat(val, 64)
-		return parsed, err == nil
+	case uint32:
+		return float64(val), true
+	case uint64:
+		return float64(val), true
 	default:
 		return 0, false
 	}
+}
+
+// toFloat64WithNumericStrings is toFloat64 plus parsing of numeric strings. Use
+// only for keys that isNumericConfigKey accepts.
+func toFloat64WithNumericStrings(v interface{}) (float64, bool) {
+	if f, ok := toFloat64(v); ok {
+		return f, true
+	}
+	if s, ok := v.(string); ok {
+		parsed, err := strconv.ParseFloat(s, 64)
+		return parsed, err == nil
+	}
+	return 0, false
 }
 
 // isDefaultValueDifference checks if a difference is due to default values
 func (c *ConfigEquivalenceChecker) isDefaultValueDifference(key string, legacy, v2 interface{}) bool {
 	// Common default value differences that are not critical
 	defaultDifferences := map[string]bool{
-		"num_workers":          true,
-		"buffer_size":          true,
-		"retry_limit":          true,
-		"retry_wait":           true,
-		"batch_size":           true,
-		"compression":          true,
-		"create_table":         true,
-		"include_failed":       true,
-		"history_archive_urls": true,
+		"num_workers":    true,
+		"buffer_size":    true,
+		"retry_limit":    true,
+		"retry_wait":     true,
+		"batch_size":     true,
+		"compression":    true,
+		"create_table":   true,
+		"include_failed": true,
 	}
 
-	return defaultDifferences[key]
+	if defaultDifferences[key] {
+		return true
+	}
+
+	// history_archive_urls is only non-critical when both sides are stock SDF
+	// archives — that is the case where v2 filled in network defaults. A custom
+	// or private archive on either side changes where ingestion reads from, so
+	// it must stay critical: otherwise a migration that silently repointed at
+	// public archives (or at a mirror unreachable in restricted environments)
+	// would be reported as equivalent.
+	if key == "history_archive_urls" {
+		return isDefaultHistoryArchiveSet(legacy) && isDefaultHistoryArchiveSet(v2)
+	}
+
+	return false
+}
+
+// defaultHistoryArchiveURLs is the set of stock SDF archives that
+// internal/config/v2 injects as network defaults.
+var defaultHistoryArchiveURLs = map[string]bool{
+	"https://history.stellar.org/prd/core-live-001":    true,
+	"https://history.stellar.org/prd/core-live-002":    true,
+	"https://history.stellar.org/prd/core-live-003":    true,
+	"https://history.stellar.org/prd/core-testnet-001": true,
+	"https://history.stellar.org/prd/core-testnet-002": true,
+	"https://history.stellar.org/prd/core-testnet-003": true,
+	"https://history-futurenet.stellar.org":            true,
+}
+
+// isDefaultHistoryArchiveSet reports whether every URL in the value is a stock
+// SDF archive. An empty or unrecognised value is not a default set.
+func isDefaultHistoryArchiveSet(value interface{}) bool {
+	urls, ok := toStringSlice(value)
+	if !ok || len(urls) == 0 {
+		return false
+	}
+	for _, u := range urls {
+		if !defaultHistoryArchiveURLs[strings.TrimRight(u, "/")] {
+			return false
+		}
+	}
+	return true
+}
+
+// toStringSlice normalises the shapes a YAML list of strings can arrive in.
+func toStringSlice(value interface{}) ([]string, bool) {
+	switch v := value.(type) {
+	case []string:
+		return v, true
+	case string:
+		return []string{v}, true
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, s)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 // configAlias maps equivalent config keys between loaded legacy and v2 configs.
@@ -388,7 +505,7 @@ func (c *ConfigEquivalenceChecker) isDefaultValue(key string, value interface{})
 	}
 
 	if defaultVal, ok := knownDefaults[key]; ok {
-		return c.valuesEqual(value, defaultVal)
+		return c.valuesEqualForKey(key, value, defaultVal)
 	}
 
 	return false
